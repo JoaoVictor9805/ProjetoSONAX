@@ -4,15 +4,15 @@ Leitura das configurações de conexão a partir de variáveis de ambiente
 (arquivo .env na raiz do projeto).
 
 Uso:
-    from services.config import DATABASE_URL
+    from app.database.config import get_database_url
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Carrega o .env da raiz do projeto (um nível acima de services/)
-_RAIZ = Path(__file__).resolve().parent.parent
+# Carrega o .env da raiz do projeto (dois níveis acima de app/database/).
+_RAIZ = Path(__file__).resolve().parents[2]
 load_dotenv(_RAIZ / ".env")
 
 

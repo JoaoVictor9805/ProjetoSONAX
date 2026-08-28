@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 import psycopg
 
-from services.config import get_database_url
+from app.database.config import get_database_url
 
 
 @contextmanager

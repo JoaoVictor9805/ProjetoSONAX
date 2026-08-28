@@ -2,7 +2,7 @@
 # Aponta o linter para os pacotes do .venv do projeto,
 # evitando falsos positivos de "import not found".
 
-project_includes = ["services/**/*.py"]
+project_includes = ["app/**/*.py"]
 project_excludes = [".venv/**", "**/__pycache__/**"]
 
 python_version = "3.11"

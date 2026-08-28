@@ -1,24 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-=======================================================================
-Identifica arquivos .WAV em um diretório e copia os com mais de 1 minuto
-para uma nova pasta um nível acima, nomeada como <pasta_atual>_audios_maiores_1min.
+============================================================================
+Biblioteca de domínio: leitura de WAV, parsing de nome, classificação,
+cópia, transcrição e persistência no banco de dados.
 
-Uso:
-    python script.py [DIRETORIO] [-r]
+Este módulo NÃO é executável — ele é importado por `app.main` (ou outros
+pontos de entrada). Toda a lógica de CLI (sys.argv, prints de UI,
+validação de diretório, retorno de códigos) vive em `app.main`.
+============================================================================
+
+USO:
+    from app.services.script import (
+        classificar_wavs, copiar_longos_para_pasta,
+        parse_nome_arquivo, salvar_no_banco, duracao_wav,
+    )
 
 ==============================================================================
 DEFINIÇÃO DAS VARIÁVEIS E ESTRUTURA DO ARQUIVO WAV
 ==============================================================================
 
 -- VARIÁVEIS DO CABEÇALHO PRINCIPAL (Lidas no começo do arquivo) --
-riff : Lê os primeiros 4 bytes. Deve ser b"RIFF" (Resource Interchange File Format). 
+riff : Lê os primeiros 4 bytes. Deve ser b"RIFF" (Resource Interchange File Format).
       Significa que o arquivo é um "contêiner" padrão da Microsoft/IBM.
 
- _    : O "underline" é usado no Python para descartar um valor. Aqui ele 
+ _    : O "underline" é usado no Python para descartar um valor. Aqui ele
         ignora o tamanho total do arquivo (que vem logo após o RIFF), pois não usaremos.
 
-wave : Lê mais 4 bytes. Deve ser b"WAVE". É a etiqueta que garante que 
+wave : Lê mais 4 bytes. Deve ser b"WAVE". É a etiqueta que garante que
        os dados dentro desse contêiner RIFF são um áudio sem compressão.
 
 -- VARIÁVEIS DE NAVEGAÇÃO (Usadas no loop while para explorar o arquivo) --
@@ -30,11 +38,11 @@ wave : Lê mais 4 bytes. Deve ser b"WAVE". É a etiqueta que garante que
 
 -- VARIÁVEIS DE CONFIGURAÇÃO E ÁUDIO --
 
-- fmt       : Recebe o conteúdo bruto do bloco b"fmt ". É o "manual de instruções" 
+- fmt       : Recebe o conteúdo bruto do bloco b"fmt ". É o "manual de instruções"
              do áudio (ex: se é estéreo, qualidade).
-- byte_rate : É a "Taxa de Bytes". Extraído do 'fmt', indica quantos bytes o 
+- byte_rate : É a "Taxa de Bytes". Extraído do 'fmt', indica quantos bytes o
             computador precisa ler por 1 segundo de áudio para a música tocar normal.
-- data_size : Quando o cid é b"data" (onde está a música em si), o csz é salvo aqui. 
+- data_size : Quando o cid é b"data" (onde está a música em si), o csz é salvo aqui.
             Representa o peso em bytes apenas do som, sem os cabeçalhos.
 
 O tempo final em segundos é simplesmente: data_size / byte_rate
@@ -43,19 +51,20 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
-import sys                   # Usado para ler os argumentos passados no terminal (ex: o nome da pasta) e para encerrar o programa.# Biblioteca para acessar argumentos da linha de comando.
+import threading             # usado apenas para anotação de tipo (cancel: threading.Event | None)
 from pathlib import Path     # Facilita muito a manipulação de caminhos de arquivos e pastas
+from typing import Callable   # usado apenas para anotação de tipo (on_progress)
 
-from .db import conectar
-from .repository import (
+from app.database.db import conectar
+from app.services.chamadas_dao import (
     _parse_data,
     _parse_hora,
     _parse_timestamp,
     buscar_nome_atendente,
     inserir_registro_chamada,
 )
+from app.services.transcrever import TranscricaoCancelada, transcrever_arquivo
 
-from .transcrever import transcrever_pasta
 
 def duracao_wav(caminho: Path):
     """Retorna a duração em segundos do WAV ou None se for inválido."""
@@ -87,7 +96,7 @@ def duracao_wav(caminho: Path):
                 if byte_rate and data_size is not None:
                     break
         return data_size / byte_rate if byte_rate and data_size else None
-    
+
     except Exception:
         return None
 
@@ -99,7 +108,7 @@ def classificar_wavs(wavs: list) -> tuple:
         d = duracao_wav(w)
         if d is None:
             invalidos.append(w)
-        elif d > 60:
+        elif d > 600:
             longos.append((w, d))
         else:
             curtos.append((w, d))
@@ -177,59 +186,109 @@ def parse_nome_arquivo(caminho: Path) -> dict:
     return info
 
 
-def parse_args(argv: list) -> tuple:
-    """Lê argv e retorna (diretorio, recursivo)."""
-    recursivo = "-r" in argv or "--recursive" in argv
-    args = [a for a in argv if a not in ("-r", "--recursive")]
-    diretorio = Path(args[0]).resolve() if args else Path.cwd()
-    return diretorio, recursivo
-
-
-def transcrever_dict(copiados: list) -> dict:
+def transcrever_dict(
+    copiados: list,
+    cancel: "threading.Event | None" = None,
+    on_progress: "Callable[[int, int, Path], None] | None" = None,
+) -> dict:
     """Transcreve cada arquivo copiado e devolve {path.name: texto}.
-    Levanta exceção se o Whisper falhar."""
+    Levanta exceção se o Whisper falhar.
+
+    Se `cancel` for fornecido, **propaga** o flag até o
+    `transcrever_arquivo`, que faz o monkey-patch do `tqdm.update`
+    para interromper a transcrição intra-arquivo (entre janelas de
+    ~30s). Se o cancel chegar no meio de uma transcrição, uma
+    `TranscricaoCancelada` sobe — esta função **não captura**; o
+    chamador (`salvar_no_banco`) trata.
+
+    Se `on_progress(i, total, caminho)` for fornecido, é chamado
+    **antes** de cada arquivo, com `i` indo de 1 a `total`. Usado pela
+    GUI para alimentar a barra de progresso; a CLI passa `None`.
+    """
+    total = len(copiados)
     textos = {}
-    for caminho, _ in copiados:
+    for i, (caminho, _) in enumerate(copiados, start=1):
+        if cancel is not None and cancel.is_set():
+            print(f"  [cancelado] parando transcrição após "
+                  f"{len(textos)} arquivo(s).")
+            return textos
+        if on_progress is not None:
+            on_progress(i, total, caminho)
         print(f"  [whisper] transcrevendo: {caminho.name} ...")
-        from services.transcrever import transcrever_arquivo
-        textos[caminho.name] = transcrever_arquivo(caminho)
+        # cancel=cancel propaga o flag até o hook no tqdm — se for
+        # setado durante a inferência, TranscricaoCancelada sobe.
+        textos[caminho.name] = transcrever_arquivo(caminho, cancel=cancel)
     return textos
 
 
-def salvar_no_banco(copiados: list) -> int:
+def salvar_no_banco(
+    copiados: list,
+    cancel: "threading.Event | None" = None,
+    on_progress: "Callable[[int, int, Path], None] | None" = None,
+) -> int:
     """Para cada arquivo copiado: transcreve, parseia o nome, busca o
     atendente pelo ramal e insere UM único registro em registro_chamadas
     com a transcrição já preenchida.
 
     Retorna a quantidade inserida. Pula (com aviso) se ramal não existir
     em `origem` ou se algum campo essencial estiver ausente.
+
+    **Cancelamento**: o `cancel` é checado em dois pontos:
+      1. **Intra-arquivo** (durante a transcrição do arquivo N) — via
+         hook no `tqdm.update` em `transcrever_arquivo`. Se ativado,
+         uma `TranscricaoCancelada` sobe; capturamos aqui, logamos, e
+         saímos do loop **sem inserir** nada daquele arquivo (o texto
+         acumulado foi descartado pelo próprio Whisper).
+      2. **Entre arquivos** — checagem explícita antes da próxima
+         iteração do loop (cobre o caso do cancel chegar entre o fim
+         de uma transcrição e o INSERT, ou entre dois INSERTs).
+
+    O que já foi transcrito+inserido permanece (cada INSERT faz
+    `commit` no `with` do `conectar()`).
     """
-    transcricoes = transcrever_dict(copiados)
-
     inseridos = 0
-    with conectar() as cur:
-        for caminho, _duracao in copiados:
-            info = parse_nome_arquivo(caminho)
+    total = len(copiados)
+    for i, (caminho, _) in enumerate(copiados, start=1):
+        if cancel is not None and cancel.is_set():
+            print(f"  [cancelado] parando antes de {caminho.name} "
+                  f"após {inseridos} registro(s) inserido(s).")
+            return inseridos
+        if on_progress is not None:
+            on_progress(i, total, caminho)
 
-            if not info["ramal"].isdigit():
-                print(f"  [aviso] ramal inválido em {caminho.name}: "
-                      f"{info['ramal']!r} — pulando")
-                continue
+        # 1) Transcrição (pode levantar TranscricaoCancelada se o
+        #    usuário cancelar no meio do arquivo atual).
+        print(f"  [whisper] transcrevendo: {caminho.name} ...")
+        try:
+            texto = transcrever_arquivo(caminho, cancel=cancel)
+        except TranscricaoCancelada as e:
+            print(f"  [cancelado] {e} — nada de "
+                  f"{caminho.name} foi inserido.")
+            return inseridos
 
-            data = _parse_data(info["data"])
-            if data is None:
-                print(f"  [aviso] data inválida em {caminho.name}: "
-                      f"{info['data']!r} — pulando")
-                continue
+        # 2) INSERT em uma transação pequena e isolada: se o próximo
+        #    arquivo for cancelado, este INSERT já está commitado.
+        info = parse_nome_arquivo(caminho)
 
-            ramal = int(info["ramal"])
+        if not info["ramal"].isdigit():
+            print(f"  [aviso] ramal inválido em {caminho.name}: "
+                  f"{info['ramal']!r} — pulando")
+            continue
+
+        data = _parse_data(info["data"])
+        if data is None:
+            print(f"  [aviso] data inválida em {caminho.name}: "
+                  f"{info['data']!r} — pulando")
+            continue
+
+        ramal = int(info["ramal"])
+        with conectar() as cur:
             nome = buscar_nome_atendente(cur, ramal)
             if nome is None:
                 print(f"  [aviso] ramal {ramal} não encontrado em `origem` "
                       f"({caminho.name}) — pulando")
                 continue
 
-            texto = transcricoes.get(caminho.name, "")
             id_reg = inserir_registro_chamada(
                 cur,
                 ramal=ramal,
@@ -238,54 +297,10 @@ def salvar_no_banco(copiados: list) -> int:
                 log_arquivo=caminho.name,
                 transcricao=texto,
             )
-            preview = texto[:60].replace("\n", " ")
-            print(f"  [bd] registro #{id_reg} inserido: "
-                  f"ramal={ramal} ({nome})  data={data}  "
-                  f"-> {caminho.name}  (\"{preview}...\")")
-            inseridos += 1
+        preview = texto[:60].replace("\n", " ")
+        print(f"  [bd] registro #{id_reg} inserido: "
+              f"ramal={ramal} ({nome})  data={data}  "
+              f"-> {caminho.name}  (\"{preview}...\")")
+        inseridos += 1
 
     return inseridos
-
-
-def main():
-    diretorio, recursivo = parse_args(sys.argv[1:])
-
-    if not diretorio.is_dir():
-        print(f"[ERRO] Diretório não encontrado: {diretorio}",
-              file=sys.stderr)
-        return 1
-
-    wavs = sorted(
-        p for p in diretorio.glob("**/*" if recursivo else "*")
-        if p.is_file() and p.suffix.lower() == ".wav"
-    )
-
-    longos, curtos, invalidos = classificar_wavs(wavs)
-
-    print(f"Diretório: {diretorio}")
-    print(f"Total: {len(wavs)}   >1min: {len(longos)}   "
-          f"<=1min: {len(curtos)}   inválidos: {len(invalidos)}\n")
-
-    if not longos:
-        print("Nenhum áudio com mais de 1 minuto encontrado.")
-        return 0
-
-    destino = diretorio.parent / f"{diretorio.name}_audios_maiores_1min"
-    print(f"Pasta de destino: {destino}\n")
-
-    copiados = copiar_longos_para_pasta(longos, destino)
-    print(f"\n{len(copiados)} arquivo(s) copiado(s) para: {destino}")
-
-    print("\nTranscrevendo e gravando no banco de dados...")
-    try:
-        inseridos = salvar_no_banco(copiados)
-        print(f"\n{inseridos} registro(s) inserido(s) com transcrição.")
-    except Exception as e:
-        print(f"\n[ERRO BD] Falha ao gravar no banco: {e}", file=sys.stderr)
-        return 2
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
