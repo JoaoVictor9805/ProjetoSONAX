@@ -1,0 +1,11 @@
+# Configuração do Pyrefly (type checker Python da Meta).
+# Aponta o linter para os pacotes do .venv do projeto,
+# evitando falsos positivos de "import not found".
+
+project_includes = ["services/**/*.py"]
+project_excludes = [".venv/**", "**/__pycache__/**"]
+
+python_version = "3.11"
+
+[find]
+site_package_path = [".venv/Lib/site-packages"]

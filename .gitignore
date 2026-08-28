@@ -1,0 +1,23 @@
+# Ambiente e credenciais
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# SO
+.DS_Store
+Thumbs.db
+
+# Saídas do script
+*_audios_maiores_1min/
