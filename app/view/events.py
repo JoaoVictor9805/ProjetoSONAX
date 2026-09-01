@@ -1,12 +1,33 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Contrato de comunicação entre a thread de trabalho (`worker.py`) e a
-main loop do Tk (`app.py`).
+Esse arquivo define os tipos de bilhete que a cozinha pode mandar pro balcão, e a própria espeteira.
 
-Toda mensagem trocada entre as duas pontas é uma instância de uma das
-três dataclasses abaixo. A fila é um wrapper de `queue.Queue` apenas
-para dar nome semântico (`put_event` / `get_event`).
+Três tipos de bilhete (chamados de "eventos"):
+
+python
+@dataclass
+class LogEvent:
+    line: str          # uma linha de texto, tipo "Transcrevendo arquivo 3..."
+    stream: str = "out" # "out" (normal) ou "err" (erro)
+
+@dataclass
+class ProgressEvent:
+    done: int    # quanto já foi feito
+    total: int   # quanto falta no total
+    phase: str   # em que etapa: "scanning", "copying", "transcribing", "inserting"
+
+@dataclass
+class DoneEvent:
+    exit_code: int      # 0 = deu certo, 1 = pasta inválida, 2 = erro no banco
+    summary: str         # resumo pro usuário ler
+    error: str | None    # mensagem de erro, se tiver
+
+Pensa em @dataclass como um "formulário pronto": em vez de você escrever uma classe inteira na mão, o Python gera automático o __init__ e tudo mais, só de você listar os campos.
+
+queue.Queue já é uma fila thread-safe pronta do Python — ou seja, uma thread pode colocar coisa nela e outra pode tirar, sem risco de os dois mexerem ao mesmo tempo e corromper tudo (isso é o problema clássico de threads: duas coisas escrevendo no mesmo lugar ao mesmo tempo e dando pau). put_event/get_event são só apelidos mais bonitos pra put/get.
+
+get_event(timeout=0.05): tenta pegar um bilhete, espera até 50ms, e se não vier nada, devolve None em vez de travar esperando pra sempre. É o "olhei na espeteira, não tinha nada novo, tudo bem, volto depois".
 ============================================================================
 """
 

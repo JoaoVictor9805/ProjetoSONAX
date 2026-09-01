@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Helpers de diálogo nativo (seleção de pasta).
+4. dialogs.py — o balconista que pergunta o endereço
 
-Encapsula o uso de `tkinter.filedialog` para manter `app.py` limpo
-e desacoplado do toolkit. A janela do `App` já existe no momento em
-que o botão é clicado, então passamos ela como `parent` para o diálogo
-ficar modal em relação à janela principal.
+Bem pequeno, faz uma coisa só: abrir aquela janelinha do sistema operacional onde você navega e escolhe uma pasta.
+
+python
+def pick_folder(parent, initial=None) -> str | None:
+    return filedialog.askdirectory(
+        parent=parent,
+        initialdir=...,
+        title="Selecione a pasta com os .wav",
+        mustexist=True,
+    )
+
+filedialog.askdirectory já vem pronto do Python — não é código nosso, é o seletor de pasta nativo do Windows/Linux/Mac. mustexist=True trava pra você não conseguir "inventar" um caminho que não existe. Se você cancelar, ele devolve vazio, e o app.py entende isso como "ok, não fez nada, seguimos esperando".
+
+Existir separado do app.py é só organização: se um dia quiserem trocar esse seletor por outro, mexe só aqui, sem bagunçar o resto.
 ============================================================================
 """
 

@@ -1,4 +1,4 @@
-create table origem (
+CREATE TABLE origem (
 	ramal INT PRIMARY key not null,
 	nome_atendente varchar(100) not null
 );

@@ -123,12 +123,13 @@ def transcrever_arquivo(
     return str(resultado.get("text", "")).strip()
 
 
+"""
 def transcrever_pasta(pasta: Path, *, recursivo: bool = False) -> list:
-    """Transcreve todos os .wav de uma pasta. Retorna [(path, texto), ...].
+    Transcreve todos os .wav de uma pasta. Retorna [(path, texto), ...].
 
     Imprime progresso antes/depois de cada arquivo para que o usuário
     saiba que o processo não travou (a transcrição no CPU é lenta).
-    """
+    
     modelo = carregar_modelo()
     padrao = "**/*" if recursivo else "*"
     wavs = sorted(p for p in pasta.glob(padrao)
@@ -148,3 +149,4 @@ def transcrever_pasta(pasta: Path, *, recursivo: bool = False) -> list:
         _emit(f"  [{i}/{len(wavs)}] {w.name} ok ({duracao:.1f}s)")
         transcricoes.append((w, texto))
     return transcricoes
+"""

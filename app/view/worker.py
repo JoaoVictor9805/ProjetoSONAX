@@ -25,7 +25,7 @@ import traceback
 from pathlib import Path
 
 from app.database.config import get_database_url
-from app.main import coletar_wavs, resolver_destino
+from app.services.io import coletar_wavs, resolver_destino
 from app.services.script import (
     classificar_wavs,
     copiar_longos_para_pasta,

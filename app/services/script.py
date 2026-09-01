@@ -57,11 +57,12 @@ from typing import Callable   # usado apenas para anotação de tipo (on_progres
 
 from app.database.db import conectar
 from app.services.chamadas_dao import (
-    _parse_data,
-    _parse_hora,
-    _parse_timestamp,
     buscar_nome_atendente,
     inserir_registro_chamada,
+)
+from app.services.parses import (
+    parse_data,
+    parse_nome_arquivo,
 )
 from app.services.transcrever import TranscricaoCancelada, transcrever_arquivo
 
@@ -127,63 +128,6 @@ def copiar_longos_para_pasta(longos: list, pasta_destino: Path) -> list:
               f"({d/60:.2f} min)  -> copiado")
         copiados.append((destino, d))
     return copiados
-
-
-def parse_nome_arquivo(caminho: Path) -> dict:
-    """Decompõe o nome do .wav nos 6 blocos de identificação da chamada:
-
-        103-554130142200-26082026-113047-178775464634775-21153502152.wav
-        |   |            |        |      |                 |
-        |   |            |        |      |                 call_id
-        |   |            |        |      timestamp_epoch   (15 dígitos, sem ponto)
-        |   |            |        hora HHMMSS
-        |   |            data DDMMAAAA
-        |   telefone (DDI 55 + DDD + número)
-        ramal / tenant
-
-    Retorna um dict com cada campo + os blocos brutos + o stem.
-    Blocos desconhecidos caem em 'extras'.
-    """
-    stem = caminho.stem
-    blocos = [b for b in stem.split("-") if b]
-
-    info = {
-        "stem": stem,
-        "blocos": blocos,
-        "ramal": "",
-        "telefone": "",
-        "data": "",
-        "hora": "",
-        "timestamp": "",
-        "call_id": "",
-        "extras": [],
-    }
-
-    for b in blocos:
-        if not b.isdigit():
-            info["extras"].append(b)
-            continue
-
-        # 15 dígitos = timestamp Unix com fração (sem ponto)
-        if len(b) == 15:
-            info["timestamp"] = b
-        # 8 dígitos = data DDMMAAAA
-        elif len(b) == 8:
-            info["data"] = b
-        # 6 dígitos = hora HHMMSS
-        elif len(b) == 6:
-            info["hora"] = b
-        # começa com 55 e tem >= 10 dígitos = telefone (DDI 55 + DDD + número)
-        elif b.startswith("55") and len(b) >= 10:
-            info["telefone"] = b
-        # número grande que sobrou = call_id
-        elif len(b) >= 9:
-            info["call_id"] = b
-        # 3-4 dígitos = ramal / tenant
-        else:
-            info["ramal"] = b
-
-    return info
 
 
 def transcrever_dict(
@@ -275,7 +219,7 @@ def salvar_no_banco(
                   f"{info['ramal']!r} — pulando")
             continue
 
-        data = _parse_data(info["data"])
+        data = parse_data(info["data"])
         if data is None:
             print(f"  [aviso] data inválida em {caminho.name}: "
                   f"{info['data']!r} — pulando")

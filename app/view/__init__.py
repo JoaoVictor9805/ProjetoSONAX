@@ -3,9 +3,9 @@
 ============================================================================
 Pacote `app.view` — interface gráfica do SONAX (CustomTkinter).
 
-Este pacote NÃO importa `app.main` no nível do módulo para evitar ciclo
-de import: `app.view.app` já puxa `app.main.coletar_wavs` /
-`app.main.resolver_destino` no momento da construção da janela.
+Este pacote NÃO importa `services.io` no nível do módulo para evitar ciclo
+de import: `app.view.app` interage com worker que puxa `app.services.io.coletar_wavs` /
+`app.services.io.resolver_destino` no momento da construção da janela.
 
 Módulos:
     events    — dataclasses de eventos + fila thread-safe.

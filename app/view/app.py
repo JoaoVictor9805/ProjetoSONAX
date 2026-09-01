@@ -3,19 +3,6 @@
 ============================================================================
 `App` — janela principal do SONAX (CustomTkinter).
 
-Layout:
-    ┌───────────────────────────────────────────────────────┐
-    │  SONAX — Transcrição de Chamadas                      │
-    │  Instruções em PT-BR (como usar)                      │
-    │                                                       │
-    │  [ entrada (readonly) ] [ Procurar... ] [ Enviar ]    │
-    │  [ barra de progresso                               ] │
-    │  ┌─ log (read-only, monospace) ────────────────────┐  │
-    │  │  ...linhas em tempo real...                     │  │
-    │  └─────────────────────────────────────────────────┘  │
-    │  [ status final (verde/vermelho) ]                    │
-    └───────────────────────────────────────────────────────┘
-
 Threading:
     - O usuário clica **Enviar** → uma `Thread` daemon roda
       `worker.run_pipeline` em background.
