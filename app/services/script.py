@@ -130,41 +130,6 @@ def copiar_longos_para_pasta(longos: list, pasta_destino: Path) -> list:
     return copiados
 
 
-def transcrever_dict(
-    copiados: list,
-    cancel: "threading.Event | None" = None,
-    on_progress: "Callable[[int, int, Path], None] | None" = None,
-) -> dict:
-    """Transcreve cada arquivo copiado e devolve {path.name: texto}.
-    Levanta exceção se o Whisper falhar.
-
-    Se `cancel` for fornecido, **propaga** o flag até o
-    `transcrever_arquivo`, que faz o monkey-patch do `tqdm.update`
-    para interromper a transcrição intra-arquivo (entre janelas de
-    ~30s). Se o cancel chegar no meio de uma transcrição, uma
-    `TranscricaoCancelada` sobe — esta função **não captura**; o
-    chamador (`salvar_no_banco`) trata.
-
-    Se `on_progress(i, total, caminho)` for fornecido, é chamado
-    **antes** de cada arquivo, com `i` indo de 1 a `total`. Usado pela
-    GUI para alimentar a barra de progresso; a CLI passa `None`.
-    """
-    total = len(copiados)
-    textos = {}
-    for i, (caminho, _) in enumerate(copiados, start=1):
-        if cancel is not None and cancel.is_set():
-            print(f"  [cancelado] parando transcrição após "
-                  f"{len(textos)} arquivo(s).")
-            return textos
-        if on_progress is not None:
-            on_progress(i, total, caminho)
-        print(f"  [whisper] transcrevendo: {caminho.name} ...")
-        # cancel=cancel propaga o flag até o hook no tqdm — se for
-        # setado durante a inferência, TranscricaoCancelada sobe.
-        textos[caminho.name] = transcrever_arquivo(caminho, cancel=cancel)
-    return textos
-
-
 def salvar_no_banco(
     copiados: list,
     cancel: "threading.Event | None" = None,
