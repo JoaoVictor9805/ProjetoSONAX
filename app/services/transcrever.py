@@ -40,7 +40,7 @@ class TranscricaoCancelada(Exception):
 
 
 @lru_cache(maxsize=1)
-def carregar_modelo(nome: str = "small"):
+def carregar_modelo(nome: str = "medium"):
     """Carrega o modelo Whisper uma única vez por processo."""
     return whisper.load_model(nome)
 

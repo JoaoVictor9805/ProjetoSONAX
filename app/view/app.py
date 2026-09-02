@@ -11,18 +11,18 @@ Threading:
       `CTkProgressBar` sem travar a UI.
 ============================================================================
 """
-
 from __future__ import annotations
 
 import ctypes
 import threading
+import tkinter as tk
 from pathlib import Path
 
 import customtkinter as ctk
 
 from app.database.config import get_database_url
 from app.services.transcrever import TranscricaoCancelada
-from app.view.dialogs import pick_folder
+from app.view.dialogs import pick_archive, pick_folder
 from app.view.events import (
     DoneEvent,
     EventQueue,
@@ -78,12 +78,13 @@ class App(ctk.CTk):
         self._queue: EventQueue | None = None
         self._worker: threading.Thread | None = None
         self._after_id: str | None = None
-        self._diretorio: Path | None = None
+        self._entrada: Path | None = None
         self._cancel: threading.Event | None = None  # setado por "Cancelar"
 
         # ----- UI -----
         self._build_header()
         self._build_selector()
+        self._build_dropdown_menu()
         self._build_progress()
         self._build_log()
         self._build_status()
@@ -103,7 +104,8 @@ class App(ctk.CTk):
         ).pack(anchor="w")
 
         instrucoes = (
-            "1.  Clique em Procurar e selecione a pasta descompactada com os arquivos de áudio .wav.\n"
+            "1.  Clique em Procurar e selecione a pasta descompactada com os "
+            "arquivos de áudio .wav **ou** um arquivo .zip/.rar com a pasta.\n"
             "2.  Você pode enviar a pasta geral ou especificar conforme seu escopo.\n"
             "3.  Quando o botão Enviar ficar disponível, clique nele para iniciar.\n"
             "4.  Acompanhe o progresso pelo log e pela barra abaixo.\n"
@@ -125,17 +127,18 @@ class App(ctk.CTk):
 
         self._entry_path = ctk.CTkEntry(
             row,
-            placeholder_text="Nenhuma pasta selecionada ...",
+            placeholder_text="Nenhuma pasta, .zip ou .rar selecionado...",
             state="readonly",
         )
         self._entry_path.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        ctk.CTkButton(
+        self._btn_procurar = ctk.CTkButton(
             row,
-            text="Procurar...",
+            text="Procurar ▾",
             width=120,
             command=self._on_procurar,
-        ).pack(side="left", padx=(0, 8))
+        )
+        self._btn_procurar.pack(side="left", padx=(0, 8))
 
         self._btn_enviar = ctk.CTkButton(
             row,
@@ -158,6 +161,29 @@ class App(ctk.CTk):
             command=self._on_cancelar,
         )
         self._btn_cancelar.pack(side="left", padx=(8, 0))
+
+    def _build_dropdown_menu(self) -> None:
+        """Cria o menu dropdown de seleção com tema escuro elegante."""
+        self._menu_procurar = tk.Menu(
+            self,
+            tearoff=0,
+            bg="#2b2b2b",
+            fg="#ffffff",
+            activebackground="#1f538d",
+            activeforeground="#ffffff",
+            activeborderwidth=0,
+            bd=1,
+            relief="solid",
+            font=("Segoe UI", 10),
+        )
+        self._menu_procurar.add_command(
+            label="📁  Selecionar Pasta...",
+            command=self._on_selecionar_pasta,
+        )
+        self._menu_procurar.add_command(
+            label="📦  Selecionar Arquivo .ZIP / .RAR ...",
+            command=self._on_selecionar_arquivo,
+        )
 
     def _build_progress(self) -> None:
         wrap = ctk.CTkFrame(self, fg_color="transparent")
@@ -209,24 +235,55 @@ class App(ctk.CTk):
     # ----------------------------------------------------------------
 
     def _on_procurar(self) -> None:
-        """Abre o diálogo nativo de seleção de pasta e valida o resultado."""
-        escolha = pick_folder(self, initial=self._diretorio)
+        """Abre o menu dropdown logo abaixo do botão Procurar."""
+        x = self._btn_procurar.winfo_rootx()
+        y = self._btn_procurar.winfo_rooty() + self._btn_procurar.winfo_height()
+        try:
+            self._menu_procurar.tk_popup(x, y)
+        finally:
+            self._menu_procurar.grab_release()
+
+    def _on_selecionar_pasta(self) -> None:
+        """Abre o seletor nativo de pasta e valida o caminho retornado."""
+        escolha = pick_folder(self, initial=self._entrada)
         if not escolha:
             return  # usuário cancelou
-
         path = Path(escolha)
         if not path.is_dir():
-            self._set_status(f"Caminho inválido: {path}", cor=_COR_ERRO)
+            self._set_status(f"Pasta inválida: {path}", cor=_COR_ERRO)
             return
+        self._entrada = path
+        self._set_entry_path(path)
+        self._habilitar_enviar_se_ok()
 
-        self._diretorio = path
-        # CTkEntry não tem setter direto: trocamos o state, escrevemos, e voltamos.
+    def _on_selecionar_arquivo(self) -> None:
+        """Abre o seletor nativo de arquivo .zip/.rar e valida o caminho retornado."""
+        escolha = pick_archive(self, initial=self._entrada)
+        if not escolha:
+            return  # usuário cancelou
+        path = Path(escolha)
+        if not path.is_file() or path.suffix.lower() not in [".zip", ".rar"]:
+            self._set_status(
+                f"Selecione um arquivo .zip ou .rar (recebido: {path.suffix})",
+                cor=_COR_ERRO,
+            )
+            return
+        if path.stat().st_size == 0:
+            self._set_status(f"Arquivo vazio: {path}", cor=_COR_ERRO)
+            return
+        self._entrada = path
+        self._set_entry_path(path)
+        self._habilitar_enviar_se_ok()
+
+    def _set_entry_path(self, path: Path) -> None:
+        """Atualiza o campo de texto readonly que mostra o caminho escolhido."""
         self._entry_path.configure(state="normal")
         self._entry_path.delete(0, "end")
         self._entry_path.insert(0, str(path))
         self._entry_path.configure(state="readonly")
 
-        # Verifica .env antes de habilitar o botão: se faltar config, fica desabilitado.
+    def _habilitar_enviar_se_ok(self) -> None:
+        """Confere o .env e habilita o botão Enviar, ou mostra erro."""
         try:
             get_database_url()
         except KeyError as e:
@@ -236,13 +293,12 @@ class App(ctk.CTk):
                 cor=_COR_ERRO,
             )
             return
-
         self._btn_enviar.configure(state="normal")
         self._set_status("Pronto para enviar.", cor=_COR_NEUTRO)
 
     def _on_enviar(self) -> None:
         """Desabilita o botão e dispara a thread de trabalho."""
-        if self._diretorio is None or self._worker is not None:
+        if self._entrada is None or self._worker is not None:
             return
 
         # Limpa estado visual para a nova rodada.
@@ -273,7 +329,7 @@ class App(ctk.CTk):
 
         self._worker = threading.Thread(
             target=run_pipeline,
-            args=(self._diretorio, self._queue, self._cancel),
+            args=(self._entrada, self._queue, self._cancel),
             daemon=True,
             name="sonax-pipeline",
         )
@@ -415,7 +471,7 @@ class App(ctk.CTk):
         self._cancel = None
 
         # Reabilita Enviar se o usuário pode tentar de novo.
-        if self._diretorio is not None:
+        if self._entrada is not None:
             try:
                 get_database_url()
                 self._btn_enviar.configure(state="normal")

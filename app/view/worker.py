@@ -23,6 +23,9 @@ from __future__ import annotations
 import threading
 import traceback
 from pathlib import Path
+import tempfile
+import zipfile
+import rarfile
 
 from app.database.config import get_database_url
 from app.services.io import coletar_wavs, resolver_destino
@@ -36,17 +39,106 @@ from app.view.events import DoneEvent, EventQueue, LogEvent, ProgressEvent
 from app.view.stream import redirect_stdio
 
 
+def _configurar_rarfile() -> None:
+    """Configura o executável unrar para o rarfile no Windows, caso não esteja no PATH."""
+    import shutil
+    if shutil.which("unrar") or shutil.which("WinRAR") or shutil.which("7z"):
+        return
+    candidatos = [
+        r"C:\Program Files\WinRAR\UnRAR.exe",
+        r"C:\Program Files\WinRAR\WinRAR.exe",
+        r"C:\Program Files (x86)\WinRAR\UnRAR.exe",
+        r"C:\Program Files (x86)\WinRAR\WinRAR.exe",
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ]
+    for c in candidatos:
+        if Path(c).is_file():
+            if "7z" in c.lower():
+                setattr(rarfile, "SEVENZIP_TOOL", c)
+                setattr(rarfile, "FORCE_TOOL", "7zip")
+            else:
+                setattr(rarfile, "UNRAR_TOOL", c)
+            return
+
+
 def run_pipeline(
-    diretorio: Path,
+    entrada: Path,
     queue: EventQueue,
     cancel: threading.Event,  # noqa: ARG001 — reservado para cancelamento futuro
 ) -> None:
     """Executa o pipeline completo. Enfileira eventos; termina com `DoneEvent`.
 
+    `entrada` pode ser um diretório com os .wav ou um arquivo `.zip` / `.rar`
+    contendo esse diretório. Se for compactado, é extraído para uma pasta
+    temporária que é removida no fim (mesmo em caso de erro/cancelamento).
+
     Esta função é **bloqueante** e deve rodar em uma thread separada
     para não congelar a main loop do Tk.
     """
+    tmp_ctx: tempfile.TemporaryDirectory | None = None
     try:
+        # Se a GUI passou um .zip ou .rar, extrai para uma pasta temporária.
+        ext = entrada.suffix.lower() if entrada.is_file() else ""
+        if ext in [".zip", ".rar"]:
+            tmp_ctx = tempfile.TemporaryDirectory(prefix="sonax_archive_")
+            destino = Path(tmp_ctx.name)
+            queue.put_event(LogEvent(
+                f"Descompactando {entrada.name} em pasta temporária...",
+                stream="out",
+            ))
+            try:
+                if ext == ".zip":
+                    with zipfile.ZipFile(entrada, "r") as zf:
+                        # Validação defensiva contra zip bomb e path traversal.
+                        membros_invalidos = [
+                            m for m in zf.namelist()
+                            if m.startswith("/") or ".." in Path(m).parts
+                        ]
+                        if membros_invalidos:
+                            raise zipfile.BadZipFile(
+                                f"Arquivo ZIP contém caminhos inválidos: "
+                                f"{membros_invalidos[:3]}..."
+                            )
+                        zf.extractall(destino)
+                elif ext == ".rar":
+                    _configurar_rarfile()
+                    with rarfile.RarFile(entrada, "r") as rf:
+                        membros_invalidos = [
+                            m for m in rf.namelist()
+                            if m.startswith("/") or ".." in Path(m).parts
+                        ]
+                        if membros_invalidos:
+                            raise rarfile.BadRarFile(
+                                f"Arquivo RAR contém caminhos inválidos: "
+                                f"{membros_invalidos[:3]}..."
+                            )
+                        rf.extractall(destino)
+            except Exception as e:
+                queue.put_event(LogEvent(
+                    f"[ERRO] Falha ao descompactar arquivo: {e}", stream="err",
+                ))
+                queue.put_event(DoneEvent(
+                    exit_code=1,
+                    summary="",
+                    error=f"Arquivo compactado inválido: {e}",
+                ))
+                return
+
+            # Se o arquivo compactado tiver uma única pasta raiz, "entra" nela para
+            # que o resto do pipeline não precise saber que veio de compactado.
+            subdirs = [p for p in destino.iterdir() if p.is_dir()]
+            if len(subdirs) == 1 and not any(destino.glob("*.wav")):
+                diretorio = subdirs[0]
+            else:
+                diretorio = destino
+
+            queue.put_event(LogEvent(
+                f"Extraído em: {diretorio}", stream="out",
+            ))
+        else:
+            diretorio = entrada
+
         # Pre-check do .env — se faltar variável, aborta cedo com mensagem clara.
         try:
             get_database_url()
@@ -63,6 +155,9 @@ def run_pipeline(
             ))
             return
 
+        # Roda o pipeline existente dentro de `with redirect_stdio(q):`
+        # para que todos os `print()` de `app.services.*` virem
+        # `LogEvent` em tempo real.
         with redirect_stdio(queue):
             queue.put_event(LogEvent(f"[INFO] Diretório selecionado: {diretorio}"))
 
@@ -76,6 +171,13 @@ def run_pipeline(
                 queue.put_event(DoneEvent(
                     exit_code=0,
                     summary="Nenhum .wav encontrado.",
+                ))
+                return
+
+            if cancel.is_set():
+                queue.put_event(DoneEvent(
+                    exit_code=0,
+                    summary="Cancelado antes de iniciar classificação.",
                 ))
                 return
 
@@ -94,6 +196,13 @@ def run_pipeline(
                 ))
                 return
 
+            if cancel.is_set():
+                queue.put_event(DoneEvent(
+                    exit_code=0,
+                    summary="Cancelado antes de iniciar cópia.",
+                ))
+                return
+
             # 3) Cópia para a pasta destino
             destino = resolver_destino(diretorio)
             queue.put_event(LogEvent(f"Pasta de destino: {destino}"))
@@ -104,30 +213,22 @@ def run_pipeline(
             ))
             queue.put_event(ProgressEvent(done=1, total=1, phase="copying"))
 
-            # 4) Transcrição (Whisper) + INSERT.
-            #    A barra agora é **granular por arquivo**: o callback
-            #    `on_progress` é chamado antes de cada transcrição em
-            #    [app/services/script.py](app/services/script.py) com
-            #    `(i, total, caminho)`, e nós emitimos um ProgressEvent
-            #    determinável a partir dele. A fase final ("inserting")
-            #    é apenas o fecho para 100% — o INSERT por arquivo é
-            #    rápido e não tem hook próprio.
-            #
-            #    Cancelamento: `cancel` é checado entre cada arquivo
-            #    em `transcrever_dict` e no loop de INSERT de
-            #    `salvar_no_banco`. O botão "Cancelar" da GUI, além de
-            #    marcar o flag, injeta `TranscricaoCancelada` direto em
-            #    **esta** thread (via `PyThreadState_SetAsyncExc` em
-            #    `app.py`), o que derruba já a inferência do Whisper em
-            #    andamento. `salvar_no_banco` captura e encerra limpo.
+            if cancel.is_set():
+                queue.put_event(DoneEvent(
+                    exit_code=0,
+                    summary="Cancelado antes de iniciar transcrição.",
+                ))
+                return
+
+            # 4) Transcrição (Whisper) + INSERT no banco
             total = len(copiados)
             queue.put_event(LogEvent(
                 f"Transcrevendo e gravando {total} arquivo(s) no banco ..."
             ))
 
-            def on_progress(i: int, tot: int, caminho) -> None:  # noqa: ARG001
-                # ARG001: 'caminho' não usado aqui (vai no LogEvent
-                # via _emit do transcrever). A interface usa o i/total.
+            def on_progress(i: int, tot: int, caminho: Path) -> None:  # noqa: ARG001
+                # ARG001: 'caminho' não usado aqui (vai no LogEvent via _emit do transcrever).
+                # A interface usa o i/total para atualizar a barra de progresso.
                 queue.put_event(ProgressEvent(
                     done=i, total=tot, phase="transcribing",
                 ))
@@ -176,3 +277,7 @@ def run_pipeline(
             summary="",
             error=f"{type(e).__name__}: {e}",
         ))
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()  # apaga a pasta temporária, mesmo se erro
+

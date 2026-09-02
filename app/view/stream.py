@@ -1,18 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Redirecionamento de stdout/stderr para a fila de eventos.
-
-`QueueWriter` é um objeto *file-like* mínimo: cada `write()` acumula um
-buffer e, a cada `\\n` encontrado, enfileira um `LogEvent` com a linha
-completa. O context manager `redirect_stdio` troca `sys.stdout` /
-`sys.stderr` por dois `QueueWriter` durante a execução do worker, e
-restaura no `__exit__` — mesmo se houver exceção.
-
-Isso permite reaproveitar **todos** os `print()` existentes em
-`app.services.*` e `app.main` sem precisar alterá-los. O `_emit()` em
-[app/services/transcrever.py:23-25](app/services/transcrever.py#L23-L25)
-já usa `flush=True`, então as linhas do Whisper chegam em tempo real.
+Sempre que algo faz print("oi") lá na cozinha, por baixo dos panos o Python chama write("oi\n") nesse objeto. Em vez de mostrar na tela, a gente guarda o texto, espera achar uma quebra de linha (\n), e transforma aquela linha num bilhete LogEvent que vai pra fila. É tipo um funcionário da cozinha que, toda vez que alguém grita alguma coisa, escreve num bilhetinho e joga na espeteira — em vez de gritar direto pro cliente.
 ============================================================================
 """
 

@@ -44,3 +44,16 @@ def pick_folder(
         title="Selecione a pasta com os .wav",
         mustexist=True,
     )
+
+def pick_archive(
+    parent: ctk.CTk, 
+    initial: Path | None = None
+    ) -> str | None:
+    
+    initialdir = str(initial) if initial is not None else str(Path.cwd())
+    return filedialog.askopenfilename(
+        parent=parent,
+        initialdir=initialdir,
+        title="Selecione o arquivo .zip ou .rar com os áudios",
+        filetypes=[("Arquivos Compactados (*.zip, *.rar)", "*.zip *.rar"), ("Todos", "*.*")],
+    )
