@@ -416,6 +416,8 @@ class App(ctk.CTk):
                 self._progress.configure(mode="indeterminate")
             self._progress.start()
             self._progress_label.configure(text="Processando ...")
+            if getattr(event, "message", None):
+                self._append_log(f"[Progresso] {event.message}", "out")
             return
 
         # Modo determinável: convertemos `done/total` da fase atual em
@@ -423,17 +425,27 @@ class App(ctk.CTk):
         # barra nunca volte ao mudar de fase.
         #
         # Pesos por fase (somam 100%):
-        #     copying     0%   → 10%   (operação única, sem granularidade)
-        #     transcribing 10% → 95%   (granular por arquivo)
-        #     inserting   95%  → 100%  (operação única, sem granularidade)
+        #     scanning      0%   → 2%
+        #     classifying   2%   → 5%
+        #     copying       5%   → 10%
+        #     transcribing  10%  → 95%   (granular intra e inter arquivos)
+        #     inserting     95%  → 100%
         step_pct = event.done / event.total
         fase = (event.phase or "").lower()
-        if fase == "copying":
-            cumulativo = 0.0 + step_pct * 0.10
-            contexto = ""
+        if fase == "scanning":
+            cumulativo = 0.0 + step_pct * 0.02
+            contexto = "varrendo  •  "
+        elif fase == "classifying":
+            cumulativo = 0.02 + step_pct * 0.03
+            contexto = "classificando  •  "
+        elif fase == "copying":
+            cumulativo = 0.05 + step_pct * 0.05
+            contexto = "copiando  •  "
         elif fase == "transcribing":
             cumulativo = 0.10 + step_pct * 0.85
-            contexto = f"{event.done} / {event.total} arquivos  •  "
+            done_int = min(int(event.total), int(event.done) + 1 if event.done < event.total else int(event.total))
+            total_int = int(event.total)
+            contexto = f"{done_int}/{total_int} arquivos  •  "
         elif fase == "inserting":
             cumulativo = 0.95 + step_pct * 0.05
             contexto = "gravando no banco  •  "
@@ -441,12 +453,16 @@ class App(ctk.CTk):
             cumulativo = step_pct
             contexto = ""
 
+        cumulativo = min(1.0, max(0.0, cumulativo))
         self._progress.stop()
         self._progress.configure(mode="determinate")
         self._progress.set(cumulativo)
         self._progress_label.configure(
             text=f"{contexto}{cumulativo * 100:.0f}%"
         )
+
+        if getattr(event, "message", None):
+            self._append_log(f"[Progresso] {event.message}", "out")
 
     def _apply_done(self, event: DoneEvent) -> None:
         self._progress.stop()

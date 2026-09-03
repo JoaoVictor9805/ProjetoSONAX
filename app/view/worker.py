@@ -176,9 +176,15 @@ def run_pipeline(
             queue.put_event(LogEvent(f"[INFO] Diretório selecionado: {diretorio}"))
 
             # 1) Varredura
-            queue.put_event(LogEvent("Varrendo .wav ..."))
+            queue.put_event(ProgressEvent(
+                done=0, total=1, phase="scanning",
+                message="Varrendo arquivos .wav ...",
+            ))
             wavs = coletar_wavs(diretorio)
-            queue.put_event(ProgressEvent(done=0, total=1, phase="scanning"))
+            queue.put_event(ProgressEvent(
+                done=1, total=1, phase="scanning",
+                message=f"Varredura concluída: {len(wavs)} arquivo(s) .wav encontrado(s).",
+            ))
 
             if not wavs:
                 _limpar_temporarios()
@@ -198,10 +204,18 @@ def run_pipeline(
                 return
 
             # 2) Classificação por duração
+            queue.put_event(ProgressEvent(
+                done=0, total=1, phase="classifying",
+                message="Classificando arquivos por duração ...",
+            ))
             longos, curtos, invalidos = classificar_wavs(wavs, cancel=cancel)
             queue.put_event(LogEvent(
                 f"Total: {len(wavs)}  •  >1min: {len(longos)}  •  "
                 f"<=1min: {len(curtos)}  •  inválidos: {len(invalidos)}"
+            ))
+            queue.put_event(ProgressEvent(
+                done=1, total=1, phase="classifying",
+                message=f"Classificação concluída: {len(longos)} áudio(s) >1min elegível(is).",
             ))
 
             if not longos:
@@ -224,12 +238,27 @@ def run_pipeline(
             # 3) Cópia para a pasta destino
             destino = resolver_destino(diretorio)
             queue.put_event(LogEvent(f"Pasta de destino: {destino}"))
-            queue.put_event(ProgressEvent(done=0, total=1, phase="copying"))
-            copiados = copiar_longos_para_pasta(longos, destino, cancel=cancel)
+            queue.put_event(ProgressEvent(
+                done=0, total=len(longos), phase="copying",
+                message=f"Copiando {len(longos)} arquivo(s) para a pasta de trabalho ...",
+            ))
+
+            def on_copy_progress(idx: int, tot: int, p: Path) -> None:
+                queue.put_event(ProgressEvent(
+                    done=idx, total=tot, phase="copying",
+                    message=f"Copiado ({idx}/{tot}): {p.name}",
+                ))
+
+            copiados = copiar_longos_para_pasta(
+                longos, destino, cancel=cancel, on_progress=on_copy_progress,
+            )
             queue.put_event(LogEvent(
                 f"{len(copiados)} arquivo(s) copiado(s) para: {destino}"
             ))
-            queue.put_event(ProgressEvent(done=1, total=1, phase="copying"))
+            queue.put_event(ProgressEvent(
+                done=len(copiados), total=len(copiados), phase="copying",
+                message=f"{len(copiados)} arquivo(s) copiado(s) com sucesso.",
+            ))
 
             if cancel.is_set():
                 _limpar_temporarios()
@@ -241,39 +270,51 @@ def run_pipeline(
 
             # 4) Transcrição (Whisper) + INSERT no banco
             total = len(copiados)
-            queue.put_event(LogEvent(
-                f"Transcrevendo e gravando {total} arquivo(s) no banco ..."
+            queue.put_event(ProgressEvent(
+                done=0, total=total, phase="transcribing",
+                message=f"Iniciando transcrição e gravação de {total} arquivo(s) ...",
             ))
 
-            def on_progress(i: int, tot: int, caminho: Path) -> None:  # noqa: ARG001
-                # ARG001: 'caminho' não usado aqui (vai no LogEvent via _emit do transcrever).
-                # A interface usa o i/total para atualizar a barra de progresso.
+            def on_progress(
+                i: int,
+                tot: int,
+                caminho: Path,
+                frac: float = 0.0,
+                msg: str = "",
+            ) -> None:
+                done_cumulativo = (i - 1) + frac
                 queue.put_event(ProgressEvent(
-                    done=i, total=tot, phase="transcribing",
+                    done=done_cumulativo,
+                    total=tot,
+                    phase="transcribing",
+                    message=msg if msg else f"[{i}/{tot}] Processando: {caminho.name}",
                 ))
 
-            inseridos = salvar_no_banco(
+            inseridos, ja_existentes = salvar_no_banco(
                 copiados, cancel=cancel, on_progress=on_progress,
             )
+
+            detalhes_existentes = f" ({ja_existentes} já existente(s))" if ja_existentes > 0 else ""
 
             if cancel.is_set():
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
                     summary=f"Cancelado após {inseridos} registro(s) "
-                            f"inserido(s) com transcrição.",
+                            f"inserido(s) com transcrição{detalhes_existentes}.",
                 ))
                 return
 
             queue.put_event(ProgressEvent(
                 done=total, total=total, phase="inserting",
+                message=f"Transcrição finalizada: {inseridos} registro(s) processado(s){detalhes_existentes}.",
             ))
 
             # 5) Exclusão das pastas temporárias geradas
             _limpar_temporarios()
             queue.put_event(DoneEvent(
                 exit_code=0,
-                summary=f"{inseridos} registro(s) inserido(s) com transcrição.",
+                summary=f"{inseridos} registro(s) inserido(s) com transcrição{detalhes_existentes}.",
             ))
 
     except FileNotFoundError as e:

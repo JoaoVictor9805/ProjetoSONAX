@@ -55,10 +55,12 @@ class ProgressEvent:
 
     `total == 0` indica progresso **indeterminado** (ex.: transcrição
     com Whisper, onde não temos contagem confiável de sub-passos).
+    `message` é uma mensagem textual opcional a ser exibida no log da GUI.
     """
-    done: int
-    total: int
-    phase: str   # "scanning" | "copying" | "transcribing" | "inserting"
+    done: int | float
+    total: int | float
+    phase: str = ""   # "scanning" | "classifying" | "copying" | "transcribing" | "inserting"
+    message: str | None = None
 
 
 @dataclass

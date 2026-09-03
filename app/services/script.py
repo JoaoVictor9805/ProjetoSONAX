@@ -61,6 +61,7 @@ from app.database.db import conectar
 from app.services.chamadas_dao import (
     buscar_nome_atendente,
     inserir_registro_chamada,
+    registro_ja_existe
 )
 from app.services.parses import (
     parse_data,
@@ -125,12 +126,14 @@ def copiar_longos_para_pasta(
     longos: list,
     pasta_destino: Path,
     cancel: threading.Event | None = None,
+    on_progress: "Callable[[int, int, Path], None] | None" = None,
 ) -> list:
     """Copia os áudios >1min para a pasta destino. Retorna a lista de copiados
     [(path_destino, duracao_seg)] — usada depois pelo salvamento no banco."""
     pasta_destino.mkdir(exist_ok=True)
     copiados = []
     vistos = set()
+    total_longos = len(longos)
     for caminho, d in sorted(longos, key=lambda x: -x[1]):
         if cancel is not None and cancel.is_set():
             break
@@ -142,20 +145,48 @@ def copiar_longos_para_pasta(
         print(f"  {caminho.name:<40} {d:>8.2f} s  "
               f"({d/60:.2f} min)  -> copiado")
         copiados.append((destino, d))
+        if on_progress is not None:
+            try:
+                on_progress(len(copiados), total_longos, caminho)
+            except Exception:
+                pass
     return copiados
+
+
+def _notificar_progresso(
+    callback: Callable | None,
+    i: int,
+    total: int,
+    caminho: Path,
+    frac: float,
+    msg: str,
+) -> None:
+    """Auxiliar para notificar progresso suportando múltiplas assinaturas."""
+    if callback is None:
+        return
+    try:
+        callback(i, total, caminho, frac, msg)
+    except TypeError:
+        try:
+            callback(i, total, caminho)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def salvar_no_banco(
     copiados: list,
     cancel: "threading.Event | None" = None,
-    on_progress: "Callable[[int, int, Path], None] | None" = None,
-) -> int:
+    on_progress: "Callable | None" = None,
+) -> tuple[int, int]:
     """Para cada arquivo copiado: transcreve, parseia o nome, busca o
     atendente pelo ramal e insere UM único registro em registro_chamadas
     com a transcrição já preenchida.
 
-    Retorna a quantidade inserida. Pula (com aviso) se ramal não existir
-    em `origem` ou se algum campo essencial estiver ausente.
+    Retorna uma tupla (inseridos, ja_existentes). Pula (com aviso) se o registro
+    já existir no banco, se ramal não existir em `origem` ou se algum campo
+    essencial estiver ausente.
 
     **Cancelamento**: o `cancel` é checado em dois pontos:
       1. **Intra-arquivo** (durante a transcrição do arquivo N) — via
@@ -171,27 +202,72 @@ def salvar_no_banco(
     `commit` no `with` do `conectar()`).
     """
     inseridos = 0
+    ja_existentes = 0
     total = len(copiados)
     for i, (caminho, _) in enumerate(copiados, start=1):
         if cancel is not None and cancel.is_set():
             print(f"  [cancelado] parando antes de {caminho.name} "
                   f"após {inseridos} registro(s) inserido(s).")
-            return inseridos
-        if on_progress is not None:
-            on_progress(i, total, caminho)
+            return inseridos, ja_existentes
 
-        # 1) Transcrição (pode levantar TranscricaoCancelada se o
-        #    usuário cancelar no meio do arquivo atual).
-        print(f"  [whisper] transcrevendo: {caminho.name} ...")
+        # --- Verificação antecipada no banco antes de transcrever ---
+        with conectar() as cur:
+            if registro_ja_existe(cur, caminho.name):
+                ja_existentes += 1
+                print(f"  [aviso] {caminho.name} já registrado no banco — pulando.")
+                _notificar_progresso(
+                    on_progress,
+                    i,
+                    total,
+                    caminho,
+                    1.0,
+                    f"[{i}/{total}] {caminho.name} já existe no banco (pulado)",
+                )
+                continue
+
+        # 1) Transcrição com progresso contínuo
+        _notificar_progresso(
+            on_progress,
+            i,
+            total,
+            caminho,
+            0.0,
+            f"[{i}/{total}] Iniciando transcrição de: {caminho.name}",
+        )
+        print(f"  [whisper] [{i}/{total}] transcrevendo: {caminho.name} ...")
+
+        def _on_sub_progress(sub_frac: float) -> None:
+            pct = int(sub_frac * 100)
+            _notificar_progresso(
+                on_progress,
+                i,
+                total,
+                caminho,
+                sub_frac * 0.85,
+                f"[{i}/{total}] {caminho.name}: {pct}% transcrevendo...",
+            )
+
         try:
-            texto = transcrever_arquivo(caminho, cancel=cancel)
+            texto = transcrever_arquivo(
+                caminho,
+                cancel=cancel,
+                on_progress=_on_sub_progress,
+            )
         except TranscricaoCancelada as e:
             print(f"  [cancelado] {e} — nada de "
                   f"{caminho.name} foi inserido.")
-            return inseridos
+            return inseridos, ja_existentes
 
-        # 2) INSERT em uma transação pequena e isolada: se o próximo
-        #    arquivo for cancelado, este INSERT já está commitado.
+        _notificar_progresso(
+            on_progress,
+            i,
+            total,
+            caminho,
+            0.90,
+            f"[{i}/{total}] {caminho.name}: transcrição concluída. Gravando no banco...",
+        )
+
+        # 2) INSERT em uma transação pequena e isolada
         info = parse_nome_arquivo(caminho)
 
         if not info["ramal"].isdigit():
@@ -234,8 +310,16 @@ def salvar_no_banco(
               f"ramal={ramal} ({nome})  data={data}  "
               f"-> {caminho.name}  (\"{preview}...\")")
         inseridos += 1
+        _notificar_progresso(
+            on_progress,
+            i,
+            total,
+            caminho,
+            1.0,
+            f"[{i}/{total}] {caminho.name} gravado com sucesso no banco!",
+        )
 
-    return inseridos
+    return inseridos, ja_existentes
 
 def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) -> None:
     """Deleta a pasta de destino especificada e todo o seu conteúdo recursivamente."""

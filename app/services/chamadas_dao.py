@@ -34,6 +34,14 @@ def buscar_nome_atendente(
     return row[0] if row else None
 
 
+def registro_ja_existe(cur: psycopg.Cursor, log_arquivo: str) -> bool:
+    cur.execute("""SELECT 1 FROM registro_chamadas 
+                    WHERE log = %s LIMIT 1""", 
+                    (log_arquivo,))
+                    
+    return cur.fetchone() is not None
+
+
 def inserir_registro_chamada(
     cur: psycopg.Cursor,
     *,  # Determina que: Você é obrigado a escrever o nome dos parâmetros para os parâmetros a baixo:

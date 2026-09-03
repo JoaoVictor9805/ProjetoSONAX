@@ -30,6 +30,9 @@ import tqdm as _tqdm_mod
 import whisper
 
 
+from typing import Callable
+
+
 class TranscricaoCancelada(Exception):
     """Levantada quando o usuário cancela a transcrição no meio.
 
@@ -55,18 +58,19 @@ def transcrever_arquivo(
     *,
     modelo=None,
     cancel: "threading.Event | None" = None,
+    on_progress: "Callable[[float], None] | None" = None,
 ) -> str:
     """Transcreve um .wav e devolve só o texto (sem timestamps).
 
     `verbose=False` silencia o cabeçalho e a barra interna do Whisper,
-    já que emitimos nosso próprio progresso no `transcrever_pasta`.
+    já que emitimos nosso próprio progresso.
 
-    Suporte a cancelamento imediato:
+    Suporte a cancelamento e progresso granular em tempo real:
     1. Checagem prévia antes de iniciar o processamento.
     2. Hook `register_forward_pre_hook` no modelo PyTorch que interrompe
-       a inferência do Whisper no exato milissegundo em que `cancel.is_set()`
-       for ativado (entre tokens individuais).
-    3. Hook de fallback no `tqdm.update` entre janelas de 30s.
+       a inferência do Whisper imediatamente ao ativar `cancel.is_set()`.
+    3. Hook no `tqdm.update` para cálculo contínuo de percentual (`on_progress`)
+       e preempção entre janelas de 30s.
     """
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada(
@@ -76,7 +80,7 @@ def transcrever_arquivo(
     if modelo is None:
         modelo = carregar_modelo()
 
-    if cancel is None:
+    if cancel is None and on_progress is None:
         # Caminho "normal" — sem hook, sem custo extra.
         resultado = modelo.transcribe(
             str(caminho),
@@ -87,7 +91,7 @@ def transcrever_arquivo(
         return str(resultado.get("text", "")).strip()
 
     hook_handle = None
-    if hasattr(modelo, "register_forward_pre_hook"):
+    if cancel is not None and hasattr(modelo, "register_forward_pre_hook"):
         def _cancel_hook(module, inputs):  # noqa: ARG001
             if cancel is not None and cancel.is_set():
                 raise TranscricaoCancelada(
@@ -96,13 +100,27 @@ def transcrever_arquivo(
         hook_handle = modelo.register_forward_pre_hook(_cancel_hook)
 
     original_update = _tqdm_mod.tqdm.update
+    last_reported_pct = -1
 
     def _patched_update(self, n=1):  # type: ignore[no-untyped-def]
+        nonlocal last_reported_pct
         if cancel is not None and cancel.is_set():
             raise TranscricaoCancelada(
                 f"Cancelamento solicitado durante {caminho.name}",
             )
-        return original_update(self, n)
+        self.n += n
+        if on_progress is not None and getattr(self, "total", None):
+            total_frames = self.total
+            current_frames = min(total_frames, getattr(self, "n", 0))
+            frac = current_frames / total_frames if total_frames > 0 else 1.0
+            pct = round(frac * 100)
+            if pct != last_reported_pct:
+                last_reported_pct = pct
+                try:
+                    on_progress(frac)
+                except Exception:
+                    pass
+        return None
 
     _tqdm_mod.tqdm.update = _patched_update  # type: ignore[method-assign]
     try:

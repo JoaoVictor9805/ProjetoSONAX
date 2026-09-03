@@ -24,22 +24,38 @@ class QueueWriter:
         self._buffer = ""
 
     def write(self, data: str) -> int:
-        """Acumula `data` e enfileira um `LogEvent` por linha terminada em `\\n`."""
+        """Acumula `data` e enfileira um `LogEvent` por linha terminada em `\\n` ou `\\r`."""
         if not data:
             return 0
         self._buffer += data
         while True:
-            idx = self._buffer.find("\n")
-            if idx == -1:
+            idx_n = self._buffer.find("\n")
+            idx_r = self._buffer.find("\r")
+
+            if idx_n == -1 and idx_r == -1:
                 break
-            line, self._buffer = self._buffer[:idx], self._buffer[idx + 1:]
+
+            if idx_n != -1 and (idx_r == -1 or idx_n < idx_r):
+                idx = idx_n
+                line = self._buffer[:idx].rstrip("\r")
+                self._buffer = self._buffer[idx + 1:]
+            else:
+                idx = idx_r
+                line = self._buffer[:idx]
+                self._buffer = self._buffer[idx + 1:]
+
+            line = line.strip()
             if line:
                 self._queue.put_event(LogEvent(line, self._stream))
         return len(data)
 
     def flush(self) -> None:
-        """No-op: o `QueueWriter` não tem buffer próprio que precise flush."""
-        return None
+        """Despeja qualquer texto remanescente no buffer para a fila."""
+        if self._buffer:
+            line = self._buffer.strip()
+            self._buffer = ""
+            if line:
+                self._queue.put_event(LogEvent(line, self._stream))
 
     def isatty(self) -> bool:
         """Sempre False — estamos roteando para uma fila, não para um TTY."""
@@ -55,9 +71,9 @@ def redirect_stdio(queue: EventQueue):
     try:
         yield
     finally:
-        # Flush do que sobrou no buffer (linha sem \n final) antes de restaurar.
+        # Flush do que sobrou no buffer antes de restaurar.
         for fake in (sys.stdout, sys.stderr):
-            if isinstance(fake, QueueWriter) and fake._buffer:
-                fake.write("\n")
+            if isinstance(fake, QueueWriter):
+                fake.flush()
         sys.stdout = original_out
         sys.stderr = original_err

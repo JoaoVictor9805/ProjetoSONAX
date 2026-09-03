@@ -14,7 +14,7 @@ CREATE TABLE registro_chamadas (
 	ramal INT not null,
 	agente_nome varchar(100) not null,
 	data_ligacao TIMESTAMP(0) not null,
-	log varchar(255),
+	log varchar(255) UNIQUE,
 	transcricao TEXT,
 	
 	foreign key (agente_nome) references origem(agente_nome)
