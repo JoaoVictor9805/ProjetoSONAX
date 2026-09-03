@@ -55,6 +55,7 @@ import struct                # Biblioteca para ler e interpretar dados binários
 import threading             # usado apenas para anotação de tipo (cancel: threading.Event | None)
 from pathlib import Path     # Facilita muito a manipulação de caminhos de arquivos e pastas
 from typing import Callable   # usado apenas para anotação de tipo (on_progress)
+from datetime import datetime
 
 from app.database.db import conectar
 from app.services.chamadas_dao import (
@@ -64,6 +65,7 @@ from app.services.chamadas_dao import (
 from app.services.parses import (
     parse_data,
     parse_nome_arquivo,
+    parse_hora
 )
 from app.services.transcrever import TranscricaoCancelada, transcrever_arquivo
 
@@ -112,7 +114,7 @@ def classificar_wavs(wavs: list, cancel: threading.Event | None = None) -> tuple
         d = duracao_wav(w)
         if d is None:
             invalidos.append(w)
-        elif d > 60:
+        elif d > 1:
             longos.append((w, d))
         else:
             curtos.append((w, d))
@@ -203,9 +205,17 @@ def salvar_no_banco(
                   f"{info['data']!r} — pulando")
             continue
 
+        hora = parse_hora(info["hora"])
+        if hora is None:
+            print(f"  [aviso] hora inválida em {caminho.name}: "
+                  f"{info['hora']!r} — pulando")
+            continue
+
+        data_ligacao = datetime.combine(data, hora) if hora else datetime(data.year, data.month, data.day)
+
         ramal = int(info["ramal"])
         with conectar() as cur:
-            nome = buscar_nome_atendente(cur, ramal)
+            nome = buscar_nome_atendente(cur, ramal, data_ligacao)
             if nome is None:
                 print(f"  [aviso] ramal {ramal} não encontrado em `origem` "
                       f"({caminho.name}) — pulando")
@@ -214,8 +224,8 @@ def salvar_no_banco(
             id_reg = inserir_registro_chamada(
                 cur,
                 ramal=ramal,
-                nome_atendente=nome,
-                data_ligacao=data,
+                agente_nome=nome,
+                data_ligacao=data_ligacao,
                 log_arquivo=caminho.name,
                 transcricao=texto,
             )

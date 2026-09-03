@@ -1,74 +1,61 @@
+-- ==========================
+-- Etapa 01
+-- ==========================
+
 CREATE TABLE origem (
-	ramal INT PRIMARY key not null,
-	nome_atendente varchar(100) not null
+	agente_nome varchar(100) PRIMARY KEY not null,
+	ramal INT not null,
+	dt_inicio TIMESTAMP(0) not null, -- primeira ligação do usuário
+	dt_fim TIMESTAMP(0) not null -- última ligação do usuário
 );
 
 CREATE TABLE registro_chamadas (
 	id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 	ramal INT not null,
-	nome_atendente varchar(100) not null,
-	data_ligacao date not null,
+	agente_nome varchar(100) not null,
+	data_ligacao TIMESTAMP(0) not null,
 	log varchar(255),
 	transcricao TEXT,
 	
-	foreign key (ramal) references origem(ramal)
+	foreign key (agente_nome) references origem(agente_nome)
 );
 
-
 TRUNCATE TABLE origem CASCADE;
+TRUNCATE TABLE registro_chamadas;
+DROP TABLE registro_chamadas, origem CASCADE;
 
-INSERT INTO origem (ramal, nome_atendente) VALUES
-(100, 'Roberto Almeida'),
-(101, 'Ana Clara Silva'),
-(102, 'Carlos Eduardo Santos'),
-(103, 'Mariana Costa'),
-(104, 'Camila Santos'),
-(105, 'João Paulo Alves'),
-(106, 'Fernanda Oliveira'),
-(107, 'Ricardo Gomes'),
-(108, 'Juliana Mendes'),
-(109, 'Marcos Costa'),
-(110, 'Lucas Ferreira'),
-(111, 'Beatriz Souza'),
-(112, 'Thiago Ribeiro'),
-(113, 'Aline Martins'),
-(114, 'Gabriel Pereira'),
-(115, 'Juliana Silva'),
-(116, 'Pedro Henrique'),
-(117, 'Larissa Rocha'),
-(118, 'Diego Fernandes'),
-(119, 'Renata Castro'),
-(120, 'Gustavo Barbosa'),
-(121, 'Vanessa Dias'),
-(122, 'Felipe Oliveira'),
-(123, 'Tatiana Melo'),
-(124, 'Alexandre Correia'),
-(125, 'Bruna Carvalho'),
-(126, 'Rodrigo Monteiro'),
-(127, 'Carolina Nunes'),
-(128, 'Letícia Ferreira'),
-(129, 'Matheus Cardoso'),
-(130, 'Natália Pires'),
-(131, 'Daniel Cavalcanti'),
-(132, 'Paula Farias'),
-(133, 'Leonardo Moura'),
-(134, 'Rafael Souza'),
-(135, 'Bianca Teixeira'),
-(136, 'Eduardo Campos'),
-(137, 'Sabrina Vieira'),
-(138, 'Victor Nogueira'),
-(139, 'Flávia Batista'),
-(140, 'Marcelo Moraes'),
-(141, 'Amanda Lima'),
-(142, 'Leandro Pinto'),
-(143, 'Cíntia Mendes'),
-(144, 'André Reis'),
-(145, 'Priscila Freitas'),
-(146, 'Fernando Borges'),
-(147, 'Bruno Pereira'),
-(148, 'Isabela Machado'),
-(149, 'Guilherme Peixoto'),
-(150, 'Carla Mendes');
+INSERT INTO origem (ramal, agente_nome, dt_inicio, dt_fim) VALUES
+(121, 'Roberto Almeida', '2025-01-01 08:22:03', '2025-03-15 18:53:44'),
+(121, 'Lucas Ferreira', '2025-03-16 08:01:04', '2025-06-20 18:03:11'),
+(121, 'Ana Clara Silva', '2025-06-21 08:59:31', '2026-01-10 18:40:22'),
+(121, 'Vanessa Dias', '2026-01-11 08:09:21', '2026-08-31 18:54:32'),
+(122, 'Felipe Oliveira', '2025-01-01 08:44:13', '2026-08-31 18:56:07');
 
 
+select * from origem; 
 select * from registro_chamadas; 
+
+-- ==========================
+-- Etapa 02
+-- ==========================
+
+CREATE TABLE avaliacao_ia (
+	id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	registro_chamada_id INT not null,
+	nota_final INT not null,
+	feedback_geral TEXT not null,
+	data_avaliacao date not null,
+	modelo_ia varchar(50) not null
+
+	foreign key(registro_chamadas_id) references registro_chamadas(id)
+);
+
+CREATE TABLE avaliacao_criterio (
+	id_av_por_criterio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	id_avaliacao INT not null,
+	criterio ENUM('chamar pelo nome', 'agir com empatia', 'ouvir com atencao', 'eficiencia operacional', 'conexao humana', 'surpreender'),
+	nota_criterio INT not null,
+	justificativa_criterio TEXT
+	
+	foreign key(id_avaliacao) references avaliacao_ia(id_avaliacao)
+);
