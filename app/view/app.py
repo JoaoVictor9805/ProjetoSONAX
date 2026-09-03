@@ -43,22 +43,23 @@ def _interromper_thread(thread_id: int, exc: type) -> bool:
 
     `PyThreadState_SetAsyncExc` entrega a exceção no próximo boundary
     de bytecode da thread — na prática interrompe **imediatamente** a
-    inferência do Whisper em `app/view/worker.py`, sem depender do
-    hook de ~30s no `tqdm.update`. O `worker.py` já trata
-    `TranscricaoCancelada` como cancelamento limpo.
+    inferência do Whisper em `app/view/worker.py`.
     """
     api = ctypes.pythonapi.PyThreadState_SetAsyncExc
-    api.argtypes = [ctypes.c_ulong, ctypes.py_object]
-    api.restype = ctypes.c_int
-
-    res = api(ctypes.c_ulong(thread_id), ctypes.py_object(exc))
-    if res > 1:
-        # Raro: mais de um estado de thread atendido. A API pede para
-        # "destravar" com NULL para não corromper o processo.
-        api(ctypes.c_ulong(thread_id), None)
-        return False
-    # res == 1 → exceção agendada; res == 0 → thread já encerrou.
-    return res == 1
+    # Compatibilidade com plataformas 32-bit e 64-bit (Windows/Linux)
+    for id_type in (ctypes.c_ulonglong, ctypes.c_ulong):
+        api.argtypes = [id_type, ctypes.py_object]
+        api.restype = ctypes.c_int
+        try:
+            res = api(id_type(thread_id), ctypes.py_object(exc))
+            if res == 1:
+                return True
+            if res > 1:
+                api(id_type(thread_id), None)
+                return False
+        except Exception:
+            continue
+    return False
 
 
 class App(ctk.CTk):
@@ -104,12 +105,12 @@ class App(ctk.CTk):
         ).pack(anchor="w")
 
         instrucoes = (
-            "1.  Clique em Procurar e selecione a pasta descompactada com os "
-            "arquivos de áudio .wav **ou** um arquivo .zip/.rar com a pasta.\n"
+            "1.  Clique em Procurar e selecione a pasta descompactada com os\n "
+            "    arquivos de áudio .wav **ou** um arquivo .zip/.rar com a pasta.\n"
             "2.  Você pode enviar a pasta geral ou especificar conforme seu escopo.\n"
             "3.  Quando o botão Enviar ficar disponível, clique nele para iniciar.\n"
             "4.  Acompanhe o progresso pelo log e pela barra abaixo.\n"
-            "obs. Não altere o nome dos arquivos .wav. ou pastas antes de enviar"
+            "obs. Não altere o nome dos arquivos ou pastas antes de enviar"
         )
         
         ctk.CTkLabel(
@@ -449,13 +450,22 @@ class App(ctk.CTk):
 
     def _apply_done(self, event: DoneEvent) -> None:
         self._progress.stop()
-        self._progress.configure(mode="determinate")
-        self._progress.set(1.0)
-        self._progress_label.configure(text="100%")
+        foi_cancelado = (
+            (event.summary and event.summary.lower().startswith("cancelado"))
+            or (self._cancel is not None and self._cancel.is_set())
+        )
 
-        if event.exit_code == 0:
+        if foi_cancelado:
+            self._progress.configure(mode="determinate")
+            self._progress_label.configure(text="Cancelado")
+            self._set_status(event.summary or "Operação cancelada.", cor=_COR_NEUTRO)
+        elif event.exit_code == 0:
+            self._progress.configure(mode="determinate")
+            self._progress.set(1.0)
+            self._progress_label.configure(text="100%")
             self._set_status(event.summary or "Concluído.", cor=_COR_OK)
         else:
+            self._progress.configure(mode="determinate")
             self._set_status(
                 event.error or f"Falha (exit_code={event.exit_code}).",
                 cor=_COR_ERRO,

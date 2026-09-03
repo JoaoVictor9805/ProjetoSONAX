@@ -71,7 +71,7 @@ class DoneEvent:
         2  Falha ao gravar no banco / erro inesperado.
     """
     exit_code: int
-    summary: str
+    summary: str = ""
     error: str | None = None
 
 

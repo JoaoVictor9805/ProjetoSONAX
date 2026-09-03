@@ -49,6 +49,7 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 ==============================================================================
     """
 
+from app.services import transcrever
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
 import threading             # usado apenas para anotação de tipo (cancel: threading.Event | None)
@@ -102,26 +103,38 @@ def duracao_wav(caminho: Path):
         return None
 
 
-def classificar_wavs(wavs: list) -> tuple:
+def classificar_wavs(wavs: list, cancel: threading.Event | None = None) -> tuple:
     """Separa a lista de WAVs em (>1min, <=1min, inválidos)."""
     longos, curtos, invalidos = [], [], []
     for w in wavs:
+        if cancel is not None and cancel.is_set():
+            break
         d = duracao_wav(w)
         if d is None:
             invalidos.append(w)
-        elif d > 600:
+        elif d > 60:
             longos.append((w, d))
         else:
             curtos.append((w, d))
     return longos, curtos, invalidos
 
 
-def copiar_longos_para_pasta(longos: list, pasta_destino: Path) -> list:
+def copiar_longos_para_pasta(
+    longos: list,
+    pasta_destino: Path,
+    cancel: threading.Event | None = None,
+) -> list:
     """Copia os áudios >1min para a pasta destino. Retorna a lista de copiados
     [(path_destino, duracao_seg)] — usada depois pelo salvamento no banco."""
     pasta_destino.mkdir(exist_ok=True)
     copiados = []
+    vistos = set()
     for caminho, d in sorted(longos, key=lambda x: -x[1]):
+        if cancel is not None and cancel.is_set():
+            break
+        if caminho.name in vistos:
+            continue
+        vistos.add(caminho.name)
         destino = pasta_destino / caminho.name
         shutil.copy2(caminho, destino)
         print(f"  {caminho.name:<40} {d:>8.2f} s  "
@@ -213,3 +226,14 @@ def salvar_no_banco(
         inseridos += 1
 
     return inseridos
+
+def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) -> None:
+    """Deleta a pasta de destino especificada e todo o seu conteúdo recursivamente."""
+    if not pasta_destino.exists():
+        return
+
+    try:
+        shutil.rmtree(pasta_destino, ignore_errors=True)
+        print(f"[deletado] pasta {pasta_destino} deletada com sucesso")
+    except Exception as e:
+        print(f"[aviso] erro ao deletar pasta {pasta_destino}: {e}")

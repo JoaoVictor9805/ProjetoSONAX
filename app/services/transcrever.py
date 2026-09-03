@@ -40,7 +40,7 @@ class TranscricaoCancelada(Exception):
 
 
 @lru_cache(maxsize=1)
-def carregar_modelo(nome: str = "medium"):
+def carregar_modelo(nome: str = "small"):
     """Carrega o modelo Whisper uma única vez por processo."""
     return whisper.load_model(nome)
 
@@ -61,15 +61,18 @@ def transcrever_arquivo(
     `verbose=False` silencia o cabeçalho e a barra interna do Whisper,
     já que emitimos nosso próprio progresso no `transcrever_pasta`.
 
-    Se `cancel` for fornecido, o `update()` do tqdm é monkey-patched
-    durante a inferência: cada janela de ~30s de áudio checa o flag.
-    Se o flag estiver setado no momento do `update()`, uma
-    `TranscricaoCancelada` sobe imediatamente e o `transcrever_arquivo`
-    propaga — o texto acumulado até então (que pode estar vazio) é
-    descartado, **nada é salvo no banco** (o chamador
-    `salvar_no_banco` propaga a exceção e fecha a transação sem
-    `commit`).
+    Suporte a cancelamento imediato:
+    1. Checagem prévia antes de iniciar o processamento.
+    2. Hook `register_forward_pre_hook` no modelo PyTorch que interrompe
+       a inferência do Whisper no exato milissegundo em que `cancel.is_set()`
+       for ativado (entre tokens individuais).
+    3. Hook de fallback no `tqdm.update` entre janelas de 30s.
     """
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada(
+            f"Cancelamento solicitado antes de iniciar {caminho.name}",
+        )
+
     if modelo is None:
         modelo = carregar_modelo()
 
@@ -83,21 +86,21 @@ def transcrever_arquivo(
         )
         return str(resultado.get("text", "")).strip()
 
-    # Caminho com cancel: monkey-patch tqdm.tqdm.update para checar
-    # o flag entre cada janela. O Whisper cria UMA instância de tqdm
-    # por chamada de `transcribe` e chama `update(n)` por janela — o
-    # `n` é o número de frames decodificados, não interessa aqui.
+    hook_handle = None
+    if hasattr(modelo, "register_forward_pre_hook"):
+        def _cancel_hook(module, inputs):  # noqa: ARG001
+            if cancel is not None and cancel.is_set():
+                raise TranscricaoCancelada(
+                    f"Cancelamento solicitado durante a inferência de {caminho.name}",
+                )
+        hook_handle = modelo.register_forward_pre_hook(_cancel_hook)
+
     original_update = _tqdm_mod.tqdm.update
 
     def _patched_update(self, n=1):  # type: ignore[no-untyped-def]
         if cancel is not None and cancel.is_set():
-            # Levantamos dentro do `update`; o Whisper não captura, então
-            # a exceção sobe pelo stack até `modelo.transcribe`. A
-            # barra tqdm fica meio quebrada, mas o `with redirect_stdio`
-            # ainda imprime o que dava — tanto faz, o usuário vai fechar
-            # a janela em seguida.
             raise TranscricaoCancelada(
-                f"cancelamento solicitado durante {caminho.name}",
+                f"Cancelamento solicitado durante {caminho.name}",
             )
         return original_update(self, n)
 
@@ -115,10 +118,9 @@ def transcrever_arquivo(
         # inserir no banco.
         raise
     finally:
-        # Restaura SEMPRE, mesmo se outra exceção subir — caso
-        # contrário, instâncias futuras de tqdm no processo ficam
-        # com o monkey-patch.
         _tqdm_mod.tqdm.update = original_update  # type: ignore[method-assign]
+        if hook_handle is not None:
+            hook_handle.remove()
 
     return str(resultado.get("text", "")).strip()
 
