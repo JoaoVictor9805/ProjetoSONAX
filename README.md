@@ -24,18 +24,18 @@ Durante o processamento, o log de execução mostra cada etapa do pipeline em te
 
 ## ✨ Funcionalidades
 
-- 📁 Seleção de uma pasta com os `.wav` ou de um arquivo compactado `.zip` / `.rar`
-- 🔍 Varredura recursiva dos áudios, ignorando pastas temporárias e deduplicando arquivos com o mesmo nome
-- ⏱️ Classificação automática por duração (elegíveis: >1min; descartados: ≤1min; inválidos: cabeçalho WAV corrompido)
-- 📋 Cópia dos áudios elegíveis para uma pasta de trabalho (`audios_maiores_1min`)
-- 🗣️ Transcrição em português via Whisper (modelo local, sem envio do áudio a serviços externos)
-- 🧩 Parsing do nome do arquivo para extrair ramal, telefone, data, hora, timestamp e ID da chamada
-- 👤 Resolução automática do atendente responsável pelo ramal, pela tabela `origem` (por período `dt_inicio`/`dt_fim`)
-- 💾 Gravação de um registro por chamada em `registro_chamadas`, evitando duplicatas já processadas
-- 📊 Barra de progresso cumulativa por fase (varredura → classificação → cópia → transcrição → gravação)
-- ⛔ Cancelamento imediato durante a transcrição, mesmo no meio da inferência do Whisper
-- 🗜️ Extração segura de `.zip`/`.rar`, com validação contra zip bomb e path traversal
-- 🧹 Limpeza automática das pastas temporárias geradas ao final do processamento
+- Seleção de uma pasta com os `.wav` ou de um arquivo compactado `.zip` / `.rar`
+- Varredura recursiva dos áudios, ignorando pastas temporárias e deduplicando arquivos com o mesmo nome
+- Classificação automática por duração (elegíveis: >1min; descartados: ≤1min; inválidos: cabeçalho WAV corrompido)
+- Cópia dos áudios elegíveis para uma pasta de trabalho (`audios_maiores_1min`)
+- Transcrição em português via Whisper (modelo local, sem envio do áudio a serviços externos)
+- Parsing do nome do arquivo para extrair ramal, telefone, data, hora, timestamp e ID da chamada
+- Resolução automática do atendente responsável pelo ramal, pela tabela `origem` (por período `dt_inicio`/`dt_fim`)
+- Gravação de um registro por chamada em `registro_chamadas`, evitando duplicatas já processadas
+- Barra de progresso cumulativa por fase (varredura → classificação → cópia → transcrição → gravação)
+- Cancelamento imediato durante a transcrição, mesmo no meio da inferência do Whisper
+- Extração segura de `.zip`/`.rar`, com validação contra zip bomb e path traversal
+- Limpeza automática das pastas temporárias geradas ao final do processamento
 
 ---
 
