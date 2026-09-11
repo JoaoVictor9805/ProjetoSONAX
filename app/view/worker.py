@@ -47,6 +47,7 @@ def run_pipeline(
     entrada: Path,
     queue: EventQueue,
     cancel: threading.Event,  # noqa: ARG001 — reservado para cancelamento futuro
+    dev_event: threading.Event | None = None,
 ) -> None:
     """Executa o pipeline completo. Enfileira eventos; termina com `DoneEvent`.
 
@@ -68,6 +69,14 @@ def run_pipeline(
         if pasta_extracao is not None and pasta_extracao.exists():
             queue.put_event(LogEvent(f"Excluindo pasta temporária extraída: {pasta_extracao} ..."))
             deletar_pasta(pasta_extracao)
+
+    def _rotular(i: int, caminho: Path) -> str:
+        """Rótulo de exibição do arquivo.
+
+        Modo dev → nome real do arquivo; caso contrário o rótulo
+        genérico "Audio NN" (comportamento original).
+        """
+        return caminho.name if dev_event is not None and dev_event.is_set() else f"Audio {i:02d}"
 
     try:
         # Se a GUI passou um .zip ou .rar, extrai na mesma pasta do arquivo.
@@ -180,7 +189,9 @@ def run_pipeline(
                 return
 
             # 2.5) Filtragem de qualidade de áudio
-            longos, rejeitados = filtrar_por_qualidade_audio(longos, cancel=cancel)
+            longos, rejeitados = filtrar_por_qualidade_audio(
+                longos, cancel=cancel, modo_dev=dev_event,
+            )
             invalidos.extend(rejeitados)
             if rejeitados:
                 queue.put_event(LogEvent(
@@ -198,7 +209,8 @@ def run_pipeline(
             def on_copy_progress(idx: int, tot: int, p: Path) -> None:
                 queue.put_event(ProgressEvent(
                     done=idx, total=tot, phase="copying",
-                    message=f"Copiado ({idx}/{tot}): Audio {idx:02d}",
+                    message=f"Copiado ({idx}/{tot}): {_rotular(idx, p)}",
+                    path=p.name,
                 ))
 
             copiados = copiar_longos_para_pasta(
@@ -239,11 +251,12 @@ def run_pipeline(
                     done=done_cumulativo,
                     total=tot,
                     phase="transcribing",
-                    message=msg if msg else f"[{i}/{tot}] Processando: Audio {i:02d}",
+                    message=msg if msg else f"[{i}/{tot}] Processando: {_rotular(i, caminho)}",
+                    path=caminho.name,
                 ))
 
             inseridos, ja_existentes = salvar_no_banco(
-                copiados, cancel=cancel, on_progress=on_progress,
+                copiados, cancel=cancel, on_progress=on_progress, modo_dev=dev_event,
             )
 
             detalhes_existentes = f" ({ja_existentes} já existente(s))" if ja_existentes > 0 else ""
@@ -269,10 +282,11 @@ def run_pipeline(
                 if cancel.is_set():
                     break
 
-                rotulo_audio = f"Audio {idx:02d}"
+                rotulo_audio = _rotular(idx, caminho)
                 queue.put_event(ProgressEvent(
                     done=idx - 1, total=total_copiados, phase="reviewing",
                     message=f"[{idx}/{total_copiados}] Revisando transcrição: {rotulo_audio} ...",
+                    path=caminho.name,
                 ))
 
                 gerar_revisao_transcricao(caminho.name, rotulo_audio=rotulo_audio)

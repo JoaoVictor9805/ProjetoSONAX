@@ -14,6 +14,7 @@ Threading:
 from __future__ import annotations
 
 import ctypes
+import re
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -81,6 +82,10 @@ class App(ctk.CTk):
         self._after_id: str | None = None
         self._entrada: Path | None = None
         self._cancel: threading.Event | None = None  # setado por "Cancelar"
+        self._modo_dev = False  # log de desenvolvimento (mostra nome real dos arquivos)
+        self._modo_dev_event = threading.Event()  # sinalizado ao worker em tempo real
+        self._linhas_log: list[tuple[str, str, str | None]] = []
+        self._rotulos: dict[str, str] = {}  # "Audio NN" -> nome do arquivo
 
         # ----- UI -----
         self._build_header()
@@ -222,21 +227,6 @@ class App(ctk.CTk):
         self._log.pack(fill="both", expand=True, padx=20, pady=(0, 4))
         self._log.configure(state="disabled")
 
-    def _build_log_dev_button(self) -> None:
-        self._log_dev_button = ctk.CTkLabel(
-            self,
-            text="Log de desenvolvimento",
-            text_color="#3498db",
-            font=ctk.CTkFont(size=11, underline=True),
-            cursor="hand2",
-        )
-        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
-        self._log_dev_button.pack(side="right", padx=(0, 20), pady=(0, 8))
-
-    def _on_log_dev_button(self) -> None:
-        """Handler do botão de log de desenvolvimento."""
-        pass
-
     def _build_status(self) -> None:
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=20, pady=(4, 16))
@@ -251,7 +241,7 @@ class App(ctk.CTk):
 
         self._log_dev_button = ctk.CTkLabel(
             footer,
-            text="Log de desenvolvimento",
+            text="Log User",
             text_color="#3498db",
             font=ctk.CTkFont(size=11, underline=True),
             cursor="hand2",
@@ -331,6 +321,8 @@ class App(ctk.CTk):
             return
 
         # Limpa estado visual para a nova rodada.
+        self._linhas_log = []
+        self._rotulos = {}
         self._log.configure(state="normal")
         self._log.delete("1.0", "end")
         self._log.configure(state="disabled")
@@ -358,7 +350,7 @@ class App(ctk.CTk):
 
         self._worker = threading.Thread(
             target=run_pipeline,
-            args=(self._entrada, self._queue, self._cancel),
+            args=(self._entrada, self._queue, self._cancel, self._modo_dev_event),
             daemon=True,
             name="sonax-pipeline",
         )
@@ -395,6 +387,24 @@ class App(ctk.CTk):
             cor=_COR_NEUTRO,
         )
 
+    def _on_log_dev_button(self, _event=None) -> None:  # noqa: ARG002 — evento do bind
+        """Alterna o log de desenvolvimento.
+
+        Off: exibe os rótulos genéricos ("Audio 01", "Audio 02", ...).
+        On : re-renderiza o log substituindo esses rótulos pelo nome
+             real do arquivo (disponível nos `ProgressEvent.path`).
+        """
+        self._modo_dev = not self._modo_dev
+        if self._modo_dev:
+            self._modo_dev_event.set()
+        else:
+            self._modo_dev_event.clear()
+        self._render_log()
+        self._log_dev_button.configure(
+            text="Log Dev" if self._modo_dev else "Log User",
+            text_color="#e67e22" if self._modo_dev else "#3498db",
+        )
+    
     # ----------------------------------------------------------------
     # Polling: drena a fila e atualiza a UI
     # ----------------------------------------------------------------
@@ -429,14 +439,50 @@ class App(ctk.CTk):
     # Atualizações de widgets
     # ----------------------------------------------------------------
 
-    def _append_log(self, line: str, stream: str) -> None:
-        prefixo = "" if stream == "out" else "[err] "
+    def _append_log(
+        self,
+        line: str,
+        stream: str,
+        path: str | None = None,
+    ) -> None:
+        """Guarda a linha no buffer e re-renderiza o texto na tela."""
+        self._linhas_log.append((line, stream, path))
+        self._render_log()
+
+    def _render_log(self) -> None:
+        """Re-renderiza todo o log aplicando o formato do modo atual."""
         self._log.configure(state="normal")
-        self._log.insert("end-1c", f"{prefixo}{line}\n")
+        self._log.delete("1.0", "end")
+        for line, stream, path in self._linhas_log:
+            prefixo = "" if stream == "out" else "[err] "
+            self._log.insert("end-1c", f"{prefixo}{self._formatar_linha(line, path)}\n")
         self._log.see("end")
         self._log.configure(state="disabled")
 
+    def _formatar_linha(self, line: str, path: str | None) -> str:
+        """No modo dev, troca os rótulos genéricos 'Audio NN' pelo nome do arquivo.
+
+        `path` tem prioridade (linhas de progresso, que já sabem o arquivo).
+        Para o resto (ex.: linhas de `print()`), usa o mapeamento aprendido
+        dos eventos de progresso (`self._rotulos`).
+        """
+
+        if not self._modo_dev:
+            return line
+
+        def _substituir(m: re.Match[str]) -> str:
+            if path is not None:
+                return path
+            return self._rotulos.get(m.group(0), m.group(0))
+
+        return re.sub(r"Audio \d+", _substituir, line)
+
     def _apply_progress(self, event: ProgressEvent) -> None:
+        if event.path and event.message:
+            m = re.search(r"Audio \d+", event.message)
+            if m:
+                self._rotulos[m.group(0)] = event.path
+
         if event.total <= 0:
             # Modo indeterminado (legado; hoje o worker sempre passa
             # `total>0`).
@@ -445,7 +491,8 @@ class App(ctk.CTk):
             self._progress.start()
             self._progress_label.configure(text="Processando ...")
             if getattr(event, "message", None):
-                self._append_log(f"[Progresso] {event.message}", "out")
+                path = getattr(event, "path", None)
+                self._append_log(f"[Progresso] {event.message}", "out", path)
             return
 
         # Modo determinável: convertemos `done/total` da fase atual em
@@ -500,7 +547,11 @@ class App(ctk.CTk):
         )
 
         if getattr(event, "message", None):
-            self._append_log(f"[Progresso] {event.message}", "out")
+            self._append_log(
+                f"[Progresso] {event.message}",
+                "out",
+                getattr(event, "path", None),
+            )
 
     def _apply_done(self, event: DoneEvent) -> None:
         self._progress.stop()

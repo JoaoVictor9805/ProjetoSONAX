@@ -136,17 +136,24 @@ def classificar_wavs(wavs: list, cancel: threading.Event | None = None) -> tuple
 def filtrar_por_qualidade_audio(
     longos: list,
     cancel: threading.Event | None = None,
+    modo_dev: threading.Event | None = None,
 ) -> tuple[list, list]:
     """Analisa a qualidade de áudio dos WAVs longos e remove os 'Péssimos'.
 
     Retorna (longos_filtrados, rejeitados) onde:
     - longos_filtrados : lista de (Path, duracao) aprovados.
     - rejeitados       : lista de Path reprovados (só o caminho, sem duração).
+
+    `modo_dev` (opcional): quando setado, os rótulos exibidos são os nomes
+    reais dos arquivos em vez de "Audio NN".
     """
     filtrados = []
     rejeitados = []
     for idx, (caminho, duracao) in enumerate(longos, 1):
-        rotulo_audio = f"Audio {idx:02d}"
+        if modo_dev is not None and modo_dev.is_set():
+            rotulo_audio = caminho.name
+        else:
+            rotulo_audio = f"Audio {idx:02d}"
         if cancel is not None and cancel.is_set():
             break
         try:
@@ -223,6 +230,7 @@ def salvar_no_banco(
     copiados: list,
     cancel: "threading.Event | None" = None,
     on_progress: "Callable | None" = None,
+    modo_dev: "threading.Event | None" = None,
 ) -> tuple[int, int]:
     """Para cada arquivo copiado: transcreve, parseia o nome, busca o
     atendente pelo ramal e insere UM único registro em registro_chamadas
@@ -249,7 +257,10 @@ def salvar_no_banco(
     ja_existentes = 0
     total = len(copiados)
     for i, (caminho, _) in enumerate(copiados, start=1):
-        rotulo_audio = f"Audio {i:02d}"
+        if modo_dev is not None and modo_dev.is_set():
+            rotulo_audio = caminho.name
+        else:
+            rotulo_audio = f"Audio {i:02d}"
         if cancel is not None and cancel.is_set():
             print(f"  [cancelado] parando antes de {rotulo_audio} ({caminho.name}) "
                   f"após {inseridos} registro(s) inserido(s).")

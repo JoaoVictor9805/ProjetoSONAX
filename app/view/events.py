@@ -61,6 +61,7 @@ class ProgressEvent:
     total: int | float
     phase: str = ""   # "scanning" | "classifying" | "copying" | "transcribing" | "inserting" | "reviewing" | "cleanup"
     message: str | None = None
+    path: str | None = None   # nome do arquivo envolvido (usado no log de desenvolvimento)
 
 
 @dataclass
