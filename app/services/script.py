@@ -49,6 +49,14 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 ==============================================================================
     """
 
+from app.services.revisao import revisar_texto
+from app.services.qualidade_audio import analisar_audio
+from app.services.qualidade_audio import classificar_qualidade_audio
+from app.services.qualidade_audio import classificar_qualidade_transcricao
+from app.services.qualidade_audio import avaliar_qualidade_transcricao
+from app.services.qualidade_audio import calcular_metricas_whisper
+from app.services.qualidade_audio import analisar_transcricao
+from app.services.planilha import exportar_transcricao_para_planilha
 from app.services import transcrever
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
@@ -61,7 +69,10 @@ from app.database.db import conectar
 from app.services.chamadas_dao import (
     buscar_nome_atendente,
     inserir_registro_chamada,
-    registro_ja_existe
+    registro_ja_existe,
+    buscar_transcricao,
+    verificar_coluna_revisao,
+    inserir_revisao
 )
 from app.services.parses import (
     parse_data,
@@ -115,11 +126,46 @@ def classificar_wavs(wavs: list, cancel: threading.Event | None = None) -> tuple
         d = duracao_wav(w)
         if d is None:
             invalidos.append(w)
-        elif d > 1:
+        elif d > 60:
             longos.append((w, d))
         else:
             curtos.append((w, d))
     return longos, curtos, invalidos
+
+
+def filtrar_por_qualidade_audio(
+    longos: list,
+    cancel: threading.Event | None = None,
+) -> tuple[list, list]:
+    """Analisa a qualidade de áudio dos WAVs longos e remove os 'Péssimos'.
+
+    Retorna (longos_filtrados, rejeitados) onde:
+    - longos_filtrados : lista de (Path, duracao) aprovados.
+    - rejeitados       : lista de Path reprovados (só o caminho, sem duração).
+    """
+    filtrados = []
+    rejeitados = []
+    for idx, (caminho, duracao) in enumerate(longos, 1):
+        rotulo_audio = f"Audio {idx:02d}"
+        if cancel is not None and cancel.is_set():
+            break
+        try:
+            dados = analisar_audio(caminho)
+            classificacao = classificar_qualidade_audio(dados)
+        except Exception as e :
+            # Se a análise falhar, mantém o áudio (não penaliza por erro técnico)
+            print(f"  [qualidade] erro ao analisar {rotulo_audio}: {e} — mantido por padrão")
+            filtrados.append((caminho, duracao))
+            continue
+
+        if classificacao == "Péssimo":
+            print(f"  [qualidade] {rotulo_audio} reprovado ({classificacao}) — excluído do processamento")
+            rejeitados.append(caminho)
+        else:
+            print(f"  [qualidade] {rotulo_audio} aprovado ({classificacao})")
+            filtrados.append((caminho, duracao))
+
+    return filtrados, rejeitados
 
 
 def copiar_longos_para_pasta(
@@ -142,8 +188,6 @@ def copiar_longos_para_pasta(
         vistos.add(caminho.name)
         destino = pasta_destino / caminho.name
         shutil.copy2(caminho, destino)
-        print(f"  {caminho.name:<40} {d:>8.2f} s  "
-              f"({d/60:.2f} min)  -> copiado")
         copiados.append((destino, d))
         if on_progress is not None:
             try:
@@ -205,8 +249,9 @@ def salvar_no_banco(
     ja_existentes = 0
     total = len(copiados)
     for i, (caminho, _) in enumerate(copiados, start=1):
+        rotulo_audio = f"Audio {i:02d}"
         if cancel is not None and cancel.is_set():
-            print(f"  [cancelado] parando antes de {caminho.name} "
+            print(f"  [cancelado] parando antes de {rotulo_audio} ({caminho.name}) "
                   f"após {inseridos} registro(s) inserido(s).")
             return inseridos, ja_existentes
 
@@ -214,14 +259,14 @@ def salvar_no_banco(
         with conectar() as cur:
             if registro_ja_existe(cur, caminho.name):
                 ja_existentes += 1
-                print(f"  [aviso] {caminho.name} já registrado no banco — pulando.")
+                print(f"  [aviso] {rotulo_audio} ({caminho.name}) já registrado no banco — pulando.")
                 _notificar_progresso(
                     on_progress,
                     i,
                     total,
                     caminho,
                     1.0,
-                    f"[{i}/{total}] {caminho.name} já existe no banco (pulado)",
+                    f"[{i}/{total}] {rotulo_audio} já existe no banco (pulado)",
                 )
                 continue
 
@@ -232,9 +277,9 @@ def salvar_no_banco(
             total,
             caminho,
             0.0,
-            f"[{i}/{total}] Iniciando transcrição de: {caminho.name}",
+            f"[{i}/{total}] Iniciando transcrição de: {rotulo_audio}",
         )
-        print(f"  [whisper] [{i}/{total}] transcrevendo: {caminho.name} ...")
+        print(f"  [whisper] [{i}/{total}] transcrevendo: {rotulo_audio} ...")
 
         def _on_sub_progress(sub_frac: float) -> None:
             pct = int(sub_frac * 100)
@@ -244,18 +289,18 @@ def salvar_no_banco(
                 total,
                 caminho,
                 sub_frac * 0.85,
-                f"[{i}/{total}] {caminho.name}: {pct}% transcrevendo...",
+                f"[{i}/{total}] {rotulo_audio}: {pct}% transcrevendo...",
             )
 
         try:
-            texto = transcrever_arquivo(
+            texto, metricas_whisper = transcrever_arquivo(
                 caminho,
                 cancel=cancel,
                 on_progress=_on_sub_progress,
             )
         except TranscricaoCancelada as e:
             print(f"  [cancelado] {e} — nada de "
-                  f"{caminho.name} foi inserido.")
+                  f"{rotulo_audio} foi inserido.")
             return inseridos, ja_existentes
 
         _notificar_progresso(
@@ -264,26 +309,56 @@ def salvar_no_banco(
             total,
             caminho,
             0.90,
-            f"[{i}/{total}] {caminho.name}: transcrição concluída. Gravando no banco...",
+            f"[{i}/{total}] {rotulo_audio}: transcrição concluída. Gravando no banco...",
         )
+
+        dados_transcricao = analisar_transcricao(texto)
+        dados_whisper = calcular_metricas_whisper(metricas_whisper)
+
+        dados = {
+            **dados_transcricao,
+            **dados_whisper
+        }
+
+        avaliacao = avaliar_qualidade_transcricao(dados)
+        qualidade = avaliacao["classificacao"]
+
+        # Exporta transcrição com todos os critérios de qualidade e métricas para a planilha
+        status_fluxo = "Descartado (qualidade péssima)" if qualidade == "Péssimo" else "Aprovado para banco"
+        try:
+            exportar_transcricao_para_planilha(
+                caminho_audio=caminho,
+                texto_transcricao=texto,
+                dados_avaliacao={
+                    **dados,
+                    **avaliacao,
+                    "status_fluxo": status_fluxo,
+                },
+            )
+        except Exception as e:
+            print(f"  [aviso planilha] Falha ao registrar na planilha {rotulo_audio}: {e}")
+
+        if qualidade == "Péssimo":
+            print(f"  [aviso] transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
+            continue
 
         # 2) INSERT em uma transação pequena e isolada
         info = parse_nome_arquivo(caminho)
 
         if not info["ramal"].isdigit():
-            print(f"  [aviso] ramal inválido em {caminho.name}: "
+            print(f"  [aviso] ramal inválido em {rotulo_audio}: "
                   f"{info['ramal']!r} — pulando")
             continue
 
         data = parse_data(info["data"])
         if data is None:
-            print(f"  [aviso] data inválida em {caminho.name}: "
+            print(f"  [aviso] data inválida em {rotulo_audio}: "
                   f"{info['data']!r} — pulando")
             continue
 
         hora = parse_hora(info["hora"])
         if hora is None:
-            print(f"  [aviso] hora inválida em {caminho.name}: "
+            print(f"  [aviso] hora inválida em {rotulo_audio}: "
                   f"{info['hora']!r} — pulando")
             continue
 
@@ -294,7 +369,7 @@ def salvar_no_banco(
             nome = buscar_nome_atendente(cur, ramal, data_ligacao)
             if nome is None:
                 print(f"  [aviso] ramal {ramal} não encontrado em `origem` "
-                      f"({caminho.name}) — pulando")
+                  f"({rotulo_audio}) — pulando")
                 continue
 
             id_reg = inserir_registro_chamada(
@@ -308,7 +383,7 @@ def salvar_no_banco(
         preview = texto[:60].replace("\n", " ")
         print(f"  [bd] registro #{id_reg} inserido: "
               f"ramal={ramal} ({nome})  data={data}  "
-              f"-> {caminho.name}  (\"{preview}...\")")
+              f"-> {rotulo_audio}  (\"{preview}...\")")
         inseridos += 1
         _notificar_progresso(
             on_progress,
@@ -316,10 +391,32 @@ def salvar_no_banco(
             total,
             caminho,
             1.0,
-            f"[{i}/{total}] {caminho.name} gravado com sucesso no banco!",
+            f"[{i}/{total}] {rotulo_audio} gravado com sucesso no banco!",
         )
 
     return inseridos, ja_existentes
+
+def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str | None:
+    """Gere a revisão a partir da coluna de transcrição, utilizando um modelo de IA"""
+    with conectar() as cur:
+        if verificar_coluna_revisao(cur, log):
+            return None
+        transcricao = buscar_transcricao(cur, log)
+
+    if not transcricao or not transcricao.strip():
+        return None
+
+    try:
+        revisao = revisar_texto(transcricao)
+    except Exception as e:
+        nome_exibicao = rotulo_audio or log
+        print(f"  [revisão] Falha ao revisar transcrição de {nome_exibicao}: {e}")
+        return None
+
+    with conectar() as cur:
+        return inserir_revisao(cur, log, revisao)
+        
+
 
 def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) -> None:
     """Deleta a pasta de destino especificada e todo o seu conteúdo recursivamente."""

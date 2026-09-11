@@ -9,7 +9,7 @@ deactivate
 python app.py
 
 python -m app.main      # CLI   --- REMOVIDO
-python run_gui.py       # GUI
+python run_gui.py       # GUI   --- Iniciar programa
 
 
 npm config set allow-scripts=opencode-ai --location=user
@@ -19,3 +19,10 @@ npm uninstall -g opencode-ai
 npm cache clean --force
 npm install -g opencode-ai
 opencode --version
+
+python app/services/revisao.py
+
+dados = {
+    **dados_transcricao,
+    **dados_whisper
+}

@@ -21,44 +21,26 @@ from __future__ import annotations
 
 import threading
 import traceback
+import time
 from pathlib import Path
-import zipfile
-import rarfile
-import shutil
-
 from app.database.config import get_database_url
+from app.services.archives import (
+    DescompactacaoError,
+    descompactar_arquivo,
+    eh_arquivo_compactado,
+)
 from app.services.io import coletar_wavs, resolver_destino
 from app.services.script import (
     classificar_wavs,
     copiar_longos_para_pasta,
     salvar_no_banco,
-    deletar_pasta
+    filtrar_por_qualidade_audio,
+    deletar_pasta,
+    gerar_revisao_transcricao
 )
 from app.services.transcrever import TranscricaoCancelada
 from app.view.events import DoneEvent, EventQueue, LogEvent, ProgressEvent
 from app.view.stream import redirect_stdio
-
-
-def _configurar_rarfile() -> None:
-    """Configura o executável unrar para o rarfile no Windows, caso não esteja no PATH."""
-    if shutil.which("unrar") or shutil.which("WinRAR") or shutil.which("7z"):
-        return
-    candidatos = [
-        r"C:\Program Files\WinRAR\UnRAR.exe",
-        r"C:\Program Files\WinRAR\WinRAR.exe",
-        r"C:\Program Files (x86)\WinRAR\UnRAR.exe",
-        r"C:\Program Files (x86)\WinRAR\WinRAR.exe",
-        r"C:\Program Files\7-Zip\7z.exe",
-        r"C:\Program Files (x86)\7-Zip\7z.exe",
-    ]
-    for c in candidatos:
-        if Path(c).is_file():
-            if "7z" in c.lower():
-                setattr(rarfile, "SEVENZIP_TOOL", c)
-                setattr(rarfile, "FORCE_TOOL", "7zip")
-            else:
-                setattr(rarfile, "UNRAR_TOOL", c)
-            return
 
 
 def run_pipeline(
@@ -89,44 +71,14 @@ def run_pipeline(
 
     try:
         # Se a GUI passou um .zip ou .rar, extrai na mesma pasta do arquivo.
-        ext = entrada.suffix.lower() if entrada.is_file() else ""
-        if ext in [".zip", ".rar"]:
-            pasta_extracao = entrada.parent / entrada.stem
-            if pasta_extracao.exists():
-                shutil.rmtree(pasta_extracao, ignore_errors=True)
-            pasta_extracao.mkdir(parents=True, exist_ok=True)
+        if eh_arquivo_compactado(entrada):
             queue.put_event(LogEvent(
-                f"Descompactando {entrada.name} em: {pasta_extracao} ...",
+                f"Descompactando {entrada.name} ...",
                 stream="out",
             ))
             try:
-                if ext == ".zip":
-                    with zipfile.ZipFile(entrada, "r") as zf:
-                        # Validação defensiva contra zip bomb e path traversal.
-                        membros_invalidos = [
-                            m for m in zf.namelist()
-                            if m.startswith("/") or ".." in Path(m).parts
-                        ]
-                        if membros_invalidos:
-                            raise zipfile.BadZipFile(
-                                f"Arquivo ZIP contém caminhos inválidos: "
-                                f"{membros_invalidos[:3]}..."
-                            )
-                        zf.extractall(pasta_extracao)
-                elif ext == ".rar":
-                    _configurar_rarfile()
-                    with rarfile.RarFile(entrada, "r") as rf:
-                        membros_invalidos = [
-                            m for m in rf.namelist()
-                            if m.startswith("/") or ".." in Path(m).parts
-                        ]
-                        if membros_invalidos:
-                            raise rarfile.BadRarFile(
-                                f"Arquivo RAR contém caminhos inválidos: "
-                                f"{membros_invalidos[:3]}..."
-                            )
-                        rf.extractall(pasta_extracao)
-            except Exception as e:
+                pasta_extracao, diretorio = descompactar_arquivo(entrada)
+            except DescompactacaoError as e:
                 _limpar_temporarios()
                 queue.put_event(LogEvent(
                     f"[ERRO] Falha ao descompactar arquivo: {e}", stream="err",
@@ -137,15 +89,7 @@ def run_pipeline(
                     error=f"Arquivo compactado inválido: {e}",
                 ))
                 return
-
-            # Se o arquivo compactado tiver uma única pasta raiz, "entra" nela para
-            # que o resto do pipeline não precise saber que veio de compactado.
-            subdirs = [p for p in pasta_extracao.iterdir() if p.is_dir()]
-            if len(subdirs) == 1 and not any(pasta_extracao.glob("*.wav")):
-                diretorio = subdirs[0]
-            else:
-                diretorio = pasta_extracao
-
+                
             queue.put_event(LogEvent(
                 f"Extraído em: {diretorio}", stream="out",
             ))
@@ -217,7 +161,7 @@ def run_pipeline(
                 done=1, total=1, phase="classifying",
                 message=f"Classificação concluída: {len(longos)} áudio(s) >1min elegível(is).",
             ))
-
+                    
             if not longos:
                 _limpar_temporarios()
                 queue.put_event(LogEvent("Nenhum áudio com mais de 1 minuto encontrado."))
@@ -235,6 +179,14 @@ def run_pipeline(
                 ))
                 return
 
+            # 2.5) Filtragem de qualidade de áudio
+            longos, rejeitados = filtrar_por_qualidade_audio(longos, cancel=cancel)
+            invalidos.extend(rejeitados)
+            if rejeitados:
+                queue.put_event(LogEvent(
+                    f"[qualidade] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento."
+                ))
+
             # 3) Cópia para a pasta destino
             destino = resolver_destino(diretorio)
             queue.put_event(LogEvent(f"Pasta de destino: {destino}"))
@@ -246,7 +198,7 @@ def run_pipeline(
             def on_copy_progress(idx: int, tot: int, p: Path) -> None:
                 queue.put_event(ProgressEvent(
                     done=idx, total=tot, phase="copying",
-                    message=f"Copiado ({idx}/{tot}): {p.name}",
+                    message=f"Copiado ({idx}/{tot}): Audio {idx:02d}",
                 ))
 
             copiados = copiar_longos_para_pasta(
@@ -287,7 +239,7 @@ def run_pipeline(
                     done=done_cumulativo,
                     total=tot,
                     phase="transcribing",
-                    message=msg if msg else f"[{i}/{tot}] Processando: {caminho.name}",
+                    message=msg if msg else f"[{i}/{tot}] Processando: Audio {i:02d}",
                 ))
 
             inseridos, ja_existentes = salvar_no_banco(
@@ -310,8 +262,45 @@ def run_pipeline(
                 message=f"Transcrição finalizada: {inseridos} registro(s) processado(s){detalhes_existentes}.",
             ))
 
+            # 4.5) Revisão e inserção no banco
+            total_copiados = len(copiados)
+
+            for idx, (caminho, _) in enumerate(copiados, 1):
+                if cancel.is_set():
+                    break
+
+                rotulo_audio = f"Audio {idx:02d}"
+                queue.put_event(ProgressEvent(
+                    done=idx - 1, total=total_copiados, phase="reviewing",
+                    message=f"[{idx}/{total_copiados}] Revisando transcrição: {rotulo_audio} ...",
+                ))
+
+                gerar_revisao_transcricao(caminho.name, rotulo_audio=rotulo_audio)
+                time.sleep(1.2)
+
+            if cancel.is_set():
+                _limpar_temporarios()
+                queue.put_event(DoneEvent(
+                    exit_code=0,
+                    summary=f"Cancelado durante a revisão ({inseridos} registro(s) inserido(s)).",
+                ))
+                return
+
+            queue.put_event(ProgressEvent(
+                done=total_copiados, total=total_copiados, phase="reviewing",
+                message="Revisão das transcrições finalizada.",
+            ))
+
             # 5) Exclusão das pastas temporárias geradas
+            queue.put_event(ProgressEvent(
+                done=0, total=1, phase="cleanup",
+                message="Limpando arquivos temporários ...",
+            ))
             _limpar_temporarios()
+            queue.put_event(ProgressEvent(
+                done=1, total=1, phase="cleanup",
+                message="Limpeza concluída.",
+            ))
             queue.put_event(DoneEvent(
                 exit_code=0,
                 summary=f"{inseridos} registro(s) inserido(s) com transcrição{detalhes_existentes}.",

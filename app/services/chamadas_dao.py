@@ -67,3 +67,56 @@ def inserir_registro_chamada(
         return resultado[0]
 
     return None
+
+def buscar_transcricao(
+    cur: psycopg.Cursor,
+    log: str
+) -> str | None:
+    """ Busca a transcricao na coluna transcricao do banco de dados """
+    cur.execute(
+        """
+        SELECT transcricao FROM registro_chamadas 
+        WHERE log = %s 
+        LIMIT 1
+        """,
+        (log,)
+    )
+    resultado = cur.fetchone()
+    return resultado[0] if resultado else None
+
+
+def verificar_coluna_revisao(
+    cur: psycopg.Cursor,
+    log: str
+) -> bool | None:
+    """ Verifica se a coluna de revisão está vazia no BD """
+    cur.execute(
+        """
+        SELECT revisao FROM registro_chamadas 
+        WHERE log = %s 
+        LIMIT 1
+        """,
+        (log,)
+    )
+    resultado = cur.fetchone()
+    return resultado[0] if resultado else None
+
+
+def inserir_revisao(
+    cur: psycopg.Cursor,
+    log: str,
+    revisao: str
+) -> str | None:
+    """ Insere a revisao na coluna revisao do banco de dados """
+    cur.execute(
+        """
+        UPDATE registro_chamadas
+        SET revisao = %s
+        WHERE log = %s
+        RETURNING revisao
+        """,
+        (revisao, log),
+    )
+    resultado = cur.fetchone()
+    
+    return resultado[0] if resultado else None

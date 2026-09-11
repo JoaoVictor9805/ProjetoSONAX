@@ -59,7 +59,7 @@ class ProgressEvent:
     """
     done: int | float
     total: int | float
-    phase: str = ""   # "scanning" | "classifying" | "copying" | "transcribing" | "inserting"
+    phase: str = ""   # "scanning" | "classifying" | "copying" | "transcribing" | "inserting" | "reviewing" | "cleanup"
     message: str | None = None
 
 

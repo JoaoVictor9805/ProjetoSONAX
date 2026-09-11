@@ -105,11 +105,11 @@ class App(ctk.CTk):
         ).pack(anchor="w")
 
         instrucoes = (
-            "1.  Clique em Procurar e selecione a pasta descompactada com os\n "
-            "    arquivos de áudio .wav **ou** um arquivo .zip/.rar com a pasta.\n"
+            "1.  Clique em Procurar e selecione a pasta descompactada com os arquivos de áudio .wav **ou** um arquivo .zip/.rar com a pasta.\n"
             "2.  Você pode enviar a pasta geral ou especificar conforme seu escopo.\n"
             "3.  Quando o botão Enviar ficar disponível, clique nele para iniciar.\n"
             "4.  Acompanhe o progresso pelo log e pela barra abaixo.\n"
+            "\n"
             "obs. Não altere o nome dos arquivos ou pastas antes de enviar"
         )
         
@@ -222,14 +222,42 @@ class App(ctk.CTk):
         self._log.pack(fill="both", expand=True, padx=20, pady=(0, 4))
         self._log.configure(state="disabled")
 
-    def _build_status(self) -> None:
-        self._status = ctk.CTkLabel(
+    def _build_log_dev_button(self) -> None:
+        self._log_dev_button = ctk.CTkLabel(
             self,
+            text="Log de desenvolvimento",
+            text_color="#3498db",
+            font=ctk.CTkFont(size=11, underline=True),
+            cursor="hand2",
+        )
+        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
+        self._log_dev_button.pack(side="right", padx=(0, 20), pady=(0, 8))
+
+    def _on_log_dev_button(self) -> None:
+        """Handler do botão de log de desenvolvimento."""
+        pass
+
+    def _build_status(self) -> None:
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.pack(fill="x", padx=20, pady=(4, 16))
+
+        self._status = ctk.CTkLabel(
+            footer,
             text="",
             anchor="w",
             font=ctk.CTkFont(size=13, weight="bold"),
         )
-        self._status.pack(fill="x", padx=20, pady=(4, 16))
+        self._status.pack(side="left", fill="x", expand=True)
+
+        self._log_dev_button = ctk.CTkLabel(
+            footer,
+            text="Log de desenvolvimento",
+            text_color="#3498db",
+            font=ctk.CTkFont(size=11, underline=True),
+            cursor="hand2",
+        )
+        self._log_dev_button.pack(side="right")
+        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
 
     # ----------------------------------------------------------------
     # Handlers dos botões
@@ -428,8 +456,10 @@ class App(ctk.CTk):
         #     scanning      0%   → 2%
         #     classifying   2%   → 5%
         #     copying       5%   → 10%
-        #     transcribing  10%  → 95%   (granular intra e inter arquivos)
-        #     inserting     95%  → 100%
+        #     transcribing  10%  → 80%   (granular intra e inter arquivos)
+        #     inserting     80%  → 83%
+        #     reviewing     83%  → 98%
+        #     cleanup       98%  → 100%
         step_pct = event.done / event.total
         fase = (event.phase or "").lower()
         if fase == "scanning":
@@ -442,13 +472,21 @@ class App(ctk.CTk):
             cumulativo = 0.05 + step_pct * 0.05
             contexto = "copiando  •  "
         elif fase == "transcribing":
-            cumulativo = 0.10 + step_pct * 0.85
+            cumulativo = 0.10 + step_pct * 0.70
             done_int = min(int(event.total), int(event.done) + 1 if event.done < event.total else int(event.total))
             total_int = int(event.total)
             contexto = f"{done_int}/{total_int} arquivos  •  "
         elif fase == "inserting":
-            cumulativo = 0.95 + step_pct * 0.05
+            cumulativo = 0.80 + step_pct * 0.03
             contexto = "gravando no banco  •  "
+        elif fase == "reviewing":
+            cumulativo = 0.83 + step_pct * 0.15
+            done_int = min(int(event.total), int(event.done) + 1 if event.done < event.total else int(event.total))
+            total_int = int(event.total)
+            contexto = f"revisando {done_int}/{total_int}  •  "
+        elif fase == "cleanup":
+            cumulativo = 0.98 + step_pct * 0.02
+            contexto = "limpando temporários  •  "
         else:
             cumulativo = step_pct
             contexto = ""

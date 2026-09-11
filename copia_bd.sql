@@ -20,6 +20,8 @@ CREATE TABLE registro_chamadas (
 	foreign key (agente_nome) references origem(agente_nome)
 );
 
+ALTER TABLE registro_chamadas ADD COLUMN revisao TEXT;
+
 TRUNCATE TABLE origem CASCADE;
 TRUNCATE TABLE registro_chamadas;
 DROP TABLE registro_chamadas, origem CASCADE;
