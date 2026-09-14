@@ -505,8 +505,10 @@ class App(ctk.CTk):
         #     copying       5%   → 10%
         #     transcribing  10%  → 80%   (granular intra e inter arquivos)
         #     inserting     80%  → 83%
-        #     reviewing     83%  → 98%
+        #     reviewing     83%  → 91%
+        #     analyzing     91%  → 98%
         #     cleanup       98%  → 100%
+        
         step_pct = event.done / event.total
         fase = (event.phase or "").lower()
         if fase == "scanning":
@@ -527,10 +529,21 @@ class App(ctk.CTk):
             cumulativo = 0.80 + step_pct * 0.03
             contexto = "gravando no banco  •  "
         elif fase == "reviewing":
-            cumulativo = 0.83 + step_pct * 0.15
-            done_int = min(int(event.total), int(event.done) + 1 if event.done < event.total else int(event.total))
+            cumulativo = 0.83 + step_pct * 0.08
+            done_int = min(
+                int(event.total),
+                int(event.done) + 1 if event.done < event.total else int(event.total)
+            )
             total_int = int(event.total)
             contexto = f"revisando {done_int}/{total_int}  •  "
+        elif fase == "analyzing":
+            cumulativo = 0.91 + step_pct * 0.07
+            done_int = min(
+                int(event.total),
+                int(event.done) + 1 if event.done < event.total else int(event.total)
+            )
+            total_int = int(event.total)
+            contexto = f"analisando {done_int}/{total_int}  •  "
         elif fase == "cleanup":
             cumulativo = 0.98 + step_pct * 0.02
             contexto = "limpando temporários  •  "

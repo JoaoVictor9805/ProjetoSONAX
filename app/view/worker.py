@@ -36,8 +36,10 @@ from app.services.script import (
     salvar_no_banco,
     filtrar_por_qualidade_audio,
     deletar_pasta,
-    gerar_revisao_transcricao
+    gerar_revisao_transcricao,
+    gerar_analise_revisao
 )
+
 from app.services.transcrever import TranscricaoCancelada
 from app.view.events import DoneEvent, EventQueue, LogEvent, ProgressEvent
 from app.view.stream import redirect_stdio
@@ -303,6 +305,44 @@ def run_pipeline(
             queue.put_event(ProgressEvent(
                 done=total_copiados, total=total_copiados, phase="reviewing",
                 message="Revisão das transcrições finalizada.",
+            ))
+
+            # 4.75) Realizar análise com IA
+            for idx, (caminho, _) in enumerate(copiados, 1):
+                if cancel.is_set():
+                    break
+
+                rotulo_audio = _rotular(idx, caminho)
+
+                queue.put_event(ProgressEvent(
+                    done = idx - 1,
+                    total = total_copiados,
+                    phase="analyzing",
+                    message= f"[{idx}/{total_copiados}] Analisando ligação: {rotulo_audio} ...",
+                    path=caminho.name,
+                ))
+
+                gerar_analise_revisao(
+                    caminho.name,
+                    rotulo_audio=rotulo_audio
+                )
+                
+                time.sleep(1.2)
+
+
+            if cancel.is_set():
+                _limpar_temporarios()
+                queue.put_event(DoneEvent(
+                    exit_code=0,
+                    summary=f"Cancelado durante a análise ({inseridos} registro(s) inserido(s)).",
+                ))
+                return
+
+            queue.put_event(ProgressEvent(
+                done=total_copiados,
+                total=total_copiados,
+                phase="analyzing",
+                message="Análise das ligações finalizada.",
             ))
 
             # 5) Exclusão das pastas temporárias geradas

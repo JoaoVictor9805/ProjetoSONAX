@@ -4,6 +4,7 @@ Acesso a dados (INSERTs/SELECTs) das tabelas `origem` e `registro_chamadas`.
 Mantém todo SQL isolado do resto do script.
 """
 
+from typing_extensions import Tuple
 from datetime import datetime
 from datetime import date
 
@@ -120,3 +121,67 @@ def inserir_revisao(
     resultado = cur.fetchone()
     
     return resultado[0] if resultado else None
+
+def buscar_revisao(
+    cur: psycopg.Cursor,
+    log: str
+) -> str | None:
+    """ Busca a revisão na coluna revisao do banco de dados """
+    cur.execute(
+        """
+        SELECT revisao FROM registro_chamadas 
+        WHERE log = %s 
+        LIMIT 1
+        """,
+        (log,)
+    )
+    resultado = cur.fetchone()
+    return resultado[0] if resultado else None
+
+
+def inserir_analise(
+    cur: psycopg.Cursor,
+    log: str,
+    nota: int,
+    resumo: str
+) -> Tuple | None:
+    """ Insere a análise na coluna analise do banco de dados """
+    cur.execute(
+        """
+        UPDATE registro_chamadas
+        SET nota = %s, resumo = %s
+        WHERE log = %s
+        RETURNING nota, resumo
+        """,
+
+        (nota, resumo, log),
+    )
+
+    resultado = cur.fetchone()
+    return resultado
+
+def verificar_coluna_analise(
+    cur: psycopg.Cursor,
+    log: str
+) -> bool:
+
+    """Verifica se a análise da ligação já foi realizada."""
+
+    cur.execute(
+        """
+        SELECT nota, resumo
+        FROM registro_chamadas
+        WHERE log = %s
+        LIMIT 1
+        """,
+        (log,)
+    )
+
+    resultado = cur.fetchone()
+
+    if not resultado:
+        return False
+
+    nota, resumo = resultado
+
+    return nota is not None and resumo is not None

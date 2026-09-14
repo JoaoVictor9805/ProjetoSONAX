@@ -49,6 +49,11 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 ==============================================================================
     """
 
+from aiohttp import resolver
+from typing_extensions import Tuple
+from aiohttp import log
+from app.services.analise_final_AI import analisar_ligacao
+from app.services.chamadas_dao import buscar_revisao
 from app.services.revisao import revisar_texto
 from app.services.qualidade_audio import analisar_audio
 from app.services.qualidade_audio import classificar_qualidade_audio
@@ -72,7 +77,9 @@ from app.services.chamadas_dao import (
     registro_ja_existe,
     buscar_transcricao,
     verificar_coluna_revisao,
-    inserir_revisao
+    inserir_revisao,
+    verificar_coluna_analise,
+    inserir_analise
 )
 from app.services.parses import (
     parse_data,
@@ -270,7 +277,7 @@ def salvar_no_banco(
         with conectar() as cur:
             if registro_ja_existe(cur, caminho.name):
                 ja_existentes += 1
-                print(f"  [aviso] {rotulo_audio} ({caminho.name}) já registrado no banco — pulando.")
+                print(f"  [aviso] {rotulo_audio} já registrado no banco — pulando.")
                 _notificar_progresso(
                     on_progress,
                     i,
@@ -409,8 +416,11 @@ def salvar_no_banco(
 
 def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str | None:
     """Gere a revisão a partir da coluna de transcrição, utilizando um modelo de IA"""
+    nome_exibicao = rotulo_audio or log
+
     with conectar() as cur:
         if verificar_coluna_revisao(cur, log):
+            print(f"  [revisão] {nome_exibicao} já existe no banco (pulado)")
             return None
         transcricao = buscar_transcricao(cur, log)
 
@@ -420,14 +430,44 @@ def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str 
     try:
         revisao = revisar_texto(transcricao)
     except Exception as e:
-        nome_exibicao = rotulo_audio or log
         print(f"  [revisão] Falha ao revisar transcrição de {nome_exibicao}: {e}")
         return None
 
     with conectar() as cur:
         return inserir_revisao(cur, log, revisao)
         
+def gerar_analise_revisao(log: str, rotulo_audio: str | None = None) -> Tuple | None:
+    """Gera análise de IA a partir da revisão da transcrição dos áudios"""
+    with conectar() as cur:
 
+        nome_exibicao = rotulo_audio or log
+
+        if verificar_coluna_revisao(cur, log):
+            revisao = buscar_revisao(cur, log)
+
+            if revisao is None:
+                return None
+
+            # Função para verificar presença no banco
+            if verificar_coluna_analise(cur, log):
+                print(f"  [análise] {nome_exibicao} já existe no banco (pulado)")
+                return None
+            try:
+                analise_IA = analisar_ligacao(revisao)
+
+                nota = analise_IA["nota"]
+                resumo = analise_IA["resumo"]
+
+            except Exception as e:
+                nome_exibicao = rotulo_audio or log
+                print(f"  [Análise Final] Falha ao realizar análise final da ligação {nome_exibicao}: {e}")
+                return None
+
+            with conectar() as cur:
+                return inserir_analise(cur, log, nota, resumo)
+
+        else:
+            return None
 
 def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) -> None:
     """Deleta a pasta de destino especificada e todo o seu conteúdo recursivamente."""
