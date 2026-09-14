@@ -43,21 +43,21 @@ select * from registro_chamadas;
 
 CREATE TABLE avaliacao_ia (
 	id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	registro_chamada_id INT not null,
+	registro_chamadas_id VARCHAR(2) not null,
 	nota_final INT not null,
 	feedback_geral TEXT not null,
 	data_avaliacao date not null,
-	modelo_ia varchar(50) not null
+	modelo_ia varchar(50) not null,
 
-	foreign key(registro_chamadas_id) references registro_chamadas(id)
+	foreign key (registro_chamadas_id) references registro_chamadas(id)
 );
 
 CREATE TABLE avaliacao_criterio (
 	id_av_por_criterio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 	id_avaliacao INT not null,
-	criterio ENUM('chamar pelo nome', 'agir com empatia', 'ouvir com atencao', 'eficiencia operacional', 'conexao humana', 'surpreender'),
-	nota_criterio INT not null,
-	justificativa_criterio TEXT
+	criterio ENUM('chamar pelo nome', 'agir com empatia', 'ouvir com atencao', 'eficiencia operacional', 'surpreender'),
+	nota_criterio VARCHAR(2) not null,
+	justificativa_criterio TEXT,
 	
-	foreign key(id_avaliacao) references avaliacao_ia(id_avaliacao)
+	foreign key (id_avaliacao) references avaliacao_ia(id_avaliacao)
 );

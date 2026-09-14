@@ -26,3 +26,6 @@ dados = {
     **dados_transcricao,
     **dados_whisper
 }
+
+git fetch origin
+git reset --hard origin/main

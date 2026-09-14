@@ -32,11 +32,10 @@ chain = prompt | client | JsonOutputParser()
 def analisar_ligacao(ligacao: str) -> dict:
     return chain.invoke({"ligacao": ligacao})
 
-"""
+
 if __name__ == "__main__":
 
     LIGACAO_TESTE = "Olá tudo bem? Como você está? Consegue me passar as informações nome e cpf por gentileza"
 
     resultado = analisar_ligacao(LIGACAO_TESTE)
     print(repr(resultado))
-"""

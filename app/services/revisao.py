@@ -17,7 +17,7 @@ client = ChatNVIDIA(
     top_p=0.95,
     max_completion_tokens=16384,
     seed=42,
-    timeout=120
+    timeout=600
 )
 
 SYSTEM_PROMPT = """
@@ -47,8 +47,6 @@ def revisar_texto(transcricao: str) -> str:
 
 if __name__ == "__main__":
 
-    """
-    TEXTO_TESTE = "Olá tudo tudo tudo tudo tudo tudo tudo tudo tudo bem? Aqui é o João da Salavinha Next"
+    TEXTO_TESTE = "Escritório Sul-América agradece sua ligação. Digite quatro para despassante. Cinco contabilidade. Seis. Departamento pessoal. Ou aguarde para ser atendido. Sul-América. Olá, boa tarde. Tudo bem? Tudo. Que bom. Eu falo com quem, príncipe, beleza? Andréia. Andréia, eu me chamo Mayra. Fala aqui das empresas Falavinia Next. Eu gostaria de conversar com vocês aí, de escritório, a respeito de uma proposta de parceria. Se ação seria contigo mesmo, ou tem outra pessoa aí com quem eu posso tratar? Não tenho sentido. Acredito que você ainda não ouviu falar referente a Falavinia, certo? Não. Nós somos uma empresa que estamos há quase 50 anos aí no mercado, uma empresa de assessoria tributária, mais em específico ali na parte de recuperação de créditos tributários. E hoje nós buscamos por parceiros estratégicos, como contadores, advogados, pessoas que têm um grande network em tanto com empresas quanto com empresários. E aí, o intuito da minha ligação seria a gente andar ali 10 minutos contigo, nessa semana ou na próxima, para a gente poder apresentar esse canal de parcerias para vocês. E vocês avaliarem se faz sentido, se a gente tem alguma sinergia ali, sabe? Você não pode passar por e-mail? Consigo sim. Qual que seria o e-mail para a gente, beleza? Tá bom. E-S-L-A-E-S-U-L-I-A-N Arrota bom. Ponto com ponto B? Isso. Perfeito. Então, responsável é E-S-L-A? Isso? Não. É o nome do território. Ah, tá. Muito obrigada, viu? Tá bom. Se lente e tache. Tchau, tchau."
     resultado = revisar_texto(TEXTO_TESTE)
     print(resultado)
-    """

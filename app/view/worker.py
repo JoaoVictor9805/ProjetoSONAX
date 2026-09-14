@@ -48,7 +48,7 @@ from app.view.stream import redirect_stdio
 def run_pipeline(
     entrada: Path,
     queue: EventQueue,
-    cancel: threading.Event,  # noqa: ARG001 — reservado para cancelamento futuro
+    cancel: threading.Event, 
     dev_event: threading.Event | None = None,
 ) -> None:
     """Executa o pipeline completo. Enfileira eventos; termina com `DoneEvent`.
@@ -291,8 +291,9 @@ def run_pipeline(
                     path=caminho.name,
                 ))
 
-                gerar_revisao_transcricao(caminho.name, rotulo_audio=rotulo_audio)
-                time.sleep(1.2)
+                gerar_revisao_transcricao(caminho.name, rotulo_audio=rotulo_audio, cancel=cancel)
+                if cancel.wait(1.2):
+                    break
 
             if cancel.is_set():
                 _limpar_temporarios()
@@ -324,10 +325,12 @@ def run_pipeline(
 
                 gerar_analise_revisao(
                     caminho.name,
-                    rotulo_audio=rotulo_audio
+                    rotulo_audio=rotulo_audio,
+                    cancel=cancel,
                 )
                 
-                time.sleep(1.2)
+                if cancel.wait(1.2):
+                        break
 
 
             if cancel.is_set():

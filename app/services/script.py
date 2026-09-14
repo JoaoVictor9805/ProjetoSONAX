@@ -414,9 +414,13 @@ def salvar_no_banco(
 
     return inseridos, ja_existentes
 
-def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str | None:
+def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None, ) -> str | None:
     """Gere a revisão a partir da coluna de transcrição, utilizando um modelo de IA"""
     nome_exibicao = rotulo_audio or log
+
+    if cancel is not None and cancel.is_set():
+            print(f"  [cancelado] revisão de {nome_exibicao} não iniciada.")
+            return None
 
     with conectar() as cur:
         if verificar_coluna_revisao(cur, log):
@@ -424,6 +428,10 @@ def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str 
             return None
         transcricao = buscar_transcricao(cur, log)
 
+    if cancel is not None and cancel.is_set():
+        print(f"  [cancelado] revisão de {nome_exibicao} abortada antes da chamada de IA.")
+        return None
+    
     if not transcricao or not transcricao.strip():
         return None
 
@@ -436,16 +444,21 @@ def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None) -> str 
     with conectar() as cur:
         return inserir_revisao(cur, log, revisao)
         
-def gerar_analise_revisao(log: str, rotulo_audio: str | None = None) -> Tuple | None:
+def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None,) -> Tuple | None:
     """Gera análise de IA a partir da revisão da transcrição dos áudios"""
     with conectar() as cur:
 
         nome_exibicao = rotulo_audio or log
 
+        if cancel is not None and cancel.is_set():
+            print(f"  [cancelado] análise de {nome_exibicao} não iniciada.")
+            return None
         if verificar_coluna_revisao(cur, log):
             revisao = buscar_revisao(cur, log)
 
             if revisao is None:
+                print(f"  [análise] {nome_exibicao} não possui revisão de transcrição para analisar (pulado)")
+
                 return None
 
             # Função para verificar presença no banco
