@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from app.config.prompts import prompt_analise
 
 load_dotenv()
 
@@ -10,20 +11,18 @@ from langchain_core.output_parsers import JsonOutputParser
 
 
 client = ChatNVIDIA(
-  model="deepseek-ai/deepseek-v4-flash-0731",
-  api_key=os.getenv("NVIDIA_API_KEY"),
-  temperature=1,
-  top_p=0.95,
-  max_completion_tokens=16384,
-  seed=42,
+    model="deepseek-ai/deepseek-v4-flash-0731",
+    api_key=os.getenv("NVIDIA_API_KEY"),
+    temperature=1,
+    top_p=0.95,
+    max_completion_tokens=16384,
+    seed=42,
+    timeout=600
 )
 
-SYSTEM_PROMPT = """Você avalia ligações de call center.
-Responda SOMENTE com um JSON válido, sem crases, sem texto antes ou depois, no formato:
-{{"nota": <número de 0 a 10>, "resumo": "<string curta>"}}"""
 
 prompt = ChatPromptTemplate.from_messages([
-  ("system", SYSTEM_PROMPT),
+  ("system", prompt_analise),
   ("user", "TRANSCRIÇÃO DA LIGAÇÂO A SER AVALIADA: \n \n{ligacao}")
 ])
 
