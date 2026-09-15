@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from app.config.prompts import prompt_revisao
+from app.config.prompts2 import prompt_revisao
 
 load_dotenv()
 
