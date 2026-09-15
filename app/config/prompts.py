@@ -325,36 +325,36 @@ Retorne SOMENTE um JSON válido, sem markdown, sem explicações antes ou depois
 
 O JSON deve seguir exatamente esta estrutura:
 
-{
+{{
   "nota_final": 0,
   "feedback_geral": "string",
   "criterios": [
-    {
+    {{
       "criterio": "chamar pelo nome",
       "nota_criterio": 0,
       "justificativa_criterio": "string"
-    },
-    {
+    }},
+    {{
       "criterio": "agir com empatia",
       "nota_criterio": 0,
       "justificativa_criterio": "string"
-    },
-    {
+    }},
+    {{
       "criterio": "ouvir com atencao",
       "nota_criterio": 0,
       "justificativa_criterio": "string"
-    },
-    {
+    }},
+    {{
       "criterio": "eficiencia operacional",
       "nota_criterio": 0,
       "justificativa_criterio": "string"
-    },
-    {
+    }},
+    {{
       "criterio": "surpreender",
       "nota_criterio": 0,
       "justificativa_criterio": "string"
-    }
+    }}
   ]
-}
+}}
 
 """

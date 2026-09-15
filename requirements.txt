@@ -1,6 +1,7 @@
 customtkinter==6.0.0
 langchain-core==1.6.2
 langchain-google-genai==4.4.0
+langchain-openrouter==0.2.8
 librosa==1.0.0
 numpy==2.5.2
 faster-whisper==1.2.1

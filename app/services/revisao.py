@@ -4,20 +4,14 @@ from app.config.prompts import prompt_revisao
 
 load_dotenv()
 
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-
-
-client = ChatNVIDIA(
-    model="deepseek-ai/deepseek-v4-flash-0731", 
-    api_key=os.getenv("NVIDIA_API_KEY"),
-    temperature=1,
-    top_p=0.95,
-    max_completion_tokens=16384,
-    seed=42,
-    timeout=120
+client = ChatGoogleGenerativeAI(
+    model="gemini-3.1-flash-lite",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+    max_output_tokens=4096,
 )
 
 prompt = ChatPromptTemplate.from_messages([

@@ -78,7 +78,7 @@ from app.services.chamadas_dao import (
     buscar_transcricao,
     verificar_coluna_revisao,
     inserir_revisao,
-    verificar_coluna_analise,
+    verificar_tabela_analise,
     inserir_analise
 )
 from app.services.parses import (
@@ -444,7 +444,7 @@ def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None, cancel:
     with conectar() as cur:
         return inserir_revisao(cur, log, revisao)
         
-def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None,) -> Tuple | None:
+def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None,) -> int | None:
     """Gera análise de IA a partir da revisão da transcrição dos áudios"""
     with conectar() as cur:
 
@@ -462,14 +462,15 @@ def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: thr
                 return None
 
             # Função para verificar presença no banco
-            if verificar_coluna_analise(cur, log):
+            if verificar_tabela_analise(cur, log):
                 print(f"  [análise] {nome_exibicao} já existe no banco (pulado)")
                 return None
             try:
                 analise_IA = analisar_ligacao(revisao)
 
-                nota = analise_IA["nota"]
-                resumo = analise_IA["resumo"]
+                nota_final = analise_IA["nota_final"]
+                feedback_geral = analise_IA["feedback_geral"]
+                criterios = analise_IA["criterios"]
 
             except Exception as e:
                 nome_exibicao = rotulo_audio or log
@@ -477,7 +478,7 @@ def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: thr
                 return None
 
             with conectar() as cur:
-                return inserir_analise(cur, log, nota, resumo)
+                return inserir_analise(cur, log, nota_final, feedback_geral, criterios)
 
         else:
             return None

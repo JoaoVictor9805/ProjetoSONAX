@@ -29,3 +29,6 @@ dados = {
 
 git fetch origin
 git reset --hard origin/main
+
+python -m app.services.analise_final_AI
+python -m app.services.revisao

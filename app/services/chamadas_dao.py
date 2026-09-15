@@ -4,6 +4,9 @@ Acesso a dados (INSERTs/SELECTs) das tabelas `origem` e `registro_chamadas`.
 Mantém todo SQL isolado do resto do script.
 """
 
+from aiohttp import client_middleware_digest_auth
+from typing_extensions import List
+from xml.etree import ElementTree
 from typing_extensions import Tuple
 from datetime import datetime
 from datetime import date
@@ -139,28 +142,7 @@ def buscar_revisao(
     return resultado[0] if resultado else None
 
 
-def inserir_analise(
-    cur: psycopg.Cursor,
-    log: str,
-    nota: int,
-    resumo: str
-) -> Tuple | None:
-    """ Insere a análise na coluna analise do banco de dados """
-    cur.execute(
-        """
-        UPDATE registro_chamadas
-        SET nota = %s, resumo = %s
-        WHERE log = %s
-        RETURNING nota, resumo
-        """,
-
-        (nota, resumo, log),
-    )
-
-    resultado = cur.fetchone()
-    return resultado
-
-def verificar_coluna_analise(
+def verificar_tabela_analise(
     cur: psycopg.Cursor,
     log: str
 ) -> bool:
@@ -169,9 +151,9 @@ def verificar_coluna_analise(
 
     cur.execute(
         """
-        SELECT nota, resumo
-        FROM registro_chamadas
-        WHERE log = %s
+        SELECT id_avaliacao
+        FROM avaliacao_ia
+        WHERE registro_chamadas_log = %s
         LIMIT 1
         """,
         (log,)
@@ -182,6 +164,75 @@ def verificar_coluna_analise(
     if not resultado:
         return False
 
-    nota, resumo = resultado
+    return True
 
-    return nota is not None and resumo is not None
+
+def inserir_analise(
+    cur: psycopg.Cursor,
+    log: str,
+    nota_final: int,
+    feedback_geral: str,
+    criterios: List,
+) -> int | None:
+
+    cur.execute(
+        """
+        INSERT INTO avaliacao_ia (
+            registro_chamadas_log,
+            nota_final,
+            feedback_geral,
+            data_avaliacao,
+            modelo_ia
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id_avaliacao
+        """,
+        (
+            log,
+            nota_final,
+            feedback_geral,
+            date.today(),
+            "gemini-3.1-flash-lite"
+        ),
+    )
+
+    resultado = cur.fetchone()
+
+    if not resultado:
+        return None
+
+    id_avaliacao = resultado[0]
+
+    criterios_inseridos = _inserir_criterio(cur, id_avaliacao, criterios)
+
+    if not criterios_inseridos:
+        return None
+
+    return id_avaliacao
+
+def _inserir_criterio(
+    cur: psycopg.Cursor,
+    id_avaliacao: int,
+    criterios: List
+) -> bool:
+
+    for criterio in criterios:
+        cur.execute(
+            """
+            INSERT INTO avaliacao_criterio (
+                id_avaliacao,
+                criterio,
+                nota_criterio,
+                justificativa_criterio
+            )
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                id_avaliacao,
+                criterio["criterio"],
+                criterio["nota_criterio"],
+                criterio["justificativa_criterio"]
+            )
+        )
+
+    return True
