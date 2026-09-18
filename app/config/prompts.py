@@ -515,7 +515,12 @@ REGRAS DE AVALIAÇÃO:
 - Não inclua critérios diferentes dos cinco definidos acima.
 - Não altere os nomes dos critérios.
 - Não inclua nenhuma informação adicional além do JSON solicitado.
-- [IMPORTANTE] A Etiqueta de quem pertence determinado momento do áudio pode estar invertida, apresentando cliente quando deveria apresentar agente, por exemplo. Analise se as etiquetas fazem sentido, se não fizerem: CONSIDERE O QUE MAIS FAZ SENTIDO DE ACORDO COM O CONTEXTO, para deixar a análise o mais correta possível.
+- Os rótulos [Agente (Falavinha)] / [Cliente (Nome da empresa)] / [URA] já
+foram determinados na etapa de revisão, com acesso a informações que você
+não tem aqui (diarização acústica e o nome real do atendente). Trate esses
+rótulos como corretos e definitivos. NÃO reatribua uma fala a outro
+interlocutor com base no conteúdo da frase, mesmo que pareça mais coerente
+com o outro papel.
 
 6. URA
 
