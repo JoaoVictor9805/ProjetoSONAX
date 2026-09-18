@@ -61,6 +61,7 @@ def inserir_registro_chamada(
         INSERT INTO registro_chamadas
             (ramal, agente_nome, data_ligacao, log, transcricao)
         VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (log) DO NOTHING
         RETURNING id
         """,
         (ramal, agente_nome, data_ligacao, log_arquivo, transcricao),
@@ -185,6 +186,7 @@ def inserir_analise(
             modelo_ia
         )
         VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (registro_chamadas_log) DO NOTHING
         RETURNING id_avaliacao
         """,
         (

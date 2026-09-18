@@ -66,25 +66,27 @@ def run_pipeline(
     def _limpar_temporarios() -> None:
         """Exclui com segurança as pastas temporárias geradas no processo."""
         if destino is not None and destino.exists():
-            queue.put_event(LogEvent(f"Excluindo pasta temporária: {destino} ..."))
+            queue.put_event(LogEvent(f"[INFO] Excluindo pasta temporária: {destino} ..."))
             deletar_pasta(destino)
         if pasta_extracao is not None and pasta_extracao.exists():
-            queue.put_event(LogEvent(f"Excluindo pasta temporária extraída: {pasta_extracao} ..."))
+            queue.put_event(LogEvent(f"[INFO] Excluindo pasta temporária extraída: {pasta_extracao} ..."))
             deletar_pasta(pasta_extracao)
 
     def _rotular(i: int, caminho: Path) -> str:
-        """Rótulo de exibição do arquivo.
+        """Rótulo de exibição do arquivo — sempre o genérico "Audio NN".
 
-        Modo dev → nome real do arquivo; caso contrário o rótulo
-        genérico "Audio NN" (comportamento original).
+        A troca para o nome real (quando o Log Dev está ligado) é feita
+        inteiramente em `app.py`, a partir do `path` que viaja junto no
+        `ProgressEvent`. Decidir aqui deixaria o texto congelado no
+        formato de quando foi impresso, impedindo o toggle de reverter.
         """
-        return caminho.name if dev_event is not None and dev_event.is_set() else f"Audio {i:02d}"
+        return f"Audio {i:02d}"
 
     try:
         # Se a GUI passou um .zip ou .rar, extrai na mesma pasta do arquivo.
         if eh_arquivo_compactado(entrada):
             queue.put_event(LogEvent(
-                f"Descompactando {entrada.name} ...",
+                f"[INFO] Descompactando {entrada.name} ...",
                 stream="out",
             ))
             try:
@@ -92,17 +94,24 @@ def run_pipeline(
             except DescompactacaoError as e:
                 _limpar_temporarios()
                 queue.put_event(LogEvent(
-                    f"[ERRO] Falha ao descompactar arquivo: {e}", stream="err",
+                    "[ERRO] Não foi possível descompactar o arquivo enviado.",
+                    stream="err",
+                ))
+                queue.put_event(LogEvent(
+                    f"{type(e).__name__}: {e}", stream="err", dev_only=True,
+                ))
+                queue.put_event(LogEvent(
+                    traceback.format_exc(), stream="err", dev_only=True,
                 ))
                 queue.put_event(DoneEvent(
                     exit_code=1,
                     summary="",
-                    error=f"Arquivo compactado inválido: {e}",
+                    error=f"[AVISO] Arquivo compactado inválido: {e}",
                 ))
                 return
                 
             queue.put_event(LogEvent(
-                f"Extraído em: {diretorio}", stream="out",
+                f"[INFO] Extraído em: {diretorio}", stream="out",
             ))
         else:
             diretorio = entrada
@@ -113,7 +122,7 @@ def run_pipeline(
         except KeyError as e:
             _limpar_temporarios()
             queue.put_event(LogEvent(
-                f"[ERRO] Variável de ambiente ausente: {e}. "
+                f"[ERRO] Variável de ambiente ausente \n. "
                 f"Verifique o arquivo .env antes de continuar.",
                 stream="err",
             ))
@@ -133,20 +142,20 @@ def run_pipeline(
             # 1) Varredura
             queue.put_event(ProgressEvent(
                 done=0, total=1, phase="scanning",
-                message="Varrendo arquivos .wav ...",
+                message="[INFO] Varrendo arquivos .wav ...",
             ))
             wavs = coletar_wavs(diretorio)
             queue.put_event(ProgressEvent(
                 done=1, total=1, phase="scanning",
-                message=f"Varredura concluída: {len(wavs)} arquivo(s) .wav encontrado(s).",
+                message=f"[INFO] Varredura concluída: {len(wavs)} arquivo(s) .wav encontrado(s).",
             ))
 
             if not wavs:
                 _limpar_temporarios()
-                queue.put_event(LogEvent("Nenhum .wav encontrado no diretório."))
+                queue.put_event(LogEvent("[INFO] Nenhum .wav encontrado no diretório."))
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary="Nenhum .wav encontrado.",
+                    summary="[INFO] Nenhum .wav encontrado.",
                 ))
                 return
 
@@ -154,31 +163,31 @@ def run_pipeline(
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary="Cancelado antes de iniciar classificação.",
+                    summary="[CANCELADO] Cancelado antes de iniciar classificação.",
                 ))
                 return
 
             # 2) Classificação por duração
             queue.put_event(ProgressEvent(
                 done=0, total=1, phase="classifying",
-                message="Classificando arquivos por duração ...",
+                message="[INFO] Classificando arquivos por duração ...",
             ))
             longos, curtos, invalidos = classificar_wavs(wavs, cancel=cancel)
             queue.put_event(LogEvent(
-                f"Total: {len(wavs)}  •  >1min: {len(longos)}  •  "
+                f"[INFO] Total: {len(wavs)}  •  >1min: {len(longos)}  •  "
                 f"<=1min: {len(curtos)}  •  inválidos: {len(invalidos)}"
             ))
             queue.put_event(ProgressEvent(
                 done=1, total=1, phase="classifying",
-                message=f"Classificação concluída: {len(longos)} áudio(s) >1min elegível(is).",
+                message=f"[INFO] Classificação concluída: {len(longos)} áudio(s) >1min elegível(is).",
             ))
                     
             if not longos:
                 _limpar_temporarios()
-                queue.put_event(LogEvent("Nenhum áudio com mais de 1 minuto encontrado."))
+                queue.put_event(LogEvent("[AVISO] Nenhum áudio com mais de 1 minuto encontrado."))
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary="Nenhum áudio >1min encontrado.",
+                    summary="[AVISO] Nenhum áudio >1min encontrado.",
                 ))
                 return
 
@@ -186,32 +195,46 @@ def run_pipeline(
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary="Cancelado antes de iniciar cópia.",
+                    summary="[CANCELADO] Cancelado antes de iniciar cópia.",
                 ))
                 return
 
             # 2.5) Filtragem de qualidade de áudio
+            def on_quality_progress(idx: int, tot: int, p: Path) -> None:
+                # Evento "silencioso": não aparece como linha própria no
+                # log (quem já imprime as linhas visíveis é a própria
+                # filtrar_por_qualidade_audio, via print). Serve só para
+                # ensinar app.py._rotulos o mapa "Audio NN" -> nome real,
+                # do mesmo jeito que on_copy_progress faz para a cópia.
+                queue.put_event(ProgressEvent(
+                    done=1, total=1, phase="classifying",
+                    message=f"[INFO] {_rotular(idx, p)}",
+                    path=p.name,
+                    silent=True,
+                ))
+
             longos, rejeitados = filtrar_por_qualidade_audio(
                 longos, cancel=cancel, modo_dev=dev_event,
+                on_progress=on_quality_progress,
             )
             invalidos.extend(rejeitados)
             if rejeitados:
                 queue.put_event(LogEvent(
-                    f"[qualidade] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento."
+                    f"[AVISO] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento."
                 ))
 
             # 3) Cópia para a pasta destino
             destino = resolver_destino(diretorio)
-            queue.put_event(LogEvent(f"Pasta de destino: {destino}"))
+            queue.put_event(LogEvent(f"[INFO] Pasta de destino: {destino}"))
             queue.put_event(ProgressEvent(
                 done=0, total=len(longos), phase="copying",
-                message=f"Copiando {len(longos)} arquivo(s) para a pasta de trabalho ...",
+                message=f"[INFO] Copiando {len(longos)} arquivo(s) para a pasta de trabalho ...",
             ))
 
             def on_copy_progress(idx: int, tot: int, p: Path) -> None:
                 queue.put_event(ProgressEvent(
                     done=idx, total=tot, phase="copying",
-                    message=f"Copiado ({idx}/{tot}): {_rotular(idx, p)}",
+                    message=f"[INFO] Copiado ({idx}/{tot}): {_rotular(idx, p)}",
                     path=p.name,
                 ))
 
@@ -219,18 +242,18 @@ def run_pipeline(
                 longos, destino, cancel=cancel, on_progress=on_copy_progress,
             )
             queue.put_event(LogEvent(
-                f"{len(copiados)} arquivo(s) copiado(s) para: {destino}"
+                f"[INFO] {len(copiados)} arquivo(s) copiado(s) para: {destino}"
             ))
             queue.put_event(ProgressEvent(
                 done=len(copiados), total=len(copiados), phase="copying",
-                message=f"{len(copiados)} arquivo(s) copiado(s) com sucesso.",
+                message=f"[INFO] {len(copiados)} arquivo(s) copiado(s) com sucesso.",
             ))
 
             if cancel.is_set():
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary="Cancelado antes de iniciar transcrição.",
+                    summary="[CANCELADO] Cancelado antes de iniciar transcrição.",
                 ))
                 return
 
@@ -238,7 +261,7 @@ def run_pipeline(
             total = len(copiados)
             queue.put_event(ProgressEvent(
                 done=0, total=total, phase="transcribing",
-                message=f"Iniciando transcrição e gravação de {total} arquivo(s) ...",
+                message=f"[INFO] Iniciando transcrição e gravação de {total} arquivo(s) ...",
             ))
 
             def on_progress(
@@ -253,28 +276,28 @@ def run_pipeline(
                     done=done_cumulativo,
                     total=tot,
                     phase="transcribing",
-                    message=msg if msg else f"[{i}/{tot}] Processando: {_rotular(i, caminho)}",
+                    message=msg if msg else f"[INFO] [{i}/{tot}] Processando: {_rotular(i, caminho)}",
                     path=caminho.name,
                 ))
 
-            inseridos, ja_existentes = salvar_no_banco(
+            inseridos, ja_existentes, mapa_diarizacao = salvar_no_banco(
                 copiados, cancel=cancel, on_progress=on_progress, modo_dev=dev_event,
             )
 
-            detalhes_existentes = f" ({ja_existentes} já existente(s))" if ja_existentes > 0 else ""
+            detalhes_existentes = f" | [INFO] {ja_existentes} já existente(s)" if ja_existentes > 0 else ""
 
             if cancel.is_set():
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary=f"Cancelado após {inseridos} registro(s) "
-                            f"inserido(s) com transcrição{detalhes_existentes}.",
+                    summary=f"[CANCELADO] Cancelado após {inseridos} registro(s) "
+                            f"inserido(s) com transcrição {detalhes_existentes}.",
                 ))
                 return
 
             queue.put_event(ProgressEvent(
                 done=total, total=total, phase="inserting",
-                message=f"Transcrição finalizada: {inseridos} registro(s) processado(s){detalhes_existentes}.",
+                message=f"[INFO] Transcrição finalizada: {inseridos} registro(s) processado(s) {detalhes_existentes}.",
             ))
 
             # 4.5) Revisão e inserção no banco
@@ -287,11 +310,21 @@ def run_pipeline(
                 rotulo_audio = _rotular(idx, caminho)
                 queue.put_event(ProgressEvent(
                     done=idx - 1, total=total_copiados, phase="reviewing",
-                    message=f"[{idx}/{total_copiados}] Revisando transcrição: {rotulo_audio} ...",
+                    message=f"[INFO] [{idx}/{total_copiados}] Revisando transcrição: {rotulo_audio} ...",
                     path=caminho.name,
                 ))
 
-                gerar_revisao_transcricao(caminho.name, rotulo_audio=rotulo_audio, cancel=cancel)
+                dados_audio = mapa_diarizacao.get(caminho.name, {})
+                texto_diarizado = dados_audio.get("texto_diarizado")
+                agente_nome = dados_audio.get("agente_nome")
+
+                gerar_revisao_transcricao(
+                    caminho.name,
+                    texto_diarizado=texto_diarizado,
+                    agente_nome=agente_nome,
+                    rotulo_audio=rotulo_audio,
+                    cancel=cancel,
+                )
                 if cancel.wait(1.2):
                     break
 
@@ -299,13 +332,13 @@ def run_pipeline(
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary=f"Cancelado durante a revisão ({inseridos} registro(s) inserido(s)).",
+                    summary=f"[CANCELADO] Cancelado durante a revisão ({inseridos} registro(s) inserido(s)).",
                 ))
                 return
 
             queue.put_event(ProgressEvent(
                 done=total_copiados, total=total_copiados, phase="reviewing",
-                message="Revisão das transcrições finalizada.",
+                message="[INFO] Revisão das transcrições finalizada.",
             ))
 
             # 4.75) Realizar análise com IA
@@ -319,7 +352,7 @@ def run_pipeline(
                     done = idx - 1,
                     total = total_copiados,
                     phase="analyzing",
-                    message= f"[{idx}/{total_copiados}] Analisando ligação: {rotulo_audio} ...",
+                    message= f"[INFO] [{idx}/{total_copiados}] Analisando ligação: {rotulo_audio} ...",
                     path=caminho.name,
                 ))
 
@@ -337,7 +370,7 @@ def run_pipeline(
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary=f"Cancelado durante a análise ({inseridos} registro(s) inserido(s)).",
+                    summary=f"[CANCELADO] Cancelado durante a análise ({inseridos} registro(s) inserido(s)).",
                 ))
                 return
 
@@ -345,46 +378,52 @@ def run_pipeline(
                 done=total_copiados,
                 total=total_copiados,
                 phase="analyzing",
-                message="Análise das ligações finalizada.",
+                message="[INFO] Análise das ligações finalizada.",
             ))
 
             # 5) Exclusão das pastas temporárias geradas
             queue.put_event(ProgressEvent(
                 done=0, total=1, phase="cleanup",
-                message="Limpando arquivos temporários ...",
+                message="[INFO] Limpando arquivos temporários ...",
             ))
             _limpar_temporarios()
             queue.put_event(ProgressEvent(
                 done=1, total=1, phase="cleanup",
-                message="Limpeza concluída.",
+                message="[INFO] Limpeza concluída.",
             ))
             queue.put_event(DoneEvent(
                 exit_code=0,
-                summary=f"{inseridos} registro(s) inserido(s) com transcrição{detalhes_existentes}.",
+                summary=f"[INFO] {inseridos} registro(s) inserido(s) com transcrição {detalhes_existentes}.",
             ))
 
     except FileNotFoundError as e:
         _limpar_temporarios()
-        queue.put_event(LogEvent(f"[ERRO] Diretório inválido: {e}", stream="err"))
+        queue.put_event(LogEvent(f"[ERRO] Diretório inválido: {e}"))
         queue.put_event(DoneEvent(
             exit_code=1,
             summary="",
-            error=f"Diretório inválido: {e}",
+            error=f"[ERRO] Diretório inválido: {e}",
         ))
     except TranscricaoCancelada as e:
         # Caso o `salvar_no_banco` não tenha capturado (não deveria
         # acontecer — ele trata — mas é uma segurança a mais).
         _limpar_temporarios()
-        queue.put_event(LogEvent(f"  [cancelado] {e}", stream="err"))
+        queue.put_event(LogEvent(f"[CANCELADO] Cancelado durante transcrição"))
         queue.put_event(DoneEvent(
             exit_code=0,
-            summary="Cancelado durante transcrição.",
+            summary="[CANCELADO] Cancelado durante transcrição.",
         ))
     except Exception as e:  # noqa: BLE001 — captura ampla de propósito
         _limpar_temporarios()
         tb = traceback.format_exc()
-        queue.put_event(LogEvent(f"[ERRO] {type(e).__name__}: {e}", stream="err"))
-        queue.put_event(LogEvent(tb, stream="err"))
+        queue.put_event(LogEvent(
+            "[ERRO] Ocorreu um erro inesperado e o processamento foi interrompido.",
+            stream="err",
+        ))
+        queue.put_event(LogEvent(
+            f"{type(e).__name__}: {e}", stream="err", dev_only=True,
+        ))
+        queue.put_event(LogEvent(tb, stream="err", dev_only=True))
         queue.put_event(DoneEvent(
             exit_code=2,
             summary="",

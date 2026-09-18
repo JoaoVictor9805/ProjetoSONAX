@@ -59,13 +59,16 @@ def transcrever_arquivo(
     beam_size: int = 5,
     language: str = "pt",
     vad_filter: bool = True,
-) -> tuple[str, list[dict]]:
-    """Transcreve um .wav usando faster-whisper e devolve (texto, metricas).
+    word_timestamps: bool = True,
+) -> tuple[str, list[dict], list[dict]]:
+    """Transcreve um .wav usando faster-whisper e devolve (texto, metricas, palavras).
 
     - texto   : string com a transcrição completa.
     - metricas: lista de dicts com avg_logprob, compression_ratio e
                 no_speech_prob de cada segmento, prontos para
                 `calcular_metricas_whisper()` em qualidade_audio.py.
+    - palavras: lista de dicts com {'start', 'end', 'word', 'probability'}
+                para alinhamento preciso com diarização.
 
     Suporte a cancelamento e progresso granular em tempo real:
     1. Checagem prévia antes de iniciar o processamento.
@@ -87,6 +90,7 @@ def transcrever_arquivo(
         language=language,
         beam_size=beam_size,
         vad_filter=vad_filter,
+        word_timestamps=word_timestamps,
     )
 
     duracao_total = getattr(info, "duration", 0.0) or 0.0
@@ -94,6 +98,7 @@ def transcrever_arquivo(
     last_reported_pct = -1
 
     metricas = []
+    palavras = []
 
     for segment in segments:
         if cancel is not None and cancel.is_set():
@@ -104,6 +109,18 @@ def transcrever_arquivo(
         texto_segmento = segment.text.strip()
         if texto_segmento:
             partes.append(texto_segmento)
+
+        # Coleta palavras com timestamps se disponíveis
+        if getattr(segment, "words", None):
+            for w in segment.words:
+                w_text = w.word.strip()
+                if w_text:
+                    palavras.append({
+                        "start": round(w.start, 3),
+                        "end": round(w.end, 3),
+                        "word": w_text,
+                        "probability": round(getattr(w, "probability", 1.0), 3)
+                    })
 
         # Coleta as métricas de cada segmento
         metricas.append({
@@ -128,7 +145,7 @@ def transcrever_arquivo(
         except Exception:
             pass
 
-    return " ".join(partes).strip(), metricas
+    return " ".join(partes).strip(), metricas, palavras
 
 
 def transcrever_pasta(pasta: Path, *, recursivo: bool = False) -> list[tuple[Path, str]]:
@@ -149,7 +166,7 @@ def transcrever_pasta(pasta: Path, *, recursivo: bool = False) -> list[tuple[Pat
     for i, w in enumerate(wavs, start=1):
         _emit(f"  [{i}/{len(wavs)}] {w.name} ... ")
         inicio = perf_counter()
-        texto, _ = transcrever_arquivo(w, modelo=modelo)
+        texto, _, _ = transcrever_arquivo(w, modelo=modelo)
         duracao = perf_counter() - inicio
         _emit(f"  [{i}/{len(wavs)}] {w.name} ok ({duracao:.1f}s)")
         transcricoes.append((w, texto))

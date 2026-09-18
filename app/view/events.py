@@ -10,6 +10,7 @@ python
 class LogEvent:
     line: str          # uma linha de texto, tipo "Transcrevendo arquivo 3..."
     stream: str = "out" # "out" (normal) ou "err" (erro)
+    dev_only: bool = False  # True = detalhe técnico, só aparece no Log Dev
 
 @dataclass
 class ProgressEvent:
@@ -33,6 +34,7 @@ get_event(timeout=0.05): tenta pegar um bilhete, espera até 50ms, e se não vie
 
 from __future__ import annotations
 
+from pathlib import Path
 import queue
 from dataclasses import dataclass
 from typing import Literal
@@ -44,9 +46,14 @@ from typing import Literal
 
 @dataclass
 class LogEvent:
-    """Uma linha de texto emitida pelo worker (geralmente via `print`)."""
+    """Uma linha de texto emitida pelo worker (geralmente via `print`).
+
+    `dev_only=True` marca a linha como **técnica**: ela fica guardada no
+    buffer do log, mas só é exibida quando o Log Dev está ligado.
+    """
     line: str
     stream: Literal["out", "err"] = "out"
+    dev_only: bool = False
 
 
 @dataclass
@@ -62,6 +69,8 @@ class ProgressEvent:
     phase: str = ""   # "scanning" | "classifying" | "copying" | "transcribing" | "inserting" | "reviewing" | "cleanup"
     message: str | None = None
     path: str | None = None   # nome do arquivo envolvido (usado no log de desenvolvimento)
+    silent: bool = False   # True = não gera linha visível no log; só ensina
+                            # o mapa "Audio NN" -> nome real (self._rotulos)
 
 
 @dataclass

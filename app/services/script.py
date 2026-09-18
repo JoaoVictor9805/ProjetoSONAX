@@ -49,6 +49,8 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 ==============================================================================
     """
 
+from langchain_core.outputs import run_info
+from shutil import ExecError
 from aiohttp import resolver
 from typing_extensions import Tuple
 from aiohttp import log
@@ -57,11 +59,9 @@ from app.services.chamadas_dao import buscar_revisao
 from app.services.revisao import revisar_texto
 from app.services.qualidade_audio import analisar_audio
 from app.services.qualidade_audio import classificar_qualidade_audio
-from app.services.qualidade_audio import classificar_qualidade_transcricao
 from app.services.qualidade_audio import avaliar_qualidade_transcricao
 from app.services.qualidade_audio import calcular_metricas_whisper
 from app.services.qualidade_audio import analisar_transcricao
-from app.services.planilha import exportar_transcricao_para_planilha
 from app.services import transcrever
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
@@ -81,12 +81,17 @@ from app.services.chamadas_dao import (
     verificar_tabela_analise,
     inserir_analise
 )
+from app.services.diarizacao import (
+    DiarizacaoErro,
+    processar_diarizacao_completa,
+)
 from app.services.parses import (
     parse_data,
     parse_nome_arquivo,
     parse_hora
 )
 from app.services.transcrever import TranscricaoCancelada, transcrever_arquivo
+from app.logs import log_dev_exc
 
 
 def duracao_wav(caminho: Path):
@@ -144,6 +149,7 @@ def filtrar_por_qualidade_audio(
     longos: list,
     cancel: threading.Event | None = None,
     modo_dev: threading.Event | None = None,
+    on_progress: "Callable[[int, int, Path], None] | None" = None,
 ) -> tuple[list, list]:
     """Analisa a qualidade de áudio dos WAVs longos e remove os 'Péssimos'.
 
@@ -151,32 +157,67 @@ def filtrar_por_qualidade_audio(
     - longos_filtrados : lista de (Path, duracao) aprovados.
     - rejeitados       : lista de Path reprovados (só o caminho, sem duração).
 
-    `modo_dev` (opcional): quando setado, os rótulos exibidos são os nomes
-    reais dos arquivos em vez de "Audio NN".
+    `modo_dev` (opcional): mantido por compatibilidade de assinatura, mas
+    não é mais usado para decidir o rótulo — o rótulo impresso aqui é
+    sempre genérico ("Audio NN"); a troca para o nome real no Log Dev é
+    feita por `app.py` a partir do `path` associado aos eventos de
+    progresso, nunca a partir do texto congelado nos `print()`.
+
+    `on_progress` (opcional): chamado a cada arquivo, ANTES do print,
+    como `on_progress(idx, total, caminho)` — mesmo padrão de
+    `copiar_longos_para_pasta`. É assim que `worker.py` ensina o mapa
+    "Audio NN" → nome real para esta etapa, já que ela só usa `print()`
+    (sem `ProgressEvent`/`path` próprio).
     """
     filtrados = []
     rejeitados = []
+    total_longos = len(longos)
     for idx, (caminho, duracao) in enumerate(longos, 1):
-        if modo_dev is not None and modo_dev.is_set():
-            rotulo_audio = caminho.name
-        else:
-            rotulo_audio = f"Audio {idx:02d}"
+        classificacao = None
+
+        # Rótulo sempre genérico — a troca para o nome real (Log Dev)
+        # é responsabilidade exclusiva de app.py._formatar_linha.
+        rotulo_audio = f"Audio {idx:02d}"
+
+        if on_progress is not None:
+            try:
+                on_progress(idx, total_longos, caminho)
+            except Exception:
+                pass
+
         if cancel is not None and cancel.is_set():
             break
-        try:
-            dados = analisar_audio(caminho)
-            classificacao = classificar_qualidade_audio(dados)
-        except Exception as e :
-            # Se a análise falhar, mantém o áudio (não penaliza por erro técnico)
-            print(f"  [qualidade] erro ao analisar {rotulo_audio}: {e} — mantido por padrão")
-            filtrados.append((caminho, duracao))
+        for tentativa in range(1, 4):
+            try:
+                dados = analisar_audio(caminho)
+                classificacao = classificar_qualidade_audio(dados)
+                break
+
+            except Exception as e :
+                print(
+                        f"[AVISO] Não foi possível analisar a qualidade "
+                        f"de '{rotulo_audio}' "
+                        f"(tentativa {tentativa}/3)"
+                    )
+                log_dev_exc()
+                if tentativa < 3:
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+                continue
+                
+        else:
+            print(
+                f"[ERRO] Não foi possível analisar a qualidade "
+                f"de '{rotulo_audio}' após 3 tentativas — "
+                f"excluído do processamento."
+            )
+            rejeitados.append(caminho)
             continue
 
         if classificacao == "Péssimo":
-            print(f"  [qualidade] {rotulo_audio} reprovado ({classificacao}) — excluído do processamento")
+            print(f"  [INFO] {rotulo_audio} reprovado ({classificacao}) — excluído do processamento")
             rejeitados.append(caminho)
         else:
-            print(f"  [qualidade] {rotulo_audio} aprovado ({classificacao})")
+            print(f"  [INFO] {rotulo_audio} aprovado ({classificacao})")
             filtrados.append((caminho, duracao))
 
     return filtrados, rejeitados
@@ -201,8 +242,25 @@ def copiar_longos_para_pasta(
             continue
         vistos.add(caminho.name)
         destino = pasta_destino / caminho.name
-        shutil.copy2(caminho, destino)
+        for tentativa in range(1,4):
+            try:
+                shutil.copy2(caminho, destino)
+                break
+            except Exception as e:
+                print(
+                   f"[AVISO] Falha ao copiar '{caminho}' "
+                   f"(tentativa {tentativa}/3)"
+                )
+                log_dev_exc()
+                if tentativa < 3:
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+        
+        else:
+           print(f"[ERRO] Não foi possível copiar '{caminho}' após 3 tentativas.")
+           continue
+           
         copiados.append((destino, d))
+
         if on_progress is not None:
             try:
                 on_progress(len(copiados), total_longos, caminho)
@@ -238,12 +296,12 @@ def salvar_no_banco(
     cancel: "threading.Event | None" = None,
     on_progress: "Callable | None" = None,
     modo_dev: "threading.Event | None" = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, dict[str, dict]]:
     """Para cada arquivo copiado: transcreve, parseia o nome, busca o
     atendente pelo ramal e insere UM único registro em registro_chamadas
     com a transcrição já preenchida.
 
-    Retorna uma tupla (inseridos, ja_existentes). Pula (com aviso) se o registro
+    Retorna uma tupla (inseridos, ja_existentes, mapa_diarizacao). Pula (com aviso) se o registro
     já existir no banco, se ramal não existir em `origem` ou se algum campo
     essencial estiver ausente.
 
@@ -262,31 +320,39 @@ def salvar_no_banco(
     """
     inseridos = 0
     ja_existentes = 0
+    mapa_diarizacao: dict[str, dict] = {}
     total = len(copiados)
     for i, (caminho, _) in enumerate(copiados, start=1):
-        if modo_dev is not None and modo_dev.is_set():
-            rotulo_audio = caminho.name
-        else:
-            rotulo_audio = f"Audio {i:02d}"
+        # Rótulo sempre genérico — a troca para o nome real (Log Dev)
+        # é responsabilidade exclusiva de app.py._formatar_linha.
+        rotulo_audio = f"Audio {i:02d}"
         if cancel is not None and cancel.is_set():
-            print(f"  [cancelado] parando antes de {rotulo_audio} ({caminho.name}) "
+            print(f"  [CANCELADO] parando antes de {rotulo_audio}, "
                   f"após {inseridos} registro(s) inserido(s).")
-            return inseridos, ja_existentes
+            return inseridos, ja_existentes, mapa_diarizacao
 
         # --- Verificação antecipada no banco antes de transcrever ---
-        with conectar() as cur:
-            if registro_ja_existe(cur, caminho.name):
-                ja_existentes += 1
-                print(f"  [aviso] {rotulo_audio} já registrado no banco — pulando.")
-                _notificar_progresso(
-                    on_progress,
-                    i,
-                    total,
-                    caminho,
-                    1.0,
-                    f"[{i}/{total}] {rotulo_audio} já existe no banco (pulado)",
-                )
-                continue
+        try:
+            with conectar() as cur:
+                if registro_ja_existe(cur, caminho.name):
+                    ja_existentes += 1
+                    _notificar_progresso(
+                        on_progress,
+                        i,
+                        total,
+                        caminho,
+                        1.0,
+                        f"[AVISO] [{i}/{total}] {rotulo_audio} - Transcrição já registrada no banco (pulado)",
+                    )
+                    continue
+
+        except Exception as e:
+            print(
+                f"[ERRO] Falha ao verificar se '{rotulo_audio}' "
+                f"já existe no banco"
+            )
+            log_dev_exc()
+            continue
 
         # 1) Transcrição com progresso contínuo
         _notificar_progresso(
@@ -295,9 +361,9 @@ def salvar_no_banco(
             total,
             caminho,
             0.0,
-            f"[{i}/{total}] Iniciando transcrição de: {rotulo_audio}",
+            f"[INFO] [{i}/{total}] Iniciando transcrição de: {rotulo_audio}",
         )
-        print(f"  [whisper] [{i}/{total}] transcrevendo: {rotulo_audio} ...")
+        print(f"  [INFO] [{i}/{total}] transcrevendo: {rotulo_audio} ...")
 
         def _on_sub_progress(sub_frac: float) -> None:
             pct = int(sub_frac * 100)
@@ -306,20 +372,90 @@ def salvar_no_banco(
                 i,
                 total,
                 caminho,
-                sub_frac * 0.85,
-                f"[{i}/{total}] {rotulo_audio}: {pct}% transcrevendo...",
+                sub_frac * 0.70,
+                f"[INFO] [{i}/{total}] {rotulo_audio}: {pct}% transcrevendo...",
             )
 
-        try:
-            texto, metricas_whisper = transcrever_arquivo(
-                caminho,
-                cancel=cancel,
-                on_progress=_on_sub_progress,
+        for tentativa in range(1, 4):
+            try:
+                texto, metricas_whisper, palavras = transcrever_arquivo(
+                    caminho,
+                    cancel=cancel,
+                    on_progress=_on_sub_progress,
+                )
+                break
+
+            except TranscricaoCancelada:
+                return inseridos, ja_existentes, mapa_diarizacao
+
+            except Exception as e:
+                print(
+                    f"[AVISO] Falha na transcrição de '{rotulo_audio}' "
+                    f"(tentativa {tentativa}/3)"
+                )
+                log_dev_exc()
+                if tentativa < 3:
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+        
+        else:
+            print(
+                f"[ERRO] Não foi possível transcrever "
+                f"'{rotulo_audio}' após 3 tentativas. Arquivo ignorado."
             )
-        except TranscricaoCancelada as e:
-            print(f"  [cancelado] {e} — nada de "
-                  f"{rotulo_audio} foi inserido.")
-            return inseridos, ja_existentes
+            continue
+
+        try:
+            dados_transcricao = analisar_transcricao(texto)
+            dados_whisper = calcular_metricas_whisper(metricas_whisper)
+
+            dados = {
+                **dados_transcricao,
+                **dados_whisper
+            }
+
+            avaliacao = avaliar_qualidade_transcricao(dados)
+
+        except Exception as e:
+            print(
+                f"[ERRO] Falha ao avaliar a transcrição "
+                f"de '{rotulo_audio}'"
+            )
+            log_dev_exc()
+            continue
+
+        qualidade = avaliacao["classificacao"]
+
+        if qualidade == "Péssimo":
+            print(f"  [AVISO] transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
+            continue
+
+        # 2) Diarização de locutores e alinhamento temporal com as palavras
+        texto_diarizado = texto
+        try:
+            _notificar_progresso(
+                on_progress,
+                i,
+                total,
+                caminho,
+                0.75,
+                f"[INFO] [{i}/{total}] {rotulo_audio}: executando diarização de locutores...",
+            )
+            print(f"  [INFO] [{i}/{total}] diarizando locutores: {rotulo_audio} ...")
+            diarizacao_res = processar_diarizacao_completa(
+                caminho,
+                palavras,
+                cancel=cancel,
+            )
+            texto_formatado = diarizacao_res.get("texto_formatado")
+            if texto_formatado:
+                texto_diarizado = texto_formatado
+                print(f"  [INFO] Diarização concluída para {rotulo_audio} ({len(diarizacao_res.get('speakers', []))} locutores identificados).")
+        except DiarizacaoErro as de:
+            print(f"  [AVISO] Diarização não concluída para {rotulo_audio}: {de} — prosseguindo com texto padrão.")
+            log_dev_exc()
+        except Exception as de:
+            print(f"  [AVISO] Erro na diarização de {rotulo_audio}: {de} — prosseguindo com texto padrão.")
+            log_dev_exc()
 
         _notificar_progresso(
             on_progress,
@@ -327,81 +463,104 @@ def salvar_no_banco(
             total,
             caminho,
             0.90,
-            f"[{i}/{total}] {rotulo_audio}: transcrição concluída. Gravando no banco...",
+            f"[INFO] [{i}/{total}] {rotulo_audio}: transcrição concluída. Gravando no banco...",
         )
 
-        dados_transcricao = analisar_transcricao(texto)
-        dados_whisper = calcular_metricas_whisper(metricas_whisper)
-
-        dados = {
-            **dados_transcricao,
-            **dados_whisper
-        }
-
-        avaliacao = avaliar_qualidade_transcricao(dados)
-        qualidade = avaliacao["classificacao"]
-
-        # Exporta transcrição com todos os critérios de qualidade e métricas para a planilha
-        status_fluxo = "Descartado (qualidade péssima)" if qualidade == "Péssimo" else "Aprovado para banco"
+        # 3) INSERT em uma transação pequena e isolada
         try:
-            exportar_transcricao_para_planilha(
-                caminho_audio=caminho,
-                texto_transcricao=texto,
-                dados_avaliacao={
-                    **dados,
-                    **avaliacao,
-                    "status_fluxo": status_fluxo,
-                },
-            )
+            info = parse_nome_arquivo(caminho)
         except Exception as e:
-            print(f"  [aviso planilha] Falha ao registrar na planilha {rotulo_audio}: {e}")
-
-        if qualidade == "Péssimo":
-            print(f"  [aviso] transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
+            print(
+                f"[ERRO] Falha ao interpretar o nome do arquivo "
+                f"'{rotulo_audio}'"
+            )
+            log_dev_exc()
             continue
 
-        # 2) INSERT em uma transação pequena e isolada
-        info = parse_nome_arquivo(caminho)
-
         if not info["ramal"].isdigit():
-            print(f"  [aviso] ramal inválido em {rotulo_audio}: "
+            print(f"  [AVISO] ramal inválido em {rotulo_audio}: "
                   f"{info['ramal']!r} — pulando")
             continue
 
         data = parse_data(info["data"])
         if data is None:
-            print(f"  [aviso] data inválida em {rotulo_audio}: "
+            print(f"  [AVISO] data inválida em {rotulo_audio}: "
                   f"{info['data']!r} — pulando")
             continue
 
         hora = parse_hora(info["hora"])
         if hora is None:
-            print(f"  [aviso] hora inválida em {rotulo_audio}: "
+            print(f"  [AVISO] hora inválida em {rotulo_audio}: "
                   f"{info['hora']!r} — pulando")
             continue
 
         data_ligacao = datetime.combine(data, hora) if hora else datetime(data.year, data.month, data.day)
 
         ramal = int(info["ramal"])
-        with conectar() as cur:
-            nome = buscar_nome_atendente(cur, ramal, data_ligacao)
-            if nome is None:
-                print(f"  [aviso] ramal {ramal} não encontrado em `origem` "
-                  f"({rotulo_audio}) — pulando")
-                continue
+        
+        id_reg = None
+        nome = None
 
-            id_reg = inserir_registro_chamada(
-                cur,
-                ramal=ramal,
-                agente_nome=nome,
-                data_ligacao=data_ligacao,
-                log_arquivo=caminho.name,
-                transcricao=texto,
+        for tentativa in range(1, 4):
+            try:
+                with conectar() as cur:
+                    nome = buscar_nome_atendente(
+                        cur,
+                        ramal,
+                        data_ligacao,
+                    )
+
+                    if nome is None:
+                        print(
+                            f"  [AVISO] ramal {ramal} não encontrado em `origem` "
+                            f"({rotulo_audio}) — pulando"
+                        )
+                        break
+
+                    id_reg = inserir_registro_chamada(
+                        cur,
+                        ramal=ramal,
+                        agente_nome=nome,
+                        data_ligacao=data_ligacao,
+                        log_arquivo=caminho.name,
+                        transcricao=texto,
+                    )
+
+                break
+
+            except Exception as e:
+                print(
+                    f"[ERRO] Falha ao salvar '{rotulo_audio}' "
+                    f"no banco de dados "
+                    f"(tentativa {tentativa}/3)"
+                )
+                log_dev_exc()
+                if tentativa < 3:
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+
+        else:
+            print(
+                f"[ERRO] Não foi possível inserir "
+                f"'{rotulo_audio}' após 3 tentativas."
             )
-        preview = texto[:60].replace("\n", " ")
-        print(f"  [bd] registro #{id_reg} inserido: "
-              f"ramal={ramal} ({nome})  data={data}  "
-              f"-> {rotulo_audio}  (\"{preview}...\")")
+            continue
+
+        if nome is None:
+            continue
+
+        if id_reg is None:
+            print(
+                f"  [AVISO] Transcrição de '{rotulo_audio}' já existe no banco — pulando"
+            )
+            ja_existentes += 1
+            continue
+
+        # Guarda o diálogo diarizado e o atendente em memória para a fase de revisão
+        mapa_diarizacao[caminho.name] = {
+            "texto_diarizado": texto_diarizado,
+            "agente_nome": nome,
+        }
+
         inseridos += 1
         _notificar_progresso(
             on_progress,
@@ -409,87 +568,220 @@ def salvar_no_banco(
             total,
             caminho,
             1.0,
-            f"[{i}/{total}] {rotulo_audio} gravado com sucesso no banco!",
+            f"[INFO] [{i}/{total}] {rotulo_audio} gravado com sucesso no banco!",
         )
 
-    return inseridos, ja_existentes
+    return inseridos, ja_existentes, mapa_diarizacao
 
-def gerar_revisao_transcricao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None, ) -> str | None:
-    """Gere a revisão a partir da coluna de transcrição, utilizando um modelo de IA"""
+def gerar_revisao_transcricao(
+    log: str,
+    texto_diarizado: str | None = None,
+    agente_nome: str | None = None,
+    rotulo_audio: str | None = None,
+    cancel: threading.Event | None = None,
+) -> str | None:
+    """Gere a revisão a partir do diálogo diarizado e dados do atendente, utilizando modelo de IA."""
     nome_exibicao = rotulo_audio or log
 
     if cancel is not None and cancel.is_set():
-            print(f"  [cancelado] revisão de {nome_exibicao} não iniciada.")
-            return None
-
-    with conectar() as cur:
-        if verificar_coluna_revisao(cur, log):
-            print(f"  [revisão] {nome_exibicao} já existe no banco (pulado)")
-            return None
-        transcricao = buscar_transcricao(cur, log)
-
-    if cancel is not None and cancel.is_set():
-        print(f"  [cancelado] revisão de {nome_exibicao} abortada antes da chamada de IA.")
-        return None
-    
-    if not transcricao or not transcricao.strip():
+        print(f"  [CANCELADO] revisão de {nome_exibicao} não iniciada.")
         return None
 
     try:
-        revisao = revisar_texto(transcricao)
+        with conectar() as cur:
+            if verificar_coluna_revisao(cur, log):
+                print(f"  [AVISO] Revisão de {nome_exibicao} já existe no banco (pulado)")
+                return None
+            
+            # Se não foi fornecido em memória, busca a transcrição padrão do banco
+            if not texto_diarizado or not texto_diarizado.strip():
+                texto_diarizado = buscar_transcricao(cur, log)
+
     except Exception as e:
-        print(f"  [revisão] Falha ao revisar transcrição de {nome_exibicao}: {e}")
+        print(
+            f"[ERRO] Falha ao verificar coluna no banco"
+            f"'{rotulo_audio}'"
+        )
+        log_dev_exc()
         return None
 
-    with conectar() as cur:
-        return inserir_revisao(cur, log, revisao)
+    if cancel is not None and cancel.is_set():
+        print(f"  [CANCELADO] revisão de {nome_exibicao} abortada antes da chamada de IA.")
+        return None
+    
+    if not texto_diarizado or not texto_diarizado.strip():
+        return None
+
+    revisao = None
+
+    for tentativa in range(1, 4):
+        try:
+            revisao = revisar_texto(texto_diarizado, nome_atendente=agente_nome)
+            break
+        except Exception as e:
+            print(
+                f"  [ERRO] Falha ao revisar transcrição "
+                f"de {nome_exibicao} "
+                f"(tentativa {tentativa}/3)"
+            )
+            log_dev_exc()
+            if tentativa < 3:
+                print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
         
-def gerar_analise_revisao(log: str, rotulo_audio: str | None = None, cancel: threading.Event | None = None,) -> int | None:
-    """Gera análise de IA a partir da revisão da transcrição dos áudios"""
-    with conectar() as cur:
+    else:
+        print(
+            f"  [ERRO] Não foi possível revisar "
+            f"{nome_exibicao} após 3 tentativas — próximo arquivo."
+        )
+        return None
 
-        nome_exibicao = rotulo_audio or log
+    for tentativa in range(1, 4):
+        try: 
+            with conectar() as cur:
+                resultado = inserir_revisao(cur, log, revisao)
+                print(f"[INFO] Revisão de {rotulo_audio} inserida com sucesso no banco")
+            break
+        
+        except Exception as e:
+            print(
+                f"[ERRO] Falha ao salvar a revisão "
+                f"'{rotulo_audio}' no banco de dados "
+                f"(tentativa {tentativa}/3)"
+            )
+            log_dev_exc()
+            if tentativa < 3:
+                print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
 
-        if cancel is not None and cancel.is_set():
-            print(f"  [cancelado] análise de {nome_exibicao} não iniciada.")
-            return None
-        if verificar_coluna_revisao(cur, log):
+    else:
+        print(
+            f"[ERRO] Não foi possível salvar a revisão "
+            f"'{rotulo_audio}' após 3 tentativas."
+        )
+        return None
+    
+    return resultado
+        
+
+def gerar_analise_revisao(
+    log: str,
+    rotulo_audio: str | None = None,
+    cancel: threading.Event | None = None,
+) -> int | None:
+    """Gera análise de IA a partir da revisão da transcrição dos áudios."""
+
+    nome_exibicao = rotulo_audio or log
+
+    if cancel is not None and cancel.is_set():
+        print(
+            f"  [CANCELADO] análise de {nome_exibicao} não iniciada."
+        )
+        return None
+
+    # Verifica se existe revisão e se a análise já foi realizada
+    try:
+        with conectar() as cur:
+
+            if not verificar_coluna_revisao(cur, log):
+                return None
+
             revisao = buscar_revisao(cur, log)
 
             if revisao is None:
-                print(f"  [análise] {nome_exibicao} não possui revisão de transcrição para analisar (pulado)")
-
+                print(
+                    f"  [AVISO] {nome_exibicao} não possui revisão "
+                    f"de transcrição para analisar (pulado)"
+                )
                 return None
 
-            # Função para verificar presença no banco
             if verificar_tabela_analise(cur, log):
-                print(f"  [análise] {nome_exibicao} já existe no banco (pulado)")
-                return None
-            try:
-                analise_IA = analisar_ligacao(revisao)
-
-                nota_final = analise_IA["nota_final"]
-                feedback_geral = analise_IA["feedback_geral"]
-                criterios = analise_IA["criterios"]
-
-            except Exception as e:
-                nome_exibicao = rotulo_audio or log
-                print(f"  [Análise Final] Falha ao realizar análise final da ligação {nome_exibicao}: {e}")
+                print(
+                    f"  [AVISO] Análise de {nome_exibicao} já existe no banco (pulado)"
+                )
                 return None
 
+    except Exception as e:
+        print(
+            f"[ERRO] Falha ao verificar dados da análise "
+            f"de '{rotulo_audio}' no banco"
+        )
+        log_dev_exc()
+        return None
+        
+    # Análise da IA — 3 tentativas
+    for tentativa in range(1, 4):
+        try:
+            analise_IA = analisar_ligacao(revisao)
+
+            nota_final = analise_IA["nota_final"]
+            feedback_geral = analise_IA["feedback_geral"]
+            criterios = analise_IA["criterios"]
+            break
+
+        except Exception as e:
+            print(
+                f"  [ERRO] Falha ao realizar análise final "
+                f"da ligação {nome_exibicao} "
+                f"(tentativa {tentativa}/3)"
+            )
+            log_dev_exc()
+            if tentativa < 3:
+                print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+
+    else:
+        print(
+            f"  [ERRO] Não foi possível realizar a análise "
+            f"final de {nome_exibicao} após 3 tentativas — próximo arquivo."
+        )
+        return None
+
+    # Salva a análise — 3 tentativas
+    for tentativa in range(1, 4):
+        try:
             with conectar() as cur:
-                return inserir_analise(cur, log, nota_final, feedback_geral, criterios)
+                id_avaliacao = inserir_analise(
+                    cur,
+                    log,
+                    nota_final,
+                    feedback_geral,
+                    criterios
+                )
 
-        else:
-            return None
+                print(f"[INFO] Análise de {rotulo_audio} inserida com sucesso no banco")
+
+            break
+
+        except Exception as e:
+            print(
+                f"[ERRO] Falha ao salvar a análise "
+                f"'{rotulo_audio}' no banco de dados "
+                f"(tentativa {tentativa}/3)"
+            )
+            log_dev_exc()
+            if tentativa < 3:
+                print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+
+    else:
+        print(
+            f"[ERRO] Não foi possível salvar a análise "
+            f"'{rotulo_audio}' após 3 tentativas."
+        )
+        return None
+
+    return id_avaliacao
 
 def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) -> None:
     """Deleta a pasta de destino especificada e todo o seu conteúdo recursivamente."""
     if not pasta_destino.exists():
         return
 
-    try:
-        shutil.rmtree(pasta_destino, ignore_errors=True)
-        print(f"[deletado] pasta {pasta_destino} deletada com sucesso")
-    except Exception as e:
-        print(f"[aviso] erro ao deletar pasta {pasta_destino}: {e}")
+    shutil.rmtree(pasta_destino, ignore_errors=True)
+        
+    if pasta_destino.exists():
+        print(
+            f"[ERRO] não foi possível deletar a pasta "
+            f"{pasta_destino}"
+        )
+    else:
+        print(
+            f"[INFO] pasta {pasta_destino} deletada com sucesso"
+        )

@@ -12,6 +12,7 @@ import sys
 
 from typing import Literal
 
+from app.logs import DEV_PREFIX
 from app.view.events import EventQueue, LogEvent
 
 
@@ -46,7 +47,7 @@ class QueueWriter:
 
             line = line.strip()
             if line:
-                self._queue.put_event(LogEvent(line, self._stream))
+                self._emitir(line)
         return len(data)
 
     def flush(self) -> None:
@@ -55,7 +56,21 @@ class QueueWriter:
             line = self._buffer.strip()
             self._buffer = ""
             if line:
-                self._queue.put_event(LogEvent(line, self._stream))
+                self._emitir(line)
+
+    def _emitir(self, line: str) -> None:
+        """Enfileira a linha, reconhecendo o marcador de mensagem técnica.
+
+        Linhas escritas por `app.logs.log_dev()` chegam aqui prefixadas
+        com `DEV_PREFIX`. O prefixo é removido e a linha vira um
+        `LogEvent(dev_only=True)` — ou seja, só aparece no Log Dev.
+        """
+        if line.startswith(DEV_PREFIX):
+            self._queue.put_event(
+                LogEvent(line[len(DEV_PREFIX):], self._stream, dev_only=True)
+            )
+        else:
+            self._queue.put_event(LogEvent(line, self._stream))
 
     def isatty(self) -> bool:
         """Sempre False — estamos roteando para uma fila, não para um TTY."""

@@ -286,18 +286,22 @@ def avaliar_qualidade_transcricao(dados):
     }
 
 
-def classificar_qualidade_transcricao(dados):
-    return avaliar_qualidade_transcricao(dados)["classificacao"]
+
 
 
     
 
 
 if __name__ == "__main__":
-    
+
+
     # ==========================================================
     # TESTE
     # ==========================================================
+    
+    def classificar_qualidade_transcricao(dados):
+        return avaliar_qualidade_transcricao(dados)["classificacao"]
+
     
     transcricao_simulada = '''
     Bom dia, meu nome é João, estou entrando em contato
