@@ -378,10 +378,11 @@ def salvar_no_banco(
 
         for tentativa in range(1, 4):
             try:
-                texto, metricas_whisper, palavras = transcrever_arquivo(
+                texto, metricas_whisper, palavras, segmentos = transcrever_arquivo(
                     caminho,
                     cancel=cancel,
                     on_progress=_on_sub_progress,
+                    retornar_segmentos=True,
                 )
                 break
 
@@ -443,7 +444,8 @@ def salvar_no_banco(
             print(f"  [INFO] [{i}/{total}] diarizando locutores: {rotulo_audio} ...")
             diarizacao_res = processar_diarizacao_completa(
                 caminho,
-                palavras,
+                palavras_whisper=palavras,
+                segmentos_whisper=segmentos,
                 cancel=cancel,
             )
             texto_formatado = diarizacao_res.get("texto_formatado")

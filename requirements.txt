@@ -13,4 +13,3 @@ soundfile==0.14.0
 tqdm==4.70.0
 types-tqdm==4.70.0.20260827
 typing_extensions==4.16.0
-openpyxl==3.1.5

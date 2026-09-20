@@ -34,15 +34,27 @@ class TranscricaoCancelada(Exception):
 @lru_cache(maxsize=1)
 def carregar_modelo(
     nome: str = "small",
-    device: str = "auto",
-    compute_type: str = "auto",
+    device: str | None = None,
+    compute_type: str | None = None,
 ) -> WhisperModel:
-    """Carrega o modelo Faster-Whisper uma única vez por processo."""
+    """Carrega o modelo Faster-Whisper uma única vez por processo.
+
+    Otimizado para execução rápida e segura em CPU (Core i3) com int8,
+    ou em GPU se explicitamente configurado e suportado.
+    """
+    import os
+
+    dev = device or os.getenv("WHISPER_DEVICE", "cpu")
+    ct = compute_type or os.getenv("WHISPER_COMPUTE_TYPE", "int8" if dev == "cpu" else "float16")
+
     try:
-        return WhisperModel(nome, device=device, compute_type=compute_type)
+        return WhisperModel(nome, device=dev, compute_type=ct)
     except Exception:
-        # Fallback para float32 se a CPU não suportar a quantização padrão
-        return WhisperModel(nome, device="cpu", compute_type="float32")
+        # Fallback garantido para CPU com int8 (ou float32)
+        try:
+            return WhisperModel(nome, device="cpu", compute_type="int8")
+        except Exception:
+            return WhisperModel(nome, device="cpu", compute_type="float32")
 
 
 def _emit(msg: str) -> None:
@@ -60,8 +72,10 @@ def transcrever_arquivo(
     language: str = "pt",
     vad_filter: bool = True,
     word_timestamps: bool = True,
-) -> tuple[str, list[dict], list[dict]]:
-    """Transcreve um .wav usando faster-whisper e devolve (texto, metricas, palavras).
+    retornar_segmentos: bool = False,
+) -> tuple[str, list[dict], list[dict]] | tuple[str, list[dict], list[dict], list[dict]]:
+    """Transcreve um .wav usando faster-whisper e devolve (texto, metricas, palavras)
+    ou (texto, metricas, palavras, segmentos) se retornar_segmentos=True.
 
     - texto   : string com a transcrição completa.
     - metricas: lista de dicts com avg_logprob, compression_ratio e
@@ -69,6 +83,7 @@ def transcrever_arquivo(
                 `calcular_metricas_whisper()` em qualidade_audio.py.
     - palavras: lista de dicts com {'start', 'end', 'word', 'probability'}
                 para alinhamento preciso com diarização.
+    - segmentos: lista de dicts com {'start', 'end', 'text'} por frase/trecho.
 
     Suporte a cancelamento e progresso granular em tempo real:
     1. Checagem prévia antes de iniciar o processamento.
@@ -85,13 +100,27 @@ def transcrever_arquivo(
         modelo = carregar_modelo()
 
     # transcribe() retorna um gerador de segmentos e metadados sobre o áudio
-    segments, info = modelo.transcribe(
-        str(caminho),
-        language=language,
-        beam_size=beam_size,
-        vad_filter=vad_filter,
-        word_timestamps=word_timestamps,
-    )
+    try:
+        segments, info = modelo.transcribe(
+            str(caminho),
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+            word_timestamps=word_timestamps,
+        )
+    except RuntimeError as re:
+        if "cublas" in str(re).lower() or "cuda" in str(re).lower():
+            # cuBLAS DLL não encontrada no Windows: fallback transparente para CPU
+            modelo = carregar_modelo(device="cpu", compute_type="int8")
+            segments, info = modelo.transcribe(
+                str(caminho),
+                language=language,
+                beam_size=beam_size,
+                vad_filter=vad_filter,
+                word_timestamps=word_timestamps,
+            )
+        else:
+            raise
 
     duracao_total = getattr(info, "duration", 0.0) or 0.0
     partes: list[str] = []
@@ -99,6 +128,7 @@ def transcrever_arquivo(
 
     metricas = []
     palavras = []
+    segmentos_lista = []
 
     for segment in segments:
         if cancel is not None and cancel.is_set():
@@ -109,6 +139,11 @@ def transcrever_arquivo(
         texto_segmento = segment.text.strip()
         if texto_segmento:
             partes.append(texto_segmento)
+            segmentos_lista.append({
+                "start": round(segment.start, 3),
+                "end": round(segment.end, 3),
+                "text": texto_segmento,
+            })
 
         # Coleta palavras com timestamps se disponíveis
         if getattr(segment, "words", None):
@@ -145,7 +180,11 @@ def transcrever_arquivo(
         except Exception:
             pass
 
-    return " ".join(partes).strip(), metricas, palavras
+    texto_completo = " ".join(partes).strip()
+
+    if retornar_segmentos:
+        return texto_completo, metricas, palavras, segmentos_lista
+    return texto_completo, metricas, palavras
 
 
 def transcrever_pasta(pasta: Path, *, recursivo: bool = False) -> list[tuple[Path, str]]:
