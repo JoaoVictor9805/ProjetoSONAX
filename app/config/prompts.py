@@ -500,7 +500,7 @@ REGRAS DE AVALIAÇÃO:
 - A nota deve refletir exclusivamente as evidências encontradas na transcrição.
 - Não atribua uma nota alta apenas porque não existem erros evidentes.
 - Não atribua uma nota baixa quando a transcrição simplesmente não fornecer evidências suficientes para avaliar determinado comportamento.
-- Quando não houver evidência suficiente para avaliar um critério, considere isso na justificativa e atribua "##".
+- Quando não houver evidência suficiente para avaliar um critério, considere isso na justificativa geral, e matenha o valor do campo vazio (null), tanto para nota_criterio quanto para justificativa_criterio.
 - A nota final deve representar a avaliação geral da ligação considerando os cinco critérios (ou os aplicáveis).
 - A nota final não precisa necessariamente englobar o critério "surpreender", afinal não cabe ao a atendente / agente surpreender o cliente em todas as ligações e momentos. Caso "surpreender" não se aplique e você não identificar abertura para isso, desconsidere ele no cálculo da nota final.
 - A nota final deve ser um número inteiro de 0 a 10.

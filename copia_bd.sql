@@ -203,6 +203,9 @@ CREATE TABLE avaliacao_criterio (
 	foreign key (id_avaliacao) references avaliacao_ia(id_avaliacao)
 );
 
+ALTER TABLE avaliacao_ia 
+ADD CONSTRAINT uq_avaliacao_ia_registro_chamadas_log UNIQUE (registro_chamadas_log);
+
 DELETE FROM registro_chamadas
 WHERE id IN (1, 2);
 
@@ -210,3 +213,225 @@ SELECT *
 FROM avaliacao_ia AS a
 INNER JOIN avaliacao_criterio AS c
     ON a.id_avaliacao = c.id_avaliacao;
+
+
+INSERT INTO registro_chamadas (
+    ramal,
+    agente_nome,
+    data_ligacao,
+    log,
+    transcricao
+) VALUES
+(
+    103,
+    'Marcos Vinicius Rocha',
+    '2026-08-26 10:22:27',
+    '103-561137232020-26082026-102227.wav',
+    'Agente: Bom dia, com quem eu falo? Cliente: Bom dia, meu nome é Carlos. Agente: Olá Carlos, como posso ajudá-lo? Cliente: Preciso de informações sobre uma cobrança. Agente: Claro, vou verificar essa informação para você.'
+),
+(
+    103,
+    'Marcos Vinicius Rocha',
+    '2026-08-26 11:34:12',
+    '105-561137232020-26082026-113412.wav',
+    'Agente: Bom dia, em que posso ajudar? Cliente: Gostaria de verificar uma situação no meu cadastro. Agente: Certo, vou consultar para você. Cliente: Obrigado. Agente: Disponha, vou verificar a informação.'
+),
+(
+    104,
+    'Rafael Henrique Souza',
+    '2026-08-26 09:15:23',
+    '104-561137232020-26082026-091523.wav',
+    'Agente: Bom dia, como posso ajudá-lo? Cliente: Estou com uma dúvida sobre meu atendimento anterior. Agente: Entendi. Vou consultar o histórico para verificar o que aconteceu.'
+),
+(
+    104,
+    'Rafael Henrique Souza',
+    '2026-08-26 14:21:08',
+    '104-561137232020-26082026-142108.wav',
+    'Agente: Boa tarde, com quem eu falo? Cliente: Meu nome é Fernanda. Agente: Olá Fernanda, tudo bem? Como posso ajudá-la? Cliente: Preciso resolver uma pendência. Agente: Claro, vou verificar e resolver isso com você.'
+),
+(
+    105,
+    'Gustavo Pereira Lima',
+    '2026-08-26 08:47:36',
+    '105-561137232020-26082026-084736.wav',
+    'Agente: Bom dia. Cliente: Bom dia, gostaria de saber sobre uma solicitação. Agente: Certo, vou consultar no sistema. Cliente: Está bem. Agente: Um momento, por favor.'
+),
+(
+    105,
+    'Gustavo Pereira Lima',
+    '2026-08-26 15:54:21',
+    '105-561137232020-26082026-155421.wav',
+    'Agente: Boa tarde, como posso ajudar? Cliente: Preciso de auxílio com meu cadastro. Agente: Claro, vou verificar os dados. Cliente: Obrigado pela ajuda. Agente: Eu que agradeço, tenha uma boa tarde.'
+),
+(
+    106,
+    'Daniel Augusto Ribeiro',
+    '2026-08-26 10:12:45',
+    '106-561137232020-26082026-101245.wav',
+    'Agente: Bom dia, João. Como posso ajudá-lo? Cliente: Estou com um problema em uma solicitação. Agente: Entendi, João. Vou verificar essa situação para você. Cliente: Certo, obrigado. Agente: Consegui localizar a solicitação e vou realizar o encaminhamento.'
+),
+(
+    106,
+    'Daniel Augusto Ribeiro',
+    '2026-08-26 13:48:27',
+    '106-561137232020-26082026-134827.wav',
+    'Agente: Boa tarde, como posso ajudar? Cliente: Gostaria de informações sobre meu atendimento. Agente: Vou verificar para você. Cliente: Certo. Agente: Encontrei a informação e vou explicar como proceder.'
+),
+(
+    107,
+    'Thiago Rodrigues Martins',
+    '2026-08-26 09:26:14',
+    '107-561137232020-26082026-092614.wav',
+    'Agente: Bom dia, meu nome é Thiago. Com quem eu falo? Cliente: Meu nome é Roberto. Agente: Olá Roberto, como posso ajudá-lo? Cliente: Tenho uma dúvida sobre uma cobrança. Agente: Claro, Roberto. Vou verificar isso agora para você.'
+),
+(
+    107,
+    'Thiago Rodrigues Martins',
+    '2026-08-26 16:10:32',
+    '107-561137232020-26082026-161032.wav',
+    'Agente: Boa tarde. Cliente: Boa tarde, preciso de ajuda com uma solicitação. Agente: Certo, qual seria o problema? Cliente: Tenho uma pendência e não sei como resolver. Agente: Vou consultar o sistema e verificar as opções disponíveis.'
+);
+
+TRUNCATE TABLE avaliacao_criterio, avaliacao_ia RESTART IDENTITY CASCADE;
+
+INSERT INTO avaliacao_ia (
+    registro_chamadas_log,
+    nota_final,
+    feedback_geral,
+    data_avaliacao,
+    modelo_ia
+) VALUES
+(
+    '103-561137232020-26082026-102227.wav',
+    '9',
+    'Atendimento cordial e eficiente, com boa condução da conversa, atenção às necessidades do cliente e demonstração de empatia.',
+    '2026-09-15',
+    'gemini-3.1-flash-lite'
+),
+(
+    '105-561137232020-26082026-113412.wav',
+    '7',
+    'Atendimento adequado e com resolução da demanda, porém apresentou oportunidades de melhoria na personalização, empatia e cordialidade.',
+    '2026-09-15',
+    'gemini-3.1-flash-lite'
+);
+
+INSERT INTO avaliacao_criterio (
+    id_avaliacao,
+    criterio,
+    nota_criterio,
+    justificativa_criterio
+) VALUES
+
+-- Avaliação da chamada:
+-- 103-561137232020-26082026-102227.wav
+
+(1, 'chamar pelo nome', '9',
+ 'O agente utilizou o nome do cliente durante a conversa de forma natural.'),
+
+(1, 'agir com empatia', '9',
+ 'Demonstrou compreensão em relação à situação apresentada pelo cliente.'),
+
+(1, 'ouvir com atencao', '8',
+ 'Demonstrou atenção às informações apresentadas pelo cliente.'),
+
+(1, 'coordialidade na fala', '10',
+ 'Manteve uma comunicação educada, respeitosa e cordial durante a interação.'),
+
+(1, 'eficiencia operacional', '9',
+ 'Conduziu o atendimento de maneira objetiva e eficiente.'),
+
+(1, 'surpreender', '8',
+ 'Demonstrou iniciativa ao oferecer auxílio adicional ao cliente.'),
+
+
+-- Avaliação da chamada:
+-- 105-561137232020-26082026-113412.wav
+
+(2, 'chamar pelo nome', '6',
+ 'O agente utilizou pouco o nome do cliente durante a conversa.'),
+
+(2, 'agir com empatia', '7',
+ 'Apresentou compreensão sobre a necessidade do cliente, mas poderia demonstrar maior acolhimento.'),
+
+(2, 'ouvir com atencao', '7',
+ 'Acompanhou as informações apresentadas, porém poderia demonstrar maior atenção aos detalhes.'),
+
+(2, 'coordialidade na fala', '8',
+ 'Manteve uma comunicação respeitosa e adequada durante o atendimento.'),
+
+(2, 'eficiencia operacional', '8',
+ 'A demanda foi encaminhada de maneira eficiente.'),
+
+(2, 'surpreender', '6',
+ 'O atendimento resolveu a demanda, mas não apresentou uma ação adicional diferenciada.');
+
+WITH nova_avaliacao AS (
+    INSERT INTO avaliacao_ia (
+        registro_chamadas_log,
+        nota_final,
+        feedback_geral,
+        data_avaliacao,
+        modelo_ia
+    )
+    VALUES (
+        '104-561137232020-26082026-091523.wav',
+        '8',
+        'Atendimento adequado e resolutivo, com boa eficiência operacional. Foram identificadas oportunidades de melhoria na empatia e na personalização do atendimento.',
+        '2026-09-20',
+        'gemini-3.1-flash-lite'
+    )
+    RETURNING id_avaliacao
+)
+INSERT INTO avaliacao_criterio (
+    id_avaliacao,
+    criterio,
+    nota_criterio,
+    justificativa_criterio
+)
+SELECT
+    nova_avaliacao.id_avaliacao,
+    dados.criterio,
+    dados.nota_criterio,
+    dados.justificativa_criterio
+FROM nova_avaliacao
+CROSS JOIN (
+    VALUES
+        (
+            'chamar pelo nome',
+            '7',
+            'O agente utilizou o nome do cliente em alguns momentos, mas poderia ter utilizado a personalização com maior frequência.'
+        ),
+        (
+            'agir com empatia',
+            '7',
+            'Demonstrou compreensão sobre a solicitação, mas poderia apresentar maior acolhimento durante a interação.'
+        ),
+        (
+            'ouvir com atencao',
+            '8',
+            'Demonstrou atenção às informações apresentadas pelo cliente e utilizou os dados para conduzir o atendimento.'
+        ),
+        (
+            'coordialidade na fala',
+            '9',
+            'Manteve uma comunicação educada, respeitosa e cordial durante o atendimento.'
+        ),
+        (
+            'eficiencia operacional',
+            '9',
+            'Conduziu a solicitação de forma objetiva e conseguiu encaminhar a demanda sem procedimentos desnecessários.'
+        ),
+        (
+            'surpreender',
+            '7',
+            'Resolveu a demanda apresentada, porém não realizou ações adicionais que proporcionassem uma experiência diferenciada.'
+        )
+) AS dados(
+    criterio,
+    nota_criterio,
+    justificativa_criterio
+);
+
+ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
