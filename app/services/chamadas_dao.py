@@ -194,7 +194,7 @@ def inserir_analise(
             nota_final,
             feedback_geral,
             date.today(),
-            "gemini-3.1-flash-lite"
+            "Revisão: gemini-3.1-flash-lite | Análise: gemini-3.5-flash-lite"
         ),
     )
 

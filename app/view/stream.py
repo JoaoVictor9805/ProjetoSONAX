@@ -69,6 +69,32 @@ class QueueWriter:
             self._queue.put_event(
                 LogEvent(line[len(DEV_PREFIX):], self._stream, dev_only=True)
             )
+            return
+
+        # Redireciona saídas técnicas de bibliotecas de terceiros para o Log Dev
+        is_dev = False
+        if self._stream == "err":
+            is_dev = True
+        elif any(
+            indicador in line
+            for indicador in (
+                "whisperx",
+                "pyannote",
+                "Loading diarization model",
+                "UserWarning",
+                "FutureWarning",
+                "DeprecationWarning",
+                "huggingface_hub",
+                "automatic function calling",
+                "(AFC)",
+                "symlink",
+                "torchcodec",
+            )
+        ):
+            is_dev = True
+
+        if is_dev:
+            self._queue.put_event(LogEvent(line, self._stream, dev_only=True))
         else:
             self._queue.put_event(LogEvent(line, self._stream))
 

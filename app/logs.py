@@ -20,7 +20,10 @@ pode importá-lo sem passar a depender da camada de interface.
 
 from __future__ import annotations
 
+import logging
+import os
 import traceback
+import warnings
 
 # Marcador interno. Nunca aparece na GUI — o `QueueWriter` o remove ao
 # converter a linha em `LogEvent`.
@@ -49,3 +52,54 @@ def log_dev_exc(contexto: str = "") -> None:
     if contexto:
         log_dev(contexto)
     log_dev(traceback.format_exc())
+
+
+def _custom_showwarning(
+    message: Warning | str,
+    category: type[Warning],
+    filename: str,
+    lineno: int,
+    file: object | None = None,
+    line: str | None = None,
+) -> None:
+    """Redireciona avisos internos de bibliotecas exclusivamente para o Log Dev."""
+    log_dev(f"[AVISO INTERNO] {category.__name__}: {message}")
+
+
+warnings.showwarning = _custom_showwarning
+
+
+class _DevLoggingHandler(logging.Handler):
+    """Handler do logging do Python que redireciona saídas de terceiros para o Log Dev."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            log_dev(msg)
+        except Exception:
+            pass
+
+
+def silenciar_loggers_externos() -> None:
+    """Redireciona os loggers de bibliotecas barulhentas para o Log Dev."""
+    dev_handler = _DevLoggingHandler()
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    dev_handler.setFormatter(formatter)
+
+    for nome in (
+        "whisperx",
+        "whisperx.diarize",
+        "pyannote",
+        "huggingface_hub",
+        "google_genai",
+        "langchain_google_genai",
+        "urllib3",
+        "lightning",
+    ):
+        l = logging.getLogger(nome)
+        l.handlers.clear()
+        l.addHandler(dev_handler)
+        l.propagate = False
+
+
+silenciar_loggers_externos()

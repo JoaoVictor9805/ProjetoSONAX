@@ -62,7 +62,6 @@ from app.services.qualidade_audio import classificar_qualidade_audio
 from app.services.qualidade_audio import avaliar_qualidade_transcricao
 from app.services.qualidade_audio import calcular_metricas_whisper
 from app.services.qualidade_audio import analisar_transcricao
-from app.services import transcrever
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
 import threading             # usado apenas para anotação de tipo (cancel: threading.Event | None)
@@ -81,17 +80,16 @@ from app.services.chamadas_dao import (
     verificar_tabela_analise,
     inserir_analise
 )
-from app.services.diarizacao import (
-    DiarizacaoErro,
-    processar_diarizacao_completa,
-)
 from app.services.parses import (
     parse_data,
     parse_nome_arquivo,
     parse_hora
 )
-from app.services.transcrever import TranscricaoCancelada, transcrever_arquivo
-from app.logs import log_dev_exc
+from app.services.assemblyai_transcribe import (
+    transcrever_audio_assemblyai,
+    TranscricaoCancelada,
+)
+from app.logs import log_dev, log_dev_exc
 
 
 def duracao_wav(caminho: Path):
@@ -354,35 +352,36 @@ def salvar_no_banco(
             log_dev_exc()
             continue
 
-        # 1) Transcrição com progresso contínuo
+        # 1) Transcrição e Diarização via AssemblyAI (Universal-3.5 Pro)
         _notificar_progresso(
             on_progress,
             i,
             total,
             caminho,
             0.0,
-            f"[INFO] [{i}/{total}] Iniciando transcrição de: {rotulo_audio}",
+            f"[INFO] [{i}/{total}] Enviando {rotulo_audio} para AssemblyAI (Universal-3.5 Pro)...",
         )
-        print(f"  [INFO] [{i}/{total}] transcrevendo: {rotulo_audio} ...")
+        print(f"  [INFO] [{i}/{total}] transcrevendo e diarizando (AssemblyAI): {rotulo_audio} ...")
 
-        def _on_sub_progress(sub_frac: float) -> None:
+        def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
             pct = int(sub_frac * 100)
             _notificar_progresso(
                 on_progress,
                 i,
                 total,
                 caminho,
-                sub_frac * 0.70,
-                f"[INFO] [{i}/{total}] {rotulo_audio}: {pct}% transcrevendo...",
+                sub_frac * 0.85,
+                f"[INFO] [{i}/{total}] {rotulo_audio}: {pct}% {msg or 'AssemblyAI processando...'}",
             )
 
+        res_assembly = None
         for tentativa in range(1, 4):
             try:
-                texto, metricas_whisper, palavras, segmentos = transcrever_arquivo(
+                res_assembly = transcrever_audio_assemblyai(
                     caminho,
                     cancel=cancel,
                     on_progress=_on_sub_progress,
-                    retornar_segmentos=True,
+                    speakers_expected=3,
                 )
                 break
 
@@ -391,27 +390,32 @@ def salvar_no_banco(
 
             except Exception as e:
                 print(
-                    f"[AVISO] Falha na transcrição de '{rotulo_audio}' "
+                    f"[AVISO] Falha na transcrição AssemblyAI de '{rotulo_audio}' "
                     f"(tentativa {tentativa}/3)"
                 )
                 log_dev_exc()
                 if tentativa < 3:
                     print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
-        
+
         else:
             print(
                 f"[ERRO] Não foi possível transcrever "
-                f"'{rotulo_audio}' após 3 tentativas. Arquivo ignorado."
+                f"'{rotulo_audio}' via AssemblyAI após 3 tentativas. Arquivo ignorado."
             )
             continue
 
+        texto_formatado = res_assembly["texto_formatado"]
+        texto_diarizado = texto_formatado
+        texto_puro = res_assembly.get("texto", texto_formatado)
+
+        # 2) Avaliação de qualidade da transcrição
         try:
-            dados_transcricao = analisar_transcricao(texto)
-            dados_whisper = calcular_metricas_whisper(metricas_whisper)
+            dados_transcricao = analisar_transcricao(texto_puro)
+            metricas_assembly = res_assembly.get("metricas", {})
 
             dados = {
                 **dados_transcricao,
-                **dados_whisper
+                **metricas_assembly,
             }
 
             avaliacao = avaliar_qualidade_transcricao(dados)
@@ -430,42 +434,13 @@ def salvar_no_banco(
             print(f"  [AVISO] transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
             continue
 
-        # 2) Diarização de locutores e alinhamento temporal com as palavras
-        texto_diarizado = texto
-        try:
-            _notificar_progresso(
-                on_progress,
-                i,
-                total,
-                caminho,
-                0.75,
-                f"[INFO] [{i}/{total}] {rotulo_audio}: executando diarização de locutores...",
-            )
-            print(f"  [INFO] [{i}/{total}] diarizando locutores: {rotulo_audio} ...")
-            diarizacao_res = processar_diarizacao_completa(
-                caminho,
-                palavras_whisper=palavras,
-                segmentos_whisper=segmentos,
-                cancel=cancel,
-            )
-            texto_formatado = diarizacao_res.get("texto_formatado")
-            if texto_formatado:
-                texto_diarizado = texto_formatado
-                print(f"  [INFO] Diarização concluída para {rotulo_audio} ({len(diarizacao_res.get('speakers', []))} locutores identificados).")
-        except DiarizacaoErro as de:
-            print(f"  [AVISO] Diarização não concluída para {rotulo_audio}: {de} — prosseguindo com texto padrão.")
-            log_dev_exc()
-        except Exception as de:
-            print(f"  [AVISO] Erro na diarização de {rotulo_audio}: {de} — prosseguindo com texto padrão.")
-            log_dev_exc()
-
         _notificar_progresso(
             on_progress,
             i,
             total,
             caminho,
             0.90,
-            f"[INFO] [{i}/{total}] {rotulo_audio}: transcrição concluída. Gravando no banco...",
+            f"[INFO] [{i}/{total}] {rotulo_audio}: transcrição e diarização concluídas. Gravando no banco...",
         )
 
         # 3) INSERT em uma transação pequena e isolada
@@ -525,7 +500,7 @@ def salvar_no_banco(
                         agente_nome=nome,
                         data_ligacao=data_ligacao,
                         log_arquivo=caminho.name,
-                        transcricao=texto,
+                        transcricao=texto_formatado,
                     )
 
                 break

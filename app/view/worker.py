@@ -40,7 +40,7 @@ from app.services.script import (
     gerar_analise_revisao
 )
 
-from app.services.transcrever import TranscricaoCancelada
+from app.services.assemblyai_transcribe import TranscricaoCancelada
 from app.view.events import DoneEvent, EventQueue, LogEvent, ProgressEvent
 from app.view.stream import redirect_stdio
 
@@ -257,11 +257,11 @@ def run_pipeline(
                 ))
                 return
 
-            # 4) Transcrição (Whisper) + INSERT no banco
+            # 4) Transcrição e Diarização (AssemblyAI Universal-3.5 Pro) + INSERT no banco
             total = len(copiados)
             queue.put_event(ProgressEvent(
                 done=0, total=total, phase="transcribing",
-                message=f"[INFO] Iniciando transcrição e gravação de {total} arquivo(s) ...",
+                message=f"[INFO] Iniciando transcrição e diarização (AssemblyAI) de {total} arquivo(s) ...",
             ))
 
             def on_progress(
@@ -297,7 +297,7 @@ def run_pipeline(
 
             queue.put_event(ProgressEvent(
                 done=total, total=total, phase="inserting",
-                message=f"[INFO] Transcrição finalizada: {inseridos} registro(s) processado(s) {detalhes_existentes}.",
+                message=f"[INFO] Transcrição e diarização finalizadas: {inseridos} registro(s) processado(s) {detalhes_existentes}.",
             ))
 
             # 4.5) Revisão e inserção no banco

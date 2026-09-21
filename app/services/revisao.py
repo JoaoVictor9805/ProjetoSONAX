@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 client = ChatGoogleGenerativeAI (
-    model="gemini-3.5-flash-lite",
+    model="gemini-3.1-flash-lite",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     max_output_tokens=4096,
     max_retries=3
