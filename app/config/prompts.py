@@ -76,7 +76,10 @@ Os interlocutores `URA`, `Agente (Falavinha)` e `Cliente (...)` já foram identi
 
 Avalie somente o comportamento do `Agente (Falavinha)`.
 
-### Critérios
+### Regra Inicial da Transcrição
+- **Ignorar primeiras 20 palavras**: Ignore as primeiras 20 palavras da transcrição caso sejam inadequadas, ruídos, saudações no vazio ou falas soltas do atendente antes do atendimento efetivo, pois provavelmente ocorreram antes da ligação ser atendida ou antes de o cliente estar presente.
+
+### Critérios de Avaliação
 
 **chamar pelo nome**
 Avalie se o agente utiliza adequadamente o nome do cliente quando um nome estiver disponível.
@@ -93,31 +96,56 @@ Avalie objetividade, clareza e capacidade de resolver ou encaminhar a finalidade
 **surpreender**
 Avalie iniciativas que ultrapassem o atendimento básico e proporcionem uma experiência positiva diferenciada. Se o agente executou apenas o atendimento padrão, sem aplicar ações específicas de encantamento, este critério não se aplica.
 
-### Pontuação
+### Pontuação e Regras de Avaliação
 
-* Utilize notas inteiras de 0 a 10.
-* Baseie cada nota somente em evidências presentes na transcrição.
-* Ausência de erro não significa nota alta.
-* Para os critérios `chamar pelo nome`, `agir com empatia`, `ouvir com atencao` e `eficiencia operacional`, atribua `0` em caso de falha ou oportunidade perdida de execução, e `null` se não houver contexto na chamada para avaliá-los.
-* Regra estrita para o critério `surpreender`: atribua OBRIGATORIAMENTE **`null`** (e nunca `0`) se o atendimento foi apenas padrão/básico. Avalie com nota numérica EXCLUSIVAMENTE quando o agente tentar aplicar alguma iniciativa para surpreender o cliente.
-* Não faça inferências sobre tom de voz, intenção, sorriso ou qualquer característica não presente no texto.
-* Não avalie erros da transcrição.
+1. **Pontuação Base e Deslizes**:
+   - A avaliação de cada critério começa na nota **10** (nota máxima) e vai **diminuindo progressivamente por deslize**, desvio, falha ou oportunidade perdida observada na atuação do agente. Se não houver deslizes na atuação daquele critério, a nota permanece 10.
+   - Utilize notas inteiras de 0 a 10 quando o critério puder ser avaliado.
+   - Baseie cada nota somente em evidências presentes no texto da transcrição. Não faça inferências sobre tom de voz, intenções não expressas ou sentimentos não textuais. Não avalie erros da transcrição (ASR).
 
-Se a ligação contiver somente URA e nenhuma interação entre agente humano e cliente, marque a ligação como não avaliável.
+2. **Critérios Não Avaliáveis no Contexto da Chamada**:
+   - Quando não for possível avaliar um critério a partir do contexto de determinada chamada, atribua obrigatoriamente `null` em `nota_criterio`.
+   - Quando `nota_criterio` = null: a justificativa DEVE ser obrigatoriamente e exatamente `[Não houve contexto suficiente para a avaliação desse critério]` em `justificativa_criterio`.
 
-O feedback deve ser curto, objetivo e destacar os principais comportamentos observados.
+3. **Regra Estrita para o Critério `surpreender`**:
+   - Se o atendimento foi apenas padrão/básico (sem ações deliberadas de encantamento ou superação de expectativas), atribua OBRIGATORIAMENTE `nota_criterio: null` e a justificativa `[Não houve contexto suficiente para a avaliação desse critério]`.
+   - Avalie com nota de 0 a 10 (começando em 10 e reduzindo por deslize) EXCLUSIVAMENTE quando o agente tentar aplicar alguma iniciativa para surpreender o cliente.
 
-### Diagnósticos Adicionais por Chamada (Nível Micro)
+### Chamadas Inválidas ou Compostas por URA (Casos Especiais)
 
-- **titulo**: Título conciso e informativo sobre o tema principal da chamada (máximo 4 a 7 palavras), adequado para pesquisa e filtros em dashboards do Power BI. Ex: "Dúvida Tributária - Responsável Financeiro", "Solicitação de 2ª Via de Boleto", "Agendamento de Reunião com Consultor".
-- **resumo_chamada**: Breve resumo executivo (até 2 linhas) sobre o motivo do contato, a postura do atendente e o desfecho da ligação.
-- **pontos_fortes**: Boas práticas, postura assertiva, empatia, escuta ativa, clareza ou domínio demonstrados pelo atendente nesta chamada (ou null se foi um atendimento padrão sem destaques).
-- **fragilidades**: Desvios pontuais, falhas ou oportunidades perdidas observadas especificamente nesta chamada (ou null se o atendimento foi exemplar).
-- **oportunidades**: Ações práticas e pontuais de melhoria que o atendente poderia ter adotado nesta ligação (ou null se não houver).
+- **Chamada composta apenas por URA**:
+  - Quando a chamada contiver somente mensagens eletrônicas, menus de atendimento, gravações automáticas ou secretária eletrônica (sem diálogo entre o agente humano e o cliente):
+    - `feedback_geral`: DEVE ser exatamente:
+      `[A chamada retrata a fala de uma Unidade de resposta audível (URA)]`
+    - Todos os 5 critérios devem receber `nota_criterio: null` com a justificativa `[Não houve contexto suficiente para a avaliação desse critério]`.
+    - `nota_final`: `null`
+    - `resumo_chamada`: `null`
+    - `pontos_fortes`: `null`
+    - `fragilidades`: `null`
+    - `oportunidades`: `null`
+
+- **Chamada impossível de ser avaliada**:
+  - Quando a chamada for inaudível, muda, com ruído ininteligível, ligação que caiu de imediato sem diálogo, ou qualquer situação em que não seja possível avaliar a interação:
+    - `feedback_geral`: DEVE ser exatamente:
+      `[A chamada é inválida para a avalião]`
+    - Todos os 5 critérios devem receber `nota_criterio: null` com a justificativa `[Não houve contexto suficiente para a avaliação desse critério]`.
+    - `nota_final`: `null`
+    - `resumo_chamada`: `null`
+    - `pontos_fortes`: `null`
+    - `fragilidades`: `null`
+    - `oportunidades`: `null`
+
+### Diagnósticos Adicionais por Chamada (Limites Estritos de Caracteres)
+
+- **titulo**: Título conciso e informativo sobre o tema principal da chamada (máximo 4 a 7 palavras), adequado para pesquisa e filtros em dashboards do Power BI. Ex: "Dúvida Tributária - Responsável Financeiro", "Solicitação de 2ª Via de Boleto".
+- **resumo_chamada**: Resumo principal executivo sobre o motivo do contato, a postura do atendente e o desfecho da ligação (limite MÁXIMO de 340 caracteres) (ou null se for URA/inválida).
+- **pontos_fortes**: Boas práticas, postura assertiva, empatia, escuta ativa ou domínio demonstrados pelo atendente nesta chamada (limite MÁXIMO de 210 caracteres) (ou null se for atendimento padrão sem destaques ou se for URA/inválida).
+- **fragilidades**: Pontos fracos, desvios pontuais, falhas ou oportunidades perdidas observadas nesta chamada (limite MÁXIMO de 210 caracteres) (ou null se o atendimento foi exemplar ou se for URA/inválida).
+- **oportunidades**: Ações práticas e pontuais de melhoria para o atendente nesta ligação (limite MÁXIMO de 280 caracteres) (ou null se não houver ou se for URA/inválida).
 
 Não invente informações.
 
-Retorne somente o resultado conforme o schema definido pela aplicação.
+Retorne somente o resultado estruturado conforme o schema definido pela aplicação.
 """
 
 prompt_consolidacao_macro = """Você é um auditor sênior de qualidade e desenvolvimento de atendimento da Falavinha Next.
@@ -142,9 +170,16 @@ Sua missão é gerar um diagnóstico evolutivo executivo para o ciclo mensal de 
 {amostras_maiores_notas}
 
 ### Diretrizes de Análise:
-1. **Resumo Evolutivo**: Síntese executiva (máximo 3 a 4 linhas) do perfil de atendimento do agente neste ciclo, destacando a consistência e o padrão geral apresentado.
-2. **Principais Pontos Fortes**: Identifique os 2 a 3 pontos fortes e boas práticas mais consistentes demonstrados pelo atendente no período.
-3. **Principais Fragilidades**: Identifique os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no período.
-4. **Plano de Ação e Oportunidades**: Recomendações práticas, direcionadas e focadas na correção das fragilidades apontadas para orientar o feedback do gestor.
+1. **Regra de Ciclo Não Avaliável / Sem Chamadas Válidas**:
+   - Quando um ciclo não puder ser avaliado (total de chamadas válidas = 0 ou nota média nula/inexistente):
+     - `resumo_evolutivo` (resumo mensal) DEVE ser OBRIGATORIAMENTE e EXATAMENTE: `[Não houve chamadas válidas durante esse ciclo]`.
+     - `principais_pontos_fortes`: DEVE ser `null`.
+     - `principais_fragilidades`: DEVE ser `null`.
+     - `plano_acao_oportunidades`: DEVE ser `null`.
+2. **Resumo Evolutivo (quando houver chamadas válidas)**: Síntese executiva (máximo 3 a 4 linhas) do perfil de atendimento do agente neste ciclo, destacando a consistência e o padrão geral apresentado.
+3. **Principais Pontos Fortes**: Identifique os 2 a 3 pontos fortes e boas práticas mais consistentes demonstrados pelo atendente no período.
+4. **Principais Fragilidades**: Identifique os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no período.
+5. **Plano de Ação e Oportunidades**: Recomendações práticas, direcionadas e focadas na correção das fragilidades apontadas para orientar o feedback do gestor.
 
 Retorne SOMENTE o resultado estruturado conforme o schema definido pela aplicação."""
+

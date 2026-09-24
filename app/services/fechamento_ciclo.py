@@ -43,16 +43,23 @@ load_dotenv()
 
 class PerfilAgenteOutput(BaseModel):
     resumo_evolutivo: str = Field(
-        description="Síntese executiva (máximo 3 a 4 linhas) do perfil e consistência do agente neste ciclo."
+        description=(
+            "Síntese executiva (máximo 3 a 4 linhas) do perfil e consistência do agente neste ciclo. "
+            "Se o ciclo não puder ser avaliado ou não houver chamadas válidas, retorne exatamente: "
+            "'[Não houve chamadas válidas durante esse ciclo]'."
+        )
     )
-    principais_pontos_fortes: str = Field(
-        description="Os 2 a 3 pontos fortes e boas práticas mais consistentes demonstrados pelo agente no mês."
+    principais_pontos_fortes: str | None = Field(
+        default=None,
+        description="Os 2 a 3 pontos fortes e boas práticas mais consistentes demonstrados pelo agente no mês (ou null se o ciclo não puder ser avaliado)."
     )
-    principais_fragilidades: str = Field(
-        description="Os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no mês."
+    principais_fragilidades: str | None = Field(
+        default=None,
+        description="Os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no mês (ou null se o ciclo não puder ser avaliado)."
     )
-    plano_acao_oportunidades: str = Field(
-        description="Recomendações práticas, direcionadas e focadas na correção das fragilidades observadas."
+    plano_acao_oportunidades: str | None = Field(
+        default=None,
+        description="Recomendações práticas, direcionadas e focadas na correção das fragilidades observadas (ou null se o ciclo não puder ser avaliado)."
     )
 
 
@@ -134,12 +141,13 @@ def obter_estatisticas_agente(
     fim: date,
 ) -> dict:
     """Calcula total de chamadas, nota média geral e médias por critério PEAH."""
-    # Total de chamadas e nota média geral
+    # Total de chamadas, nota média geral e total de chamadas válidas com nota
     cur.execute(
         """
         SELECT 
             COUNT(DISTINCT a.id_avaliacao) as total_chamadas,
-            COALESCE(ROUND(AVG(a.nota_final::numeric), 2), 0) as nota_media
+            ROUND(AVG(a.nota_final::numeric), 2) as nota_media,
+            COUNT(DISTINCT CASE WHEN a.nota_final IS NOT NULL THEN a.id_avaliacao END) as chamadas_validas
         FROM avaliacao_ia a
         INNER JOIN registro_chamadas r ON a.registro_chamadas_log = r.log
         WHERE r.agente_nome = %s
@@ -149,7 +157,8 @@ def obter_estatisticas_agente(
     )
     res_geral = cur.fetchone()
     total_chamadas = res_geral[0] if res_geral else 0
-    nota_media = float(res_geral[1]) if res_geral and res_geral[1] is not None else 0.0
+    nota_media = float(res_geral[1]) if res_geral and res_geral[1] is not None else None
+    chamadas_validas = res_geral[2] if res_geral and len(res_geral) > 2 else 0
 
     # Médias dos critérios PEAH
     cur.execute(
@@ -173,6 +182,7 @@ def obter_estatisticas_agente(
     return {
         "total_chamadas": total_chamadas,
         "nota_media": nota_media,
+        "chamadas_validas": chamadas_validas,
         "medias_criterios": medias_criterios,
     }
 
@@ -269,7 +279,7 @@ def gravar_perfil_agente(
     agente_nome: str,
     mes_referencia: date,
     total_chamadas_mes: int,
-    nota_media_mes: float,
+    nota_media_mes: float | None,
     perfil: PerfilAgenteOutput,
 ) -> int | None:
     """Insere ou atualiza o fechamento mensal na tabela `perfil_agente`."""
@@ -427,43 +437,59 @@ def executar_fechamento_ciclo(
 
         total_chamadas = stats["total_chamadas"]
         nota_media = stats["nota_media"]
-        medias_criterios_str = "\n".join(
-            f"- {crit}: {nota:.2f}" for crit, nota in stats["medias_criterios"].items()
-        ) or "- Nenhum critério pontuado."
+        chamadas_validas = stats.get("chamadas_validas", 0)
 
-        _log(f"  Métricas: {total_chamadas} chamadas | Média geral: {nota_media:.2f}")
-        _log(f"  Amostras coletadas: {len(menores)} menores notas | {len(maiores)} maiores notas")
+        # Regra: Quando um ciclo não puder ser avaliado, não atribua 0, atribua null em nota_media_mes (perfil_agente).
+        # Quando um ciclo = null, o resumo mensal deve ser [Não houve chamadas válidas durante esse ciclo] (perfil_agente).
+        # Os demais atributos: fragilidades, pontos fortes e oportunidades de melhoria devem receber null (perfil_agente).
+        if total_chamadas == 0 or chamadas_validas == 0 or nota_media is None:
+            _log(f"  [INFO] Ciclo sem chamadas válidas para {agente_nome}. Gravando perfil nulo padronizado.")
+            perfil_resultado = PerfilAgenteOutput(
+                resumo_evolutivo="[Não houve chamadas válidas durante esse ciclo]",
+                principais_pontos_fortes=None,
+                principais_fragilidades=None,
+                plano_acao_oportunidades=None,
+            )
+            nota_media_gravar = None
+        else:
+            nota_media_gravar = nota_media
+            medias_criterios_str = "\n".join(
+                f"- {crit}: {nota:.2f}" for crit, nota in stats["medias_criterios"].items()
+            ) or "- Nenhum critério pontuado."
 
-        # Invocação do Gemini Flash-Lite com retentativas
-        perfil_resultado: PerfilAgenteOutput | None = None
-        for tentativa in range(1, 4):
-            try:
-                payload = {
-                    "agente_nome": agente_nome,
-                    "ciclo_inicio": inicio.strftime("%d/%m/%Y"),
-                    "ciclo_fim": fim.strftime("%d/%m/%Y"),
-                    "total_chamadas": total_chamadas,
-                    "nota_media": f"{nota_media:.2f}",
-                    "medias_criterios": medias_criterios_str,
-                    "amostras_menores_notas": formatar_bloco_amostras(menores),
-                    "amostras_maiores_notas": formatar_bloco_amostras(maiores),
-                }
-                resposta = chain.invoke(payload)
-                if isinstance(resposta, PerfilAgenteOutput):
-                    perfil_resultado = resposta
-                elif isinstance(resposta, dict):
-                    perfil_resultado = PerfilAgenteOutput(**resposta)
-                else:
-                    perfil_resultado = PerfilAgenteOutput(**dict(resposta))
-                break
-            except Exception as e:
-                _log(f"  [AVISO] Tentativa {tentativa}/3 falhou para {agente_nome}.")
-                log_dev_exc()
+            _log(f"  Métricas: {total_chamadas} chamadas ({chamadas_validas} válidas) | Média geral: {nota_media:.2f}")
+            _log(f"  Amostras coletadas: {len(menores)} menores notas | {len(maiores)} maiores notas")
 
-        if perfil_resultado is None:
-            _log(f"  [ERRO] Não foi possível gerar o perfil macro de {agente_nome} após 3 tentativas.")
-            falhas += 1
-            continue
+            # Invocação do Gemini Flash-Lite com retentativas
+            perfil_resultado: PerfilAgenteOutput | None = None
+            for tentativa in range(1, 4):
+                try:
+                    payload = {
+                        "agente_nome": agente_nome,
+                        "ciclo_inicio": inicio.strftime("%d/%m/%Y"),
+                        "ciclo_fim": fim.strftime("%d/%m/%Y"),
+                        "total_chamadas": total_chamadas,
+                        "nota_media": f"{nota_media:.2f}",
+                        "medias_criterios": medias_criterios_str,
+                        "amostras_menores_notas": formatar_bloco_amostras(menores),
+                        "amostras_maiores_notas": formatar_bloco_amostras(maiores),
+                    }
+                    resposta = chain.invoke(payload)
+                    if isinstance(resposta, PerfilAgenteOutput):
+                        perfil_resultado = resposta
+                    elif isinstance(resposta, dict):
+                        perfil_resultado = PerfilAgenteOutput(**resposta)
+                    else:
+                        perfil_resultado = PerfilAgenteOutput(**dict(resposta))
+                    break
+                except Exception as e:
+                    _log(f"  [AVISO] Tentativa {tentativa}/3 falhou para {agente_nome}.")
+                    log_dev_exc()
+
+            if perfil_resultado is None:
+                _log(f"  [ERRO] Não foi possível gerar o perfil macro de {agente_nome} após 3 tentativas.")
+                falhas += 1
+                continue
 
         # Gravação no PostgreSQL
         try:
@@ -473,7 +499,7 @@ def executar_fechamento_ciclo(
                     agente_nome,
                     mes_referencia,
                     total_chamadas,
-                    nota_media,
+                    nota_media_gravar,
                     perfil_resultado,
                 )
             _log(f"  [INFO] Perfil macro de {agente_nome} salvo com sucesso no banco (ID {id_perfil}).")

@@ -37,18 +37,17 @@ class Criterio(BaseModel):
         ge=0,
         le=10,
         description=(
-            "Nota inteira entre 0 e 10. "
-            "Use null quando não houver evidência suficiente "
-            "para avaliar o critério."
+            "Nota inteira entre 0 e 10. A nota começa em 10 e vai diminuindo progressivamente por deslize. "
+            "Atribua null quando não for possível avaliar o critério a partir do contexto da chamada."
         ),
     )
 
     justificativa_criterio: str | None = Field(
         default=None,
         description=(
-            "Justificativa curta e objetiva baseada exclusivamente "
-            "na transcrição. Use null quando o critério não puder "
-            "ser avaliado."
+            "Justificativa curta e objetiva baseada exclusivamente na transcrição. "
+            "Quando nota_criterio = null, a justificativa deve ser obrigatoriamente e exatamente: "
+            "'[Não houve contexto suficiente para a avaliação desse critério]'."
         ),
     )
 
@@ -60,16 +59,16 @@ class AnaliseLigacao(BaseModel):
         ge=0,
         le=10,
         description=(
-            "Nota geral da ligação. "
-            "Esse valor será recalculado pela aplicação."
+            "Nota geral da ligação recalculada pela aplicação. Use null se a chamada for URA ou inválida."
         ),
     )
 
     feedback_geral: str | None = Field(
         default=None,
         description=(
-            "Feedback curto e objetivo sobre os principais pontos "
-            "observados no comportamento do agente."
+            "Feedback sobre o atendimento. Em caso de URA ou chamada não avaliável, escreva exatamente: "
+            "'[A chamada retrata a fala de uma Unidade de resposta audível (URA)]' ou "
+            "'[A chamada é inválida para a avalião]' conforme a situação."
         ),
     )
 
@@ -84,35 +83,34 @@ class AnaliseLigacao(BaseModel):
     )
 
     resumo_chamada: str | None = Field(
-
         default=None,
         description=(
-            "Breve resumo executivo (até 2 linhas) sobre o motivo do contato, "
-            "a postura do atendente e o desfecho da ligação."
+            "Resumo principal executivo da chamada (limite de até 340 caracteres) sobre o motivo do contato, "
+            "a postura do atendente e o desfecho da ligação (ou null se for URA/inválida)."
         ),
     )
 
     pontos_fortes: str | None = Field(
         default=None,
         description=(
-            "Boas práticas, postura assertiva, empatia, escuta ativa ou domínio demonstrados "
-            "nesta chamada específica (ou null se não houver destaques)."
+            "Pontos fortes e boas práticas demonstradas na ligação (limite de até 210 caracteres) "
+            "(ou null se não houver destaques ou se for URA/inválida)."
         ),
     )
 
     fragilidades: str | None = Field(
         default=None,
         description=(
-            "Desvios pontuais, falhas ou oportunidades perdidas observadas "
-            "nesta chamada específica (ou null se não houver)."
+            "Pontos fracos, desvios pontuais ou deslizes observados na ligação (limite de até 210 caracteres) "
+            "(ou null se não houver ou se for URA/inválida)."
         ),
     )
 
     oportunidades: str | None = Field(
         default=None,
         description=(
-            "Oportunidades práticas e pontuais de melhoria para o atendente "
-            "nesta ligação (ou null se não houver)."
+            "Oportunidades práticas e pontuais de melhoria para o atendente (limite de até 280 caracteres) "
+            "(ou null se não houver ou se for URA/inválida)."
         ),
     )
 
@@ -199,8 +197,8 @@ def calcular_nota_final(resultado: dict) -> dict:
 
     notas = [
         criterio["nota_criterio"]
-        for criterio in resultado["criterios"]
-        if criterio["nota_criterio"] is not None
+        for criterio in resultado.get("criterios", [])
+        if criterio.get("nota_criterio") is not None
     ]
 
     if not notas:
@@ -233,6 +231,46 @@ def analisar_ligacao(ligacao: str) -> dict:
         resultado = resposta
     else:
         resultado = dict(resposta)
+
+    feedback = (resultado.get("feedback_geral") or "").strip()
+
+    # Tratamento de URA ou chamadas inválidas
+    if "[A chamada retrata a fala de uma Unidade de resposta audível (URA)]" in feedback:
+        resultado["feedback_geral"] = "[A chamada retrata a fala de uma Unidade de resposta audível (URA)]"
+        resultado["nota_final"] = None
+        resultado["resumo_chamada"] = None
+        resultado["pontos_fortes"] = None
+        resultado["fragilidades"] = None
+        resultado["oportunidades"] = None
+        for crit in resultado.get("criterios", []):
+            crit["nota_criterio"] = None
+            crit["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
+
+    elif "[A chamada é inválida para a avali" in feedback or "inválida para a avali" in feedback.lower():
+        resultado["feedback_geral"] = "[A chamada é inválida para a avalião]"
+        resultado["nota_final"] = None
+        resultado["resumo_chamada"] = None
+        resultado["pontos_fortes"] = None
+        resultado["fragilidades"] = None
+        resultado["oportunidades"] = None
+        for crit in resultado.get("criterios", []):
+            crit["nota_criterio"] = None
+            crit["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
+
+    # Regra: quando nota_criterio = null, justificativa obrigatória padronizada
+    for criterio in resultado.get("criterios", []):
+        if criterio.get("nota_criterio") is None:
+            criterio["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
+
+    # Limites estritos de caracteres (salvaguarda de comprimento)
+    if resultado.get("resumo_chamada") and len(resultado["resumo_chamada"]) > 340:
+        resultado["resumo_chamada"] = resultado["resumo_chamada"][:337] + "..."
+    if resultado.get("pontos_fortes") and len(resultado["pontos_fortes"]) > 210:
+        resultado["pontos_fortes"] = resultado["pontos_fortes"][:207] + "..."
+    if resultado.get("fragilidades") and len(resultado["fragilidades"]) > 210:
+        resultado["fragilidades"] = resultado["fragilidades"][:207] + "..."
+    if resultado.get("oportunidades") and len(resultado["oportunidades"]) > 280:
+        resultado["oportunidades"] = resultado["oportunidades"][:277] + "..."
 
     # Calcula deterministicamente a nota final
     resultado = calcular_nota_final(resultado)

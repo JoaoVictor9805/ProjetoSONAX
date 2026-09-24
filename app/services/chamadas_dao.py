@@ -194,6 +194,13 @@ def garantir_schema_atualizado(cur: psycopg.Cursor) -> None:
 
         ALTER TABLE perfil_agente
         ADD COLUMN IF NOT EXISTS principais_pontos_fortes TEXT;
+
+        ALTER TABLE perfil_agente ALTER COLUMN nota_media_mes DROP NOT NULL;
+        ALTER TABLE perfil_agente ALTER COLUMN resumo_evolutivo DROP NOT NULL;
+        ALTER TABLE perfil_agente ALTER COLUMN principais_pontos_fortes DROP NOT NULL;
+        ALTER TABLE perfil_agente ALTER COLUMN principais_fragilidades DROP NOT NULL;
+        ALTER TABLE perfil_agente ALTER COLUMN plano_acao_oportunidades DROP NOT NULL;
+        ALTER TABLE avaliacao_criterio ALTER COLUMN justificativa_criterio DROP NOT NULL;
         """
     )
     cur.execute(

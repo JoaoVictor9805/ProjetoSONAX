@@ -23,6 +23,97 @@ CREATE TABLE registro_chamadas (
 alter table registro_chamadas add column revisao TEXT;
 
 
+
+-- ==========================
+-- Etapa 02
+-- ==========================
+
+CREATE TABLE avaliacao_ia (
+	id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	registro_chamadas_log varchar(255) not null,
+	nota_final VARCHAR(2) not null,
+	feedback_geral TEXT not null,
+	data_avaliacao date not null,
+	modelo_ia varchar(50) not null,
+
+	foreign key (registro_chamadas_log) references registro_chamadas(log)
+);
+
+ALTER TABLE avaliacao_ia
+ADD CONSTRAINT uq_avaliacao_ia_registro_log
+UNIQUE (registro_chamadas_log);
+
+ALTER TABLE avaliacao_ia
+ALTER COLUMN modelo_ia TYPE VARCHAR(255);
+
+ALTER TABLE avaliacao_ia
+ALTER COLUMN nota_final DROP NOT NULL;
+
+ALTER TABLE avaliacao_ia
+ADD COLUMN IF NOT EXISTS titulo VARCHAR(255),
+ADD COLUMN IF NOT EXISTS resumo_chamada TEXT,
+ADD COLUMN IF NOT EXISTS pontos_fortes TEXT,
+ADD COLUMN IF NOT EXISTS fragilidades TEXT,
+ADD COLUMN IF NOT EXISTS oportunidades TEXT;
+
+
+CREATE TABLE avaliacao_criterio (
+	id_av_por_criterio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	id_avaliacao INT not null,
+	criterio VARCHAR(50) NOT NULL
+        CHECK (criterio IN (
+            'chamar pelo nome',
+            'agir com empatia',
+            'ouvir com atencao',
+            'coordialidade na fala',
+            'eficiencia operacional',
+            'surpreender'
+        )),
+	nota_criterio VARCHAR(2) not null,
+	justificativa_criterio TEXT,
+	
+	foreign key (id_avaliacao) references avaliacao_ia(id_avaliacao)
+);
+
+ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
+
+-- ==========================
+-- Etapa 03: Nível Macro
+-- ==========================
+
+CREATE TABLE IF NOT EXISTS perfil_agente (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agente_nome VARCHAR(100) NOT NULL REFERENCES origem(agente_nome),
+    mes_referencia DATE NOT NULL, -- Gravaremos sempre o dia 01. Ex: '2026-08-01'
+    total_chamadas_mes INT NOT NULL DEFAULT 0,
+    nota_media_mes NUMERIC(4,2),
+    resumo_evolutivo TEXT,
+    principais_pontos_fortes TEXT,
+    principais_fragilidades TEXT,
+    plano_acao_oportunidades TEXT,
+    data_processamento TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uk_perfil_agente_mes UNIQUE (agente_nome, mes_referencia)
+);
+
+ALTER TABLE perfil_agente ALTER COLUMN nota_media_mes DROP NOT NULL;
+ALTER TABLE perfil_agente ALTER COLUMN resumo_evolutivo DROP NOT NULL;
+ALTER TABLE perfil_agente ALTER COLUMN principais_pontos_fortes DROP NOT NULL;
+ALTER TABLE perfil_agente ALTER COLUMN principais_fragilidades DROP NOT NULL;
+ALTER TABLE perfil_agente ALTER COLUMN plano_acao_oportunidades DROP NOT NULL;
+
+-- ==========================
+-- Adição e Selects
+-- ==========================
+
+
+SELECT *
+from registro_chamadas as rc
+INNER join avaliacao_ia AS a
+	on rc.log = a.registro_chamadas_log
+INNER JOIN avaliacao_criterio AS c
+    ON a.id_avaliacao = c.id_avaliacao;
+
+
 INSERT INTO origem (ramal, agente_nome, dt_inicio, dt_fim) VALUES
 (103, 'Marcos Vinicius Rocha', '2025-01-03 08:12:14', '2025-05-18 17:45:32'),
 (103, 'Juliana Mendes Costa', '2025-05-19 08:03:21', '2026-08-29 18:12:44'),
@@ -148,84 +239,3 @@ INSERT INTO origem (ramal, agente_nome, dt_inicio, dt_fim) VALUES
 
 (142, 'Otavio Henrique Martins', '2025-08-25 08:37:14', '2025-12-05 18:27:53'),
 (142, 'Lorena Gabriela Ferreira', '2025-12-06 08:09:26', '2026-08-31 18:55:18');
-
--- ==========================
--- Etapa 02
--- ==========================
-
-
-
-
-CREATE TABLE avaliacao_ia (
-	id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	registro_chamadas_log varchar(255) not null,
-	nota_final VARCHAR(2) not null,
-	feedback_geral TEXT not null,
-	data_avaliacao date not null,
-	modelo_ia varchar(50) not null,
-
-	foreign key (registro_chamadas_log) references registro_chamadas(log)
-);
-
-ALTER TABLE avaliacao_ia
-ADD CONSTRAINT uq_avaliacao_ia_registro_log
-UNIQUE (registro_chamadas_log);
-
-ALTER TABLE avaliacao_ia
-ALTER COLUMN modelo_ia TYPE VARCHAR(255);
-
-ALTER TABLE avaliacao_ia
-ALTER COLUMN nota_final DROP NOT NULL;
-
-ALTER TABLE avaliacao_ia
-ADD COLUMN IF NOT EXISTS titulo VARCHAR(255),
-ADD COLUMN IF NOT EXISTS resumo_chamada TEXT,
-ADD COLUMN IF NOT EXISTS pontos_fortes TEXT,
-ADD COLUMN IF NOT EXISTS fragilidades TEXT,
-ADD COLUMN IF NOT EXISTS oportunidades TEXT;
-
-
-CREATE TABLE avaliacao_criterio (
-	id_av_por_criterio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	id_avaliacao INT not null,
-	criterio VARCHAR(50) NOT NULL
-        CHECK (criterio IN (
-            'chamar pelo nome',
-            'agir com empatia',
-            'ouvir com atencao',
-            'coordialidade na fala',
-            'eficiencia operacional',
-            'surpreender'
-        )),
-	nota_criterio VARCHAR(2) not null,
-	justificativa_criterio TEXT,
-	
-	foreign key (id_avaliacao) references avaliacao_ia(id_avaliacao)
-);
-
-ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
-
--- ==========================
--- Etapa 03: Nível Macro
--- ==========================
-
-CREATE TABLE IF NOT EXISTS perfil_agente (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    agente_nome VARCHAR(100) NOT NULL REFERENCES origem(agente_nome),
-    mes_referencia DATE NOT NULL, -- Gravaremos sempre o dia 01. Ex: '2026-08-01'
-    total_chamadas_mes INT NOT NULL DEFAULT 0,
-    nota_media_mes NUMERIC(4,2),
-    resumo_evolutivo TEXT,
-    principais_pontos_fortes TEXT,
-    principais_fragilidades TEXT,
-    plano_acao_oportunidades TEXT,
-    data_processamento TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT uk_perfil_agente_mes UNIQUE (agente_nome, mes_referencia)
-);
-
-SELECT *
-from registro_chamadas as rc
-INNER join avaliacao_ia AS a
-	on rc.log = a.registro_chamadas_log
-INNER JOIN avaliacao_criterio AS c
-    ON a.id_avaliacao = c.id_avaliacao;
