@@ -49,19 +49,15 @@ O tempo final em segundos é simplesmente: data_size / byte_rate
 ==============================================================================
     """
 
-from langchain_core.outputs import run_info
-from shutil import ExecError
-from aiohttp import resolver
-from typing_extensions import Tuple
-from aiohttp import log
 from app.services.analise_final_AI import analisar_ligacao
 from app.services.chamadas_dao import buscar_revisao
 from app.services.revisao import revisar_texto
-from app.services.qualidade_audio import analisar_audio
-from app.services.qualidade_audio import classificar_qualidade_audio
-from app.services.qualidade_audio import avaliar_qualidade_transcricao
-from app.services.qualidade_audio import calcular_metricas_whisper
-from app.services.qualidade_audio import analisar_transcricao
+from app.services.qualidade_audio import (
+    analisar_audio,
+    classificar_qualidade_audio,
+    avaliar_qualidade_transcricao,
+    analisar_transcricao,
+)
 import shutil                # biblioteca para copiar os arquivos de um lugar para outro.
 import struct                # Biblioteca para ler e interpretar dados binários puros (necessário para ler o cabeçalho do arquivo WAV).
 import threading             # usado apenas para anotação de tipo (cancel: threading.Event | None)
@@ -78,18 +74,19 @@ from app.services.chamadas_dao import (
     verificar_coluna_revisao,
     inserir_revisao,
     verificar_tabela_analise,
-    inserir_analise
+    inserir_analise,
 )
 from app.services.parses import (
     parse_data,
     parse_nome_arquivo,
-    parse_hora
+    parse_hora,
 )
 from app.services.assemblyai_transcribe import (
     transcrever_audio_assemblyai,
     TranscricaoCancelada,
 )
-from app.logs import log_dev, log_dev_exc
+from app.logs import log_dev_exc
+
 
 
 def duracao_wav(caminho: Path):
@@ -246,7 +243,7 @@ def copiar_longos_para_pasta(
                 break
             except Exception as e:
                 print(
-                   f"[AVISO] Falha ao copiar '{caminho}' "
+                   f"  [AVISO] Falha ao copiar '{caminho.name}' "
                    f"(tentativa {tentativa}/3)"
                 )
                 log_dev_exc()
@@ -254,7 +251,7 @@ def copiar_longos_para_pasta(
                     print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
         
         else:
-           print(f"[ERRO] Não foi possível copiar '{caminho}' após 3 tentativas.")
+           print(f"  [ERRO] Não foi possível copiar '{caminho.name}' após 3 tentativas.")
            continue
            
         copiados.append((destino, d))
@@ -325,7 +322,7 @@ def salvar_no_banco(
         # é responsabilidade exclusiva de app.py._formatar_linha.
         rotulo_audio = f"Audio {i:02d}"
         if cancel is not None and cancel.is_set():
-            print(f"  [CANCELADO] parando antes de {rotulo_audio}, "
+            print(f"  [CANCELADO] Parando antes de {rotulo_audio}, "
                   f"após {inseridos} registro(s) inserido(s).")
             return inseridos, ja_existentes, mapa_diarizacao
 
@@ -346,7 +343,7 @@ def salvar_no_banco(
 
         except Exception as e:
             print(
-                f"[ERRO] Falha ao verificar se '{rotulo_audio}' "
+                f"  [ERRO] Falha ao verificar se '{rotulo_audio}' "
                 f"já existe no banco"
             )
             log_dev_exc()
@@ -361,7 +358,7 @@ def salvar_no_banco(
             0.0,
             f"[INFO] [{i}/{total}] Enviando {rotulo_audio} para AssemblyAI (Universal-3.5 Pro)...",
         )
-        print(f"  [INFO] [{i}/{total}] transcrevendo e diarizando (AssemblyAI): {rotulo_audio} ...")
+        print(f"  [INFO] [{i}/{total}] Transcrevendo e diarizando (AssemblyAI): {rotulo_audio} ...")
 
         def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
             pct = int(sub_frac * 100)
@@ -422,7 +419,7 @@ def salvar_no_banco(
 
         except Exception as e:
             print(
-                f"[ERRO] Falha ao avaliar a transcrição "
+                f"  [ERRO] Falha ao avaliar a transcrição "
                 f"de '{rotulo_audio}'"
             )
             log_dev_exc()
@@ -431,7 +428,7 @@ def salvar_no_banco(
         qualidade = avaliacao["classificacao"]
 
         if qualidade == "Péssimo":
-            print(f"  [AVISO] transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
+            print(f"  [AVISO] Transcrição de {rotulo_audio} não é adequada ({avaliacao['pontuacao']}/100 - {avaliacao['motivo']}) — pulando")
             continue
 
         _notificar_progresso(
@@ -448,26 +445,26 @@ def salvar_no_banco(
             info = parse_nome_arquivo(caminho)
         except Exception as e:
             print(
-                f"[ERRO] Falha ao interpretar o nome do arquivo "
+                f"  [ERRO] Falha ao interpretar o nome do arquivo "
                 f"'{rotulo_audio}'"
             )
             log_dev_exc()
             continue
 
         if not info["ramal"].isdigit():
-            print(f"  [AVISO] ramal inválido em {rotulo_audio}: "
+            print(f"  [AVISO] Ramal inválido em {rotulo_audio}: "
                   f"{info['ramal']!r} — pulando")
             continue
 
         data = parse_data(info["data"])
         if data is None:
-            print(f"  [AVISO] data inválida em {rotulo_audio}: "
+            print(f"  [AVISO] Data inválida em {rotulo_audio}: "
                   f"{info['data']!r} — pulando")
             continue
 
         hora = parse_hora(info["hora"])
         if hora is None:
-            print(f"  [AVISO] hora inválida em {rotulo_audio}: "
+            print(f"  [AVISO] Hora inválida em {rotulo_audio}: "
                   f"{info['hora']!r} — pulando")
             continue
 
@@ -507,7 +504,7 @@ def salvar_no_banco(
 
             except Exception as e:
                 print(
-                    f"[ERRO] Falha ao salvar '{rotulo_audio}' "
+                    f"  [ERRO] Falha ao salvar '{rotulo_audio}' "
                     f"no banco de dados "
                     f"(tentativa {tentativa}/3)"
                 )
@@ -517,7 +514,7 @@ def salvar_no_banco(
 
         else:
             print(
-                f"[ERRO] Não foi possível inserir "
+                f"  [ERRO] Não foi possível inserir "
                 f"'{rotulo_audio}' após 3 tentativas."
             )
             continue
@@ -561,7 +558,7 @@ def gerar_revisao_transcricao(
     nome_exibicao = rotulo_audio or log
 
     if cancel is not None and cancel.is_set():
-        print(f"  [CANCELADO] revisão de {nome_exibicao} não iniciada.")
+        print(f"  [CANCELADO] Revisão de {nome_exibicao} não iniciada.")
         return None
 
     try:
@@ -576,14 +573,13 @@ def gerar_revisao_transcricao(
 
     except Exception as e:
         print(
-            f"[ERRO] Falha ao verificar coluna no banco"
-            f"'{rotulo_audio}'"
+            f"  [ERRO] Falha ao verificar revisão de '{rotulo_audio}' no banco"
         )
         log_dev_exc()
         return None
 
     if cancel is not None and cancel.is_set():
-        print(f"  [CANCELADO] revisão de {nome_exibicao} abortada antes da chamada de IA.")
+        print(f"  [CANCELADO] Revisão de {nome_exibicao} abortada antes da chamada de IA.")
         return None
     
     if not texto_diarizado or not texto_diarizado.strip():
@@ -616,12 +612,12 @@ def gerar_revisao_transcricao(
         try: 
             with conectar() as cur:
                 resultado = inserir_revisao(cur, log, revisao)
-                print(f"[INFO] Revisão de {rotulo_audio} inserida com sucesso no banco")
+                print(f"  [INFO] Revisão de {rotulo_audio} inserida com sucesso no banco")
             break
         
         except Exception as e:
             print(
-                f"[ERRO] Falha ao salvar a revisão "
+                f"  [ERRO] Falha ao salvar a revisão "
                 f"'{rotulo_audio}' no banco de dados "
                 f"(tentativa {tentativa}/3)"
             )
@@ -631,7 +627,7 @@ def gerar_revisao_transcricao(
 
     else:
         print(
-            f"[ERRO] Não foi possível salvar a revisão "
+            f"  [ERRO] Não foi possível salvar a revisão "
             f"'{rotulo_audio}' após 3 tentativas."
         )
         return None
@@ -650,7 +646,7 @@ def gerar_analise_revisao(
 
     if cancel is not None and cancel.is_set():
         print(
-            f"  [CANCELADO] análise de {nome_exibicao} não iniciada."
+            f"  [CANCELADO] Análise de {nome_exibicao} não iniciada."
         )
         return None
 
@@ -678,7 +674,7 @@ def gerar_analise_revisao(
 
     except Exception as e:
         print(
-            f"[ERRO] Falha ao verificar dados da análise "
+            f"  [ERRO] Falha ao verificar dados da análise "
             f"de '{rotulo_audio}' no banco"
         )
         log_dev_exc()
@@ -692,6 +688,11 @@ def gerar_analise_revisao(
             nota_final = analise_IA["nota_final"]
             feedback_geral = analise_IA["feedback_geral"]
             criterios = analise_IA["criterios"]
+            titulo = analise_IA.get("titulo")
+            resumo_chamada = analise_IA.get("resumo_chamada")
+            pontos_fortes = analise_IA.get("pontos_fortes")
+            fragilidades = analise_IA.get("fragilidades")
+            oportunidades = analise_IA.get("oportunidades")
             break
 
         except Exception as e:
@@ -720,16 +721,21 @@ def gerar_analise_revisao(
                     log,
                     nota_final,
                     feedback_geral,
-                    criterios
+                    criterios,
+                    titulo=titulo,
+                    resumo_chamada=resumo_chamada,
+                    pontos_fortes=pontos_fortes,
+                    fragilidades=fragilidades,
+                    oportunidades=oportunidades,
                 )
 
-                print(f"[INFO] Análise de {rotulo_audio} inserida com sucesso no banco")
+                print(f"  [INFO] Análise de {rotulo_audio} inserida com sucesso no banco")
 
             break
 
         except Exception as e:
             print(
-                f"[ERRO] Falha ao salvar a análise "
+                f"  [ERRO] Falha ao salvar a análise "
                 f"'{rotulo_audio}' no banco de dados "
                 f"(tentativa {tentativa}/3)"
             )
@@ -739,7 +745,7 @@ def gerar_analise_revisao(
 
     else:
         print(
-            f"[ERRO] Não foi possível salvar a análise "
+            f"  [ERRO] Não foi possível salvar a análise "
             f"'{rotulo_audio}' após 3 tentativas."
         )
         return None
@@ -755,10 +761,9 @@ def deletar_pasta(pasta_destino: Path, cancel: threading.Event | None = None) ->
         
     if pasta_destino.exists():
         print(
-            f"[ERRO] não foi possível deletar a pasta "
-            f"{pasta_destino}"
+            f"[AVISO] Não foi possível excluir a pasta temporária de trabalho."
         )
     else:
         print(
-            f"[INFO] pasta {pasta_destino} deletada com sucesso"
+            f"[INFO] Pasta temporária de trabalho excluída com sucesso."
         )

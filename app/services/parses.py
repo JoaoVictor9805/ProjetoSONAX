@@ -38,13 +38,6 @@ def parse_hora(hora_hhmmss: str) -> time | None:
     )
 
 
-#def parse_timestamp(ts_15_digitos: str) -> float | None:
-#    """178775464634775 -> 1787754646.34775"""
-#    if len(ts_15_digitos) != 15:
-#        return None
-#    return float(f"{ts_15_digitos[:10]}.{ts_15_digitos[10:]}")
-
-
 # ----------------------------
 # Parser do nome do arquivo WAV
 # ----------------------------

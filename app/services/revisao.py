@@ -5,25 +5,27 @@ from app.config.prompts import prompt_revisao
 load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-# from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 
+"""
 client = ChatGoogleGenerativeAI (
     model="gemini-3.1-flash-lite",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     max_output_tokens=4096,
     max_retries=3
 )
-
 """
-client = ChatGroq (
-    model="openai/gpt-oss-120b",
-    temperature=0.5,
+
+client = ChatOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    model="nex-agi/nex-n2.5-mini:free", # Modelo gratuito confiável via OpenRouter
     max_tokens=4096,
     max_retries=3
 )
-"""
+
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", prompt_revisao),

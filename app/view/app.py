@@ -17,20 +17,24 @@ import ctypes
 import re
 import threading
 import tkinter as tk
+import traceback
 from pathlib import Path
 
 import customtkinter as ctk
 
 from app.database.config import get_database_url
 from app.services.assemblyai_transcribe import TranscricaoCancelada
-from app.view.dialogs import pick_archive, pick_folder
+from app.services.fechamento_ciclo import executar_fechamento_ciclo
+from app.view.dialogs import ModalFechamentoMensal, pick_archive, pick_folder
 from app.view.events import (
     DoneEvent,
     EventQueue,
     LogEvent,
     ProgressEvent,
 )
+from app.view.stream import redirect_stdio
 from app.view.worker import run_pipeline
+
 
 
 # Cor do texto de status por exit_code (consistente com semântica CLI).
@@ -212,12 +216,24 @@ class App(ctk.CTk):
         self._progress.set(0)
 
     def _build_log(self) -> None:
+        header_log = ctk.CTkFrame(self, fg_color="transparent")
+        header_log.pack(fill="x", padx=20, pady=(10, 2))
+
         ctk.CTkLabel(
-            self,
-            text="Log de execução",
-            anchor="w",
+            header_log,
+            text="Log de execução: ",
             font=ctk.CTkFont(size=12, weight="bold"),
-        ).pack(fill="x", padx=20, pady=(10, 2))
+        ).pack(side="left")
+
+        self._log_dev_button = ctk.CTkLabel(
+            header_log,
+            text="Log User",
+            text_color="#3498db",
+            font=ctk.CTkFont(size=12, underline=True),
+            cursor="hand2",
+        )
+        self._log_dev_button.pack(side="left")
+        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
 
         self._log = ctk.CTkTextbox(
             self,
@@ -240,15 +256,15 @@ class App(ctk.CTk):
         )
         self._status.pack(side="left", fill="x", expand=True)
 
-        self._log_dev_button = ctk.CTkLabel(
+        self._btn_fechamento = ctk.CTkButton(
             footer,
-            text="Log User",
-            text_color="#3498db",
-            font=ctk.CTkFont(size=11, underline=True),
-            cursor="hand2",
+            text="Fechamento Mensal",
+            width=140,
+            fg_color="#D17004",
+            hover_color="#B5650D",
+            command=self._on_fechamento_mensal,
         )
-        self._log_dev_button.pack(side="right")
-        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
+        self._btn_fechamento.pack(side="right")
 
     # ----------------------------------------------------------------
     # Handlers dos botões
@@ -342,12 +358,14 @@ class App(ctk.CTk):
         self._queue = EventQueue()
 
         self._btn_enviar.configure(state="disabled")
+        self._btn_fechamento.configure(state="disabled")
         self._btn_cancelar.configure(
             state="normal",
             text="Cancelar",
             fg_color="#c0392b",       # vermelho enquanto ativo
             hover_color="#e74c3c",
         )
+
 
         self._worker = threading.Thread(
             target=run_pipeline,
@@ -606,13 +624,96 @@ class App(ctk.CTk):
         )
         self._cancel = None
 
-        # Reabilita Enviar se o usuário pode tentar de novo.
+        # Reabilita Enviar se o usuário pode tentar de novo e o botão Fechamento.
+        self._btn_fechamento.configure(state="normal")
         if self._entrada is not None:
             try:
                 get_database_url()
                 self._btn_enviar.configure(state="normal")
             except KeyError:
                 self._btn_enviar.configure(state="disabled")
+
+    def _on_fechamento_mensal(self) -> None:
+        """Abre o modal para configuração e execução do Fechamento Mensal."""
+        if self._worker is not None and self._worker.is_alive():
+            self._set_status("Aguarde a operação atual finalizar.", cor=_COR_ERRO)
+            return
+
+        ModalFechamentoMensal(self, on_confirm=self._iniciar_consolidacao_macro)
+
+    def _iniciar_consolidacao_macro(self, ano: int, mes: int, forcar: bool) -> None:
+        """Dispara o processo de fechamento mensal em thread background."""
+        self._queue = EventQueue()
+        self._linhas_log.clear()
+        self._rotulos.clear()
+        self._log.configure(state="normal")
+        self._log.delete("1.0", "end")
+        self._log.configure(state="disabled")
+
+        self._btn_enviar.configure(state="disabled")
+        self._btn_fechamento.configure(state="disabled")
+        self._btn_cancelar.configure(state="disabled")
+
+        self._set_status(f"Consolidando ciclo {mes:02d}/{ano} ...", cor="#e67e22")
+        self._progress.configure(mode="indeterminate")
+        self._progress.start()
+        self._progress_label.configure(text="Consolidando...")
+
+        def _worker_fn() -> None:
+            def _log_callback(msg: str) -> None:
+                if self._queue is not None:
+                    self._queue.put_event(LogEvent(msg))
+
+            try:
+                with redirect_stdio(self._queue):
+                    resultado = executar_fechamento_ciclo(
+                        ano=ano,
+                        mes=mes,
+                        forcar=forcar,
+                        on_progress=_log_callback,
+                    )
+                    if self._queue is not None:
+                        if resultado["falhas"] > 0:
+                            self._queue.put_event(
+                                DoneEvent(
+                                    exit_code=2,
+                                    summary=f"Fechamento finalizado: {resultado['processados']} processado(s), {resultado['falhas']} falha(s).",
+                                )
+                            )
+                        else:
+                            self._queue.put_event(
+                                DoneEvent(
+                                    exit_code=0,
+                                    summary=f"Fechamento {mes:02d}/{ano} concluído com sucesso ({resultado['processados']} agente(s)).",
+                                )
+                            )
+            except Exception as exc:
+                if self._queue is not None:
+                    tb = traceback.format_exc()
+                    self._queue.put_event(
+                        LogEvent(
+                            "[FALHA TOTAL] Ocorreu uma falha no sistema e o fechamento mensal foi interrompido.",
+                            stream="err",
+                        )
+                    )
+                    self._queue.put_event(
+                        LogEvent(f"{type(exc).__name__}: {exc}", stream="err", dev_only=True)
+                    )
+                    self._queue.put_event(
+                        LogEvent(tb, stream="err", dev_only=True)
+                    )
+                    self._queue.put_event(
+                        DoneEvent(
+                            exit_code=2,
+                            summary="Erro durante a consolidação mensal.",
+                            error="Falha na consolidação mensal.",
+                        )
+                    )
+
+        self._worker = threading.Thread(target=_worker_fn, daemon=True)
+        self._worker.start()
+        self._after_id = self.after(50, self._poll)
+
 
     def _set_status(self, texto: str, cor: str) -> None:
         self._status.configure(text=texto, text_color=cor)

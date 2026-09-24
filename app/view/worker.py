@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import threading
 import traceback
-import time
 from pathlib import Path
 from app.database.config import get_database_url
 from app.services.archives import (
@@ -94,7 +93,7 @@ def run_pipeline(
             except DescompactacaoError as e:
                 _limpar_temporarios()
                 queue.put_event(LogEvent(
-                    "[ERRO] Não foi possível descompactar o arquivo enviado.",
+                    "[FALHA TOTAL] Não foi possível descompactar o arquivo enviado.",
                     stream="err",
                 ))
                 queue.put_event(LogEvent(
@@ -106,7 +105,7 @@ def run_pipeline(
                 queue.put_event(DoneEvent(
                     exit_code=1,
                     summary="",
-                    error=f"[AVISO] Arquivo compactado inválido: {e}",
+                    error="Arquivo compactado inválido ou corrompido.",
                 ))
                 return
                 
@@ -122,9 +121,14 @@ def run_pipeline(
         except KeyError as e:
             _limpar_temporarios()
             queue.put_event(LogEvent(
-                f"[ERRO] Variável de ambiente ausente \n. "
-                f"Verifique o arquivo .env antes de continuar.",
+                "[FALHA TOTAL] Configuração do sistema ausente ou incompleta (.env).",
                 stream="err",
+            ))
+            queue.put_event(LogEvent(
+                f"{type(e).__name__}: {e}", stream="err", dev_only=True,
+            ))
+            queue.put_event(LogEvent(
+                traceback.format_exc(), stream="err", dev_only=True,
             ))
             queue.put_event(DoneEvent(
                 exit_code=2,
@@ -398,11 +402,20 @@ def run_pipeline(
 
     except FileNotFoundError as e:
         _limpar_temporarios()
-        queue.put_event(LogEvent(f"[ERRO] Diretório inválido: {e}"))
+        queue.put_event(LogEvent(
+            "[FALHA TOTAL] Diretório de arquivos inválido ou inacessível.",
+            stream="err",
+        ))
+        queue.put_event(LogEvent(
+            f"{type(e).__name__}: {e}", stream="err", dev_only=True,
+        ))
+        queue.put_event(LogEvent(
+            traceback.format_exc(), stream="err", dev_only=True,
+        ))
         queue.put_event(DoneEvent(
             exit_code=1,
             summary="",
-            error=f"[ERRO] Diretório inválido: {e}",
+            error="Diretório de arquivos inválido ou inacessível.",
         ))
     except TranscricaoCancelada as e:
         # Caso o `salvar_no_banco` não tenha capturado (não deveria
@@ -417,7 +430,7 @@ def run_pipeline(
         _limpar_temporarios()
         tb = traceback.format_exc()
         queue.put_event(LogEvent(
-            "[ERRO] Ocorreu um erro inesperado e o processamento foi interrompido.",
+            "[FALHA TOTAL] Ocorreu um erro inesperado e o processamento foi interrompido.",
             stream="err",
         ))
         queue.put_event(LogEvent(
@@ -427,6 +440,6 @@ def run_pipeline(
         queue.put_event(DoneEvent(
             exit_code=2,
             summary="",
-            error=f"{type(e).__name__}: {e}",
+            error="Erro inesperado durante o processamento.",
         ))
 

@@ -26,26 +26,30 @@ import sys
 from pathlib import Path
 
 
+def _obter_raiz() -> Path:
+    """Retorna a raiz do projeto (ou a pasta do executável se congelado)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
 def _garantir_raiz_no_path() -> Path:
     """Coloca a raiz do projeto no `sys.path` se ainda não estiver.
 
     Returns:
         Path: a raiz do projeto (um nível acima de `app/`).
     """
-    raiz = Path(__file__).resolve().parents[1]
+    raiz = _obter_raiz()
     if str(raiz) not in sys.path:
         sys.path.insert(0, str(raiz))
     return raiz
 
 
 def iniciar_gui() -> None:
-    """Força CWD = raiz, ajusta `sys.path` e delega ao entrypoint da view.
-
-    Equivalente a rodar `python -m app.view` com a garantia de que o
-    CWD e o `sys.path` estão corretos, independentemente de onde o
-    processo foi iniciado.
-    """
-    raiz = Path(__file__).resolve().parents[1]
+    """Força CWD = raiz, ajusta `sys.path` e inicia o loop da janela principal."""
+    raiz = _obter_raiz()
     os.chdir(raiz)
     _garantir_raiz_no_path()
-    runpy.run_module("app.view.__main__", run_name="__main__", alter_sys=True)
+    
+    from app.view.app import App
+    App().mainloop()

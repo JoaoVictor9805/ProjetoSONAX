@@ -1,0 +1,14 @@
+================================================================== 
+[INICIO] Fechamento Mensal disparado em 24/09/2026 as 13:18:46,15 
+================================================================== 
+usage: fechamento_ciclo.py [-h] [--ano ANO] [--mes MES] [--nao-forcar]
+
+Fechamento e Consolidação Macro de Ciclo Mensal (SONAX)
+
+options:
+  -h, --help    show this help message and exit
+  --ano ANO     Ano do ciclo de consolidação (padrão: 2026)
+  --mes MES     Mês do ciclo de consolidação (1 a 12, padrão: 8)
+  --nao-forcar  Pula agentes que já possuem avaliação registrada no ciclo
+[SUCESSO] Fechamento mensal concluido com exito em 24/09/2026 as 13:18:50,97 
+ 

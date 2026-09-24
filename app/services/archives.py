@@ -31,6 +31,28 @@ def eh_arquivo_compactado(caminho: Path) -> bool:
 
 def configurar_rarfile() -> None:
     """Configura o executável unrar/7z para o rarfile no Windows, caso não esteja no PATH."""
+    import sys
+    # 1. Verifica UnRAR embutido (no pacote do PyInstaller ou na pasta bin/ do projeto)
+    bases: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bases.append(Path(meipass))
+        bases.append(Path(sys.executable).resolve().parent)
+    else:
+        bases.append(Path(__file__).resolve().parents[2])
+
+    for base in bases:
+        candidato = base / "bin" / "UnRAR.exe"
+        if candidato.is_file():
+            setattr(rarfile, "UNRAR_TOOL", str(candidato))
+            return
+        candidato_raiz = base / "UnRAR.exe"
+        if candidato_raiz.is_file():
+            setattr(rarfile, "UNRAR_TOOL", str(candidato_raiz))
+            return
+
+    # 2. Se não encontrou embutido, procura nos caminhos do sistema
     if shutil.which("unrar") or shutil.which("WinRAR") or shutil.which("7z"):
         return
     candidatos = [

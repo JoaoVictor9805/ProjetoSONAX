@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -72,6 +73,49 @@ class AnaliseLigacao(BaseModel):
         ),
     )
 
+    titulo: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Título curto e informativo (4 a 7 palavras) sobre o tema principal da chamada, "
+            "adequado para busca e identificação rápida em relatórios do Power BI. "
+            "Ex: 'Dúvida Tributária - Contato Financeiro', 'Solicitação de 2ª Via de Boleto'."
+        ),
+    )
+
+    resumo_chamada: str | None = Field(
+
+        default=None,
+        description=(
+            "Breve resumo executivo (até 2 linhas) sobre o motivo do contato, "
+            "a postura do atendente e o desfecho da ligação."
+        ),
+    )
+
+    pontos_fortes: str | None = Field(
+        default=None,
+        description=(
+            "Boas práticas, postura assertiva, empatia, escuta ativa ou domínio demonstrados "
+            "nesta chamada específica (ou null se não houver destaques)."
+        ),
+    )
+
+    fragilidades: str | None = Field(
+        default=None,
+        description=(
+            "Desvios pontuais, falhas ou oportunidades perdidas observadas "
+            "nesta chamada específica (ou null se não houver)."
+        ),
+    )
+
+    oportunidades: str | None = Field(
+        default=None,
+        description=(
+            "Oportunidades práticas e pontuais de melhoria para o atendente "
+            "nesta ligação (ou null se não houver)."
+        ),
+    )
+
     criterios: list[Criterio] = Field(
         min_length=5,
         max_length=5,
@@ -82,10 +126,11 @@ class AnaliseLigacao(BaseModel):
     )
 
 
+
 # ==========================================================
 # MODELO
 # ==========================================================
-
+"""
 client = ChatGoogleGenerativeAI(
     model="gemini-3.5-flash-lite",
     google_api_key=os.getenv("GEMINI_API_KEY"),
@@ -96,7 +141,15 @@ client = ChatGoogleGenerativeAI(
     max_output_tokens=4096,
     max_retries=3,
 )
+"""
 
+client = ChatOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    model="nex-agi/nex-n2.5-mini:free", # Modelo gratuito confiável via OpenRouter
+    max_tokens=4096,
+    max_retries=3
+)
 
 # ==========================================================
 # STRUCTURED OUTPUT

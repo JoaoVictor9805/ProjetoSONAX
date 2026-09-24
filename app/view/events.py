@@ -34,7 +34,6 @@ get_event(timeout=0.05): tenta pegar um bilhete, espera até 50ms, e se não vie
 
 from __future__ import annotations
 
-from pathlib import Path
 import queue
 from dataclasses import dataclass
 from typing import Literal

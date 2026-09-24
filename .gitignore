@@ -21,3 +21,6 @@ Thumbs.db
 
 # Saídas do script
 *_audios_maiores_1min/
+
+build/
+dist/

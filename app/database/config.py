@@ -8,12 +8,45 @@ Uso:
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Carrega o .env da raiz do projeto (dois níveis acima de app/database/).
-_RAIZ = Path(__file__).resolve().parents[2]
-load_dotenv(_RAIZ / ".env")
+
+def carregar_env() -> Path | None:
+    """Carrega o arquivo .env respeitando a seguinte ordem de prioridade:
+    1. Arquivo .env externo ao lado do executável (.exe)
+    2. Arquivo .env embutido no pacote do PyInstaller (_MEIPASS)
+    3. Arquivo .env na raiz do projeto (modo desenvolvimento)
+    """
+    if getattr(sys, "frozen", False):
+        # 1. Checa se existe .env externo ao lado do .exe (Prioridade Máxima)
+        pasta_exe = Path(sys.executable).resolve().parent
+        env_externo = pasta_exe / ".env"
+        if env_externo.is_file():
+            load_dotenv(env_externo, override=True)
+            return env_externo
+
+        # 2. Fallback: .env embutido pelo PyInstaller no diretório temporário
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            env_interno = Path(meipass) / ".env"
+            if env_interno.is_file():
+                load_dotenv(env_interno, override=True)
+                return env_interno
+        return None
+    else:
+        # 3. Modo desenvolvimento (.py)
+        raiz = Path(__file__).resolve().parents[2]
+        env_dev = raiz / ".env"
+        if env_dev.is_file():
+            load_dotenv(env_dev, override=True)
+            return env_dev
+        return None
+
+
+# Carrega o .env na inicialização do módulo
+_ENV_CARREGADO = carregar_env()
 
 
 def get_database_url() -> str:

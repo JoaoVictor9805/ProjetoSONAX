@@ -21,7 +21,6 @@ pode importá-lo sem passar a depender da camada de interface.
 from __future__ import annotations
 
 import logging
-import os
 import traceback
 import warnings
 

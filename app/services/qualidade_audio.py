@@ -162,38 +162,6 @@ def analisar_transcricao(transcricao):
     }
 
 
-def calcular_metricas_whisper(metricas):
-    if not metricas:
-        return {
-            "logprob_media": 0,
-            "taxa_compressao_media": 0,
-            "probabilidade_media_sem_fala": 0
-        }
-
-    logprob_media = sum(
-        item["logprob_media"]
-        for item in metricas
-    ) / len(metricas)
-
-    taxa_compressao_media = sum(
-        item["taxa_compressao"]
-        for item in metricas
-    ) / len(metricas)
-
-    probabilidade_media_sem_fala = sum(
-        item["probabilidade_sem_fala"]
-        for item in metricas
-    ) / len(metricas)
-
-    return {
-        # Indica a confiança do Whisper nas escolhas feitas durante a transcrição. Quanto mais próximo de 0, maior tende a ser a confiança; valores muito negativos indicam menor confiança.
-        "logprob_media": logprob_media,
-        # Ajuda a identificar possíveis problemas na transcrição, como repetições anormais ou falhas na decodificação. Valores muito altos podem indicar uma transcrição problemática.
-        "taxa_compressao_media": taxa_compressao_media,
-        # Representa a probabilidade estimada pelo Whisper de que os segmentos não contenham fala. 
-        "probabilidade_media_sem_fala": probabilidade_media_sem_fala
-    }
-
 
 def avaliar_qualidade_transcricao(dados):
     """
@@ -309,17 +277,15 @@ if __name__ == "__main__":
     se você possui interesse em conhecer nossa solução.
     '''
 
-    metricas_simuladas = [
-        {
-            "logprob_media": -0.3,
-            "taxa_compressao": 1.2,
-            "probabilidade_sem_fala": 0.05
-        }
-    ]
+    metricas_simuladas = {
+        "logprob_media": -0.3,
+        "taxa_compressao_media": 1.2,
+        "probabilidade_media_sem_fala": 0.05,
+    }
 
     dados = {
         **analisar_transcricao(transcricao_simulada),
-        **calcular_metricas_whisper(metricas_simuladas)
+        **metricas_simuladas,
     }
 
     print("Classificação:", classificar_qualidade_transcricao(dados))

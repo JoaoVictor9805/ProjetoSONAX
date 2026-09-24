@@ -111,8 +111,44 @@ Se a ligação contiver somente URA e nenhuma interação entre agente humano e 
 
 O feedback deve ser curto, objetivo e destacar os principais comportamentos observados.
 
+### Diagnósticos Adicionais por Chamada (Nível Micro)
+
+- **titulo**: Título conciso e informativo sobre o tema principal da chamada (máximo 4 a 7 palavras), adequado para pesquisa e filtros em dashboards do Power BI. Ex: "Dúvida Tributária - Responsável Financeiro", "Solicitação de 2ª Via de Boleto", "Agendamento de Reunião com Consultor".
+- **resumo_chamada**: Breve resumo executivo (até 2 linhas) sobre o motivo do contato, a postura do atendente e o desfecho da ligação.
+- **pontos_fortes**: Boas práticas, postura assertiva, empatia, escuta ativa, clareza ou domínio demonstrados pelo atendente nesta chamada (ou null se foi um atendimento padrão sem destaques).
+- **fragilidades**: Desvios pontuais, falhas ou oportunidades perdidas observadas especificamente nesta chamada (ou null se o atendimento foi exemplar).
+- **oportunidades**: Ações práticas e pontuais de melhoria que o atendente poderia ter adotado nesta ligação (ou null se não houver).
+
 Não invente informações.
 
 Retorne somente o resultado conforme o schema definido pela aplicação.
-
 """
+
+prompt_consolidacao_macro = """Você é um auditor sênior de qualidade e desenvolvimento de atendimento da Falavinha Next.
+
+Sua missão é gerar um diagnóstico evolutivo executivo para o ciclo mensal de um atendente, analisando:
+1. As médias consolidadas dos critérios PEAH no período.
+2. A média geral do atendente no ciclo.
+3. A amostragem de pontos fortes, fragilidades e oportunidades observadas nas ligações extremas (menores e maiores notas) do mês.
+
+### Dados Recebidos:
+- Atendente: {agente_nome}
+- Período: {ciclo_inicio} a {ciclo_fim}
+- Total de ligações avaliadas no ciclo: {total_chamadas}
+- Média geral da nota no ciclo: {nota_media}
+- Médias por critério PEAH:
+{medias_criterios}
+
+- Amostragem das ligações de menor nota (gargalos críticos e pontos de atenção):
+{amostras_menores_notas}
+
+- Amostragem das ligações de maior nota (pontos fortes e melhores práticas):
+{amostras_maiores_notas}
+
+### Diretrizes de Análise:
+1. **Resumo Evolutivo**: Síntese executiva (máximo 3 a 4 linhas) do perfil de atendimento do agente neste ciclo, destacando a consistência e o padrão geral apresentado.
+2. **Principais Pontos Fortes**: Identifique os 2 a 3 pontos fortes e boas práticas mais consistentes demonstrados pelo atendente no período.
+3. **Principais Fragilidades**: Identifique os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no período.
+4. **Plano de Ação e Oportunidades**: Recomendações práticas, direcionadas e focadas na correção das fragilidades apontadas para orientar o feedback do gestor.
+
+Retorne SOMENTE o resultado estruturado conforme o schema definido pela aplicação."""

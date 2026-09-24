@@ -1,16 +1,12 @@
 customtkinter==6.0.0
 langchain-core==1.6.2
 langchain-google-genai==4.4.0
-langchain-openrouter==0.2.8
 librosa==1.0.0
 numpy==2.5.2
-faster-whisper==1.2.1
 psycopg==3.3.5
 psycopg-binary==3.3.5
 python-dotenv==1.2.3
 rarfile==4.5
 soundfile==0.14.0
-tqdm==4.70.0
-types-tqdm==4.70.0.20260827
-typing_extensions==4.16.0
 assemblyai>=1.5.5
+
