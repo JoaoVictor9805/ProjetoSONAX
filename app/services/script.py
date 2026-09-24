@@ -81,8 +81,8 @@ from app.services.parses import (
     parse_nome_arquivo,
     parse_hora,
 )
-from app.services.assemblyai_transcribe import (
-    transcrever_audio_assemblyai,
+from app.services.transcricao import (
+    transcrever_audio_openrouter as transcrever_audio,
     TranscricaoCancelada,
 )
 from app.logs import log_dev_exc
@@ -349,16 +349,16 @@ def salvar_no_banco(
             log_dev_exc()
             continue
 
-        # 1) Transcrição e Diarização via AssemblyAI (Universal-3.5 Pro)
+        # 1) Transcrição via NVIDIA Nemotron (OpenRouter)
         _notificar_progresso(
             on_progress,
             i,
             total,
             caminho,
             0.0,
-            f"[INFO] [{i}/{total}] Enviando {rotulo_audio} para AssemblyAI (Universal-3.5 Pro)...",
+            f"[INFO] [{i}/{total}] Enviando {rotulo_audio} para NVIDIA Nemotron (OpenRouter)...",
         )
-        print(f"  [INFO] [{i}/{total}] Transcrevendo e diarizando (AssemblyAI): {rotulo_audio} ...")
+        print(f"  [INFO] [{i}/{total}] Transcrevendo (NVIDIA Nemotron): {rotulo_audio} ...")
 
         def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
             pct = int(sub_frac * 100)
@@ -368,17 +368,16 @@ def salvar_no_banco(
                 total,
                 caminho,
                 sub_frac * 0.85,
-                f"[INFO] [{i}/{total}] {rotulo_audio}: {pct}% {msg or 'AssemblyAI processando...'}",
+                f"[INFO] [{i}/{total}] {rotulo_audio}: {pct}% {msg or 'NVIDIA Nemotron processando...'}",
             )
 
-        res_assembly = None
+        res_transcricao = None
         for tentativa in range(1, 4):
             try:
-                res_assembly = transcrever_audio_assemblyai(
+                res_transcricao = transcrever_audio(
                     caminho,
                     cancel=cancel,
                     on_progress=_on_sub_progress,
-                    speakers_expected=3,
                 )
                 break
 
@@ -387,7 +386,7 @@ def salvar_no_banco(
 
             except Exception as e:
                 print(
-                    f"[AVISO] Falha na transcrição AssemblyAI de '{rotulo_audio}' "
+                    f"[AVISO] Falha na transcrição de '{rotulo_audio}' "
                     f"(tentativa {tentativa}/3)"
                 )
                 log_dev_exc()
@@ -397,22 +396,23 @@ def salvar_no_banco(
         else:
             print(
                 f"[ERRO] Não foi possível transcrever "
-                f"'{rotulo_audio}' via AssemblyAI após 3 tentativas. Arquivo ignorado."
+                f"'{rotulo_audio}' após 3 tentativas. Arquivo ignorado."
             )
             continue
 
-        texto_formatado = res_assembly["texto_formatado"]
-        texto_diarizado = texto_formatado
-        texto_puro = res_assembly.get("texto", texto_formatado)
+        texto_transcricao = res_transcricao.get("texto", "")
+        texto_formatado = texto_transcricao
+        texto_diarizado = texto_transcricao
+        texto_puro = texto_transcricao
 
         # 2) Avaliação de qualidade da transcrição
         try:
             dados_transcricao = analisar_transcricao(texto_puro)
-            metricas_assembly = res_assembly.get("metricas", {})
+            metricas_transcricao = res_transcricao.get("metricas", {})
 
             dados = {
                 **dados_transcricao,
-                **metricas_assembly,
+                **metricas_transcricao,
             }
 
             avaliacao = avaliar_qualidade_transcricao(dados)
@@ -437,7 +437,7 @@ def salvar_no_banco(
             total,
             caminho,
             0.90,
-            f"[INFO] [{i}/{total}] {rotulo_audio}: transcrição e diarização concluídas. Gravando no banco...",
+            f"[INFO] [{i}/{total}] {rotulo_audio}: transcrição concluída. Gravando no banco...",
         )
 
         # 3) INSERT em uma transação pequena e isolada
@@ -529,9 +529,10 @@ def salvar_no_banco(
             ja_existentes += 1
             continue
 
-        # Guarda o diálogo diarizado e o atendente em memória para a fase de revisão
+        # Guarda o texto da transcrição e o atendente em memória para a fase de revisão/diarização
         mapa_diarizacao[caminho.name] = {
             "texto_diarizado": texto_diarizado,
+            "texto_transcricao": texto_transcricao,
             "agente_nome": nome,
         }
 
@@ -554,7 +555,7 @@ def gerar_revisao_transcricao(
     rotulo_audio: str | None = None,
     cancel: threading.Event | None = None,
 ) -> str | None:
-    """Gere a revisão a partir do diálogo diarizado e dados do atendente, utilizando modelo de IA."""
+    """Gera a diarização e revisão a partir da transcrição contínua e dados do atendente, utilizando modelo de IA."""
     nome_exibicao = rotulo_audio or log
 
     if cancel is not None and cancel.is_set():

@@ -23,7 +23,7 @@ from pathlib import Path
 import customtkinter as ctk
 
 from app.database.config import get_database_url
-from app.services.assemblyai_transcribe import TranscricaoCancelada
+from app.services.transcricao import TranscricaoCancelada
 from app.services.fechamento_ciclo import executar_fechamento_ciclo
 from app.view.dialogs import ModalFechamentoMensal, pick_archive, pick_folder
 from app.view.events import (

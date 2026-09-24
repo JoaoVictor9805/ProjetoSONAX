@@ -71,11 +71,12 @@ def _obter_chain_macro():
     )
     """
     client = ChatOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    model="nex-agi/nex-n2.5-mini:free", # Modelo gratuito confiável via OpenRouter
-    max_tokens=15000,
-    max_retries=3
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        model="openai/gpt-4o-mini",
+        temperature=0.0,
+        max_tokens=1500,
+        max_retries=3,
     )
     structured_client = client.with_structured_output(
         PerfilAgenteOutput,

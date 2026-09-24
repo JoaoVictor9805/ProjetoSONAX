@@ -39,7 +39,7 @@ from app.services.script import (
     gerar_analise_revisao
 )
 
-from app.services.assemblyai_transcribe import TranscricaoCancelada
+from app.services.transcricao import TranscricaoCancelada
 from app.view.events import DoneEvent, EventQueue, LogEvent, ProgressEvent
 from app.view.stream import redirect_stdio
 
@@ -261,11 +261,11 @@ def run_pipeline(
                 ))
                 return
 
-            # 4) Transcrição e Diarização (AssemblyAI Universal-3.5 Pro) + INSERT no banco
+            # 4) Transcrição (NVIDIA Nemotron via OpenRouter) + INSERT no banco
             total = len(copiados)
             queue.put_event(ProgressEvent(
                 done=0, total=total, phase="transcribing",
-                message=f"[INFO] Iniciando transcrição e diarização (AssemblyAI) de {total} arquivo(s) ...",
+                message=f"[INFO] Iniciando transcrição (NVIDIA Nemotron) de {total} arquivo(s) ...",
             ))
 
             def on_progress(
@@ -301,10 +301,10 @@ def run_pipeline(
 
             queue.put_event(ProgressEvent(
                 done=total, total=total, phase="inserting",
-                message=f"[INFO] Transcrição e diarização finalizadas: {inseridos} registro(s) processado(s) {detalhes_existentes}.",
+                message=f"[INFO] Transcrição finalizada: {inseridos} registro(s) processado(s) {detalhes_existentes}.",
             ))
 
-            # 4.5) Revisão e inserção no banco
+            # 4.5) Diarização e revisão (Qwen Instruct) + inserção no banco
             total_copiados = len(copiados)
 
             for idx, (caminho, _) in enumerate(copiados, 1):
@@ -314,7 +314,7 @@ def run_pipeline(
                 rotulo_audio = _rotular(idx, caminho)
                 queue.put_event(ProgressEvent(
                     done=idx - 1, total=total_copiados, phase="reviewing",
-                    message=f"[INFO] [{idx}/{total_copiados}] Revisando transcrição: {rotulo_audio} ...",
+                    message=f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando (Qwen Instruct): {rotulo_audio} ...",
                     path=caminho.name,
                 ))
 
@@ -336,16 +336,16 @@ def run_pipeline(
                 _limpar_temporarios()
                 queue.put_event(DoneEvent(
                     exit_code=0,
-                    summary=f"[CANCELADO] Cancelado durante a revisão ({inseridos} registro(s) inserido(s)).",
+                    summary=f"[CANCELADO] Cancelado durante a diarização e revisão ({inseridos} registro(s) inserido(s)).",
                 ))
                 return
 
             queue.put_event(ProgressEvent(
                 done=total_copiados, total=total_copiados, phase="reviewing",
-                message="[INFO] Revisão das transcrições finalizada.",
+                message="[INFO] Diarização e revisão das transcrições finalizada.",
             ))
 
-            # 4.75) Realizar análise com IA
+            # 4.75) Realizar análise com IA (GPT-4o-mini)
             for idx, (caminho, _) in enumerate(copiados, 1):
                 if cancel.is_set():
                     break
@@ -356,7 +356,7 @@ def run_pipeline(
                     done = idx - 1,
                     total = total_copiados,
                     phase="analyzing",
-                    message= f"[INFO] [{idx}/{total_copiados}] Analisando ligação: {rotulo_audio} ...",
+                    message= f"[INFO] [{idx}/{total_copiados}] Analisando critérios PEAH (GPT-4o-mini): {rotulo_audio} ...",
                     path=caminho.name,
                 ))
 

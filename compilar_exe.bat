@@ -23,8 +23,8 @@ pyinstaller --noconsole --onefile --name "SONAX" ^
     --collect-all customtkinter ^
     --collect-all psycopg ^
     --collect-all langchain ^
-    --collect-all langchain_google_genai ^
-    --collect-all assemblyai ^
+    --collect-all langchain_openai ^
+    --collect-all requests ^
     run_gui.py
 
 if %errorlevel% neq 0 (

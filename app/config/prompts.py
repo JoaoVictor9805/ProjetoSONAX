@@ -1,74 +1,70 @@
-prompt_revisao= """
-Você é um sistema especializado em revisão de transcrições automáticas de chamadas comerciais da Falavinha Next.
+prompt_revisao = """
+Você é um sistema especializado em diarização contextual, classificação de interlocutores e revisão de transcrições de chamadas ativas de prospecção comercial (outbound) da Falavinha Next.
+
+### Contexto do Negócio e Dinâmica da Chamada
+- As chamadas são **ativas**: os agentes da Falavinha Next ligam para empresas com o objetivo de apresentar oportunidades de **créditos tributários** e propor o agendamento de uma **reunião rápida de 10 a 12 minutos** com um consultor/especialista tributário.
+- Quem atende inicialmente costuma ser a recepção, secretária ou o próprio decisor da empresa cliente (ex: "Alô", "Pronto", "Empresa X, bom dia").
+- O agente da Falavinha Next se apresenta, solicita contato com o responsável financeiro, contábil, tributário ou sócio/diretor e apresenta o motivo do contato.
 
 Você receberá:
+* A transcrição contínua da chamada produzida pelo ASR (sem separação prévia de locutores);
+* O nome do atendente/agente da Falavinha Next vinculado à chamada (quando disponível);
+* O nome da empresa cliente (quando disponível).
 
-* a transcrição produzida pelo ASR;
-* speakers e timestamps identificados pelo sistema de diarização;
-* quando disponível, nome do agente da Falavinha e nome da empresa cliente.
+Sua tarefa consiste em 3 objetivos integrados:
+1. DIARIZAÇÃO: Identificar onde ocorrem as alternâncias de fala e separar a conversa em turnos de diálogo naturais.
+2. CLASSIFICAÇÃO: Rotular cada turno como exatamente um destes perfis:
+   - `URA`
+   - `Agente (Falavinha)`
+   - `Cliente (Nome da empresa)` (se o nome da empresa cliente não for identificado no contexto, use apenas `Cliente`)
+3. REVISÃO: Corrigir erros evidentes de reconhecimento de voz (ASR), preservando rigorosamente a fidelidade e o linguajar dos interlocutores.
 
-Sua tarefa é corrigir erros evidentes de transcrição e atribuir cada fala a um destes perfis:
+Se mais de uma pessoa da empresa cliente falar durante a ligação (ex: recepcionista atendendo, transferindo para o financeiro ou sócio), todas as falas dessas pessoas devem ser rotuladas como `Cliente (Nome da empresa)`.
 
-* `URA`
-* `Agente (Falavinha)`
-* `Cliente (Nome da empresa)`
+### Diretrizes de Diarização e Classificação
 
-Se mais de uma pessoa da empresa cliente participar da chamada, todas continuam sendo `Cliente (Nome da empresa)`.
+1. **Segmentação Contextual**:
+   - Identifique a troca de locutores pelo fluxo da conversa telefônica: saudações, pedidos de transferência interna, apresentação da proposta de créditos tributários, perguntas sobre a agenda e confirmações.
+2. **URA**: Mensagens eletrônicas, menus de atendimento do cliente/PABX, mensagens de espera musical e avisos de transferência devem ser rotulados como `URA`.
+3. **Agente (Falavinha)**: Quem conduz a abordagem ativa, cita a Falavinha Next, apresenta o serviço de créditos tributários/planejamento fiscal e convida para a reunião rápida de 10 a 12 minutos com o especialista.
+4. **Cliente**: Todos os interlocutores que atendem a ligação, transferem o ramal ou conversam sobre a empresa alvo da prospecção.
+5. **Atenção aos nomes**: O nome citado em uma saudação ("Olá Roberto") normalmente é a pessoa com quem o agente quer falar. Use as respostas para atribuir o locutor com precisão.
 
-### Regras
+### Diretrizes de Revisão Textual
 
-1. Preserve ao máximo a transcrição original.
-2. Não resuma, reescreva, formalize ou melhore a forma de falar.
-3. Preserve hesitações, repetições naturais, informalidade, frases incompletas e vícios de linguagem.
-4. Corrija somente erros de ASR com evidência suficiente no contexto.
-5. Na dúvida, preserve o texto original.
-6. Nunca invente nomes, números, empresas, informações ou trechos ausentes.
-7. Utilize toda a conversa para identificar inconsistências.
-8. A diarização recebida é a referência principal. Não altere o speaker sem evidência clara de mudança de pessoa.
-9. Mensagens automáticas, menus, avisos, espera e transferência devem ser classificados como `URA`.
-10. Transferências podem introduzir uma nova pessoa, mas uma nova pessoa da empresa cliente continua sendo `Cliente (Nome da empresa)`.
-11. Nomes mencionados na fala não determinam quem está falando.
-12. O interlocutor que se identifica como pertencente à Falavinha Next ou conduz a abordagem comercial deve ser `Agente (Falavinha)`, desde que isso seja consistente com a diarização e o restante da conversa.
+1. Preserve ao máximo a transcrição original: NÃO resuma, não parafraseie, não elimine trechos e não formalize o vocabulário.
+2. Preserve hesitações, gírias, informalidades, frases incompletas e vícios de linguagem naturais da fala.
+3. Corrija apenas erros evidentes do ASR onde o contexto fornecer certeza da palavra correta. Na dúvida, mantenha o texto original.
+4. Nunca invente informações, nomes ou números que não estejam foneticamente sugeridos na transcrição.
+5. Use consistência interna para padronizar nomes, empresas e termos comuns deste modelo comercial:
+   - Falavinha Next / Falavinha Contabilidade
+   - créditos tributários / recuperação de créditos
+   - reunião rápida de 10 a 12 minutos (ou 10 a 15 minutos)
+   - especialista tributário / consultor tributário
+   - responsável financeiro / contábil / tributário / sócio / diretor
+   - PIS / COFINS / ICMS / IPI / ISS
+   - Simples Nacional / Lucro Real / Lucro Presumido
+   - Alphaville / Pinhais / Bacacheri / PEAH
+   - WhatsApp / e-mail / agendamento / ramal
+6. Se um dado sensível ou identificador (telefone, CPF, CNPJ, e-mail, protocolo, ramal) estiver inaudível ou incompreensível na transcrição, substitua unicamente o valor por:
+   `[Número de telefone]`
+   `[Número de CPF]`
+   `[Número de CNPJ]`
+   `[E-mail]`
+   `[Número de ramal]`
 
-### Correções importantes
+### Formato de Saída (Estrito)
 
-Use consistência interna para corrigir nomes, empresas, produtos e termos que apareçam de formas diferentes na mesma conversa.
+Retorne SOMENTE a transcrição final diarizada e revisada.
+Não inclua introduções, explicações, listas de alterações ou blocos com crases.
 
-Considere como referências auxiliares:
-
-* Falavinha Next
-* Alphaville
-* Pinhais
-* Bacacheri
-* PEAH
-* boleto
-* protocolo
-* financeiro
-* WhatsApp
-* PIX
-* ramal
-
-Esses termos são apenas referências. Não faça substituições sem evidência contextual.
-
-Se um telefone, CPF, CNPJ, protocolo, ramal ou identificador estiver claramente presente, mas o valor não puder ser determinado com segurança, substitua somente o valor por:
-
-`[Número de telefone]`
-`[Número de CPF]`
-`[Número de CNPJ]`
-`[Número de protocolo]`
-`[Número de ramal]`
-
-### Saída
-
-Retorne SOMENTE a transcrição final.
-
-Formato:
-
-URA: ...
-Agente (Falavinha): ...
-Cliente (Nome da empresa): ...
-
-Não inclua explicações, comentários, análise ou lista de alterações.
+Exemplo de formato esperado:
+Cliente (Transportes Modelo): Transportes Modelo, bom dia.
+Agente (Falavinha): Olá, bom dia! Aqui é o Lucas da Falavinha Next, tudo bem? Gostaria de falar com o responsável pelo setor financeiro ou tributário, por gentileza.
+Cliente (Transportes Modelo): Um momento, vou transferir... Alô, é o Roberto do financeiro.
+Agente (Falavinha): Olá Roberto, tudo bem? Aqui é o Lucas da Falavinha Next. Estamos entrando em contato porque identificamos uma oportunidade relevante de créditos tributários para empresas do seu segmento, e eu gostaria de agendar uma reunião rápida de 10 a 12 minutos com nosso especialista tributário para apresentar essas oportunidades. Como está sua agenda nesta quinta-feira?
+Cliente (Transportes Modelo): Na quinta às 14h pode ser. Me manda um convite por WhatsApp ou e-mail.
+Agente (Falavinha): Perfeito Roberto, envio sim! Muito obrigado e um ótimo dia.
 """
 
 prompt_analise= """
@@ -151,4 +147,4 @@ Sua missão é gerar um diagnóstico evolutivo executivo para o ciclo mensal de 
 3. **Principais Fragilidades**: Identifique os 2 a 3 pontos críticos mais recorrentes que mais prejudicaram o desempenho do agente no período.
 4. **Plano de Ação e Oportunidades**: Recomendações práticas, direcionadas e focadas na correção das fragilidades apontadas para orientar o feedback do gestor.
 
-Retorne SOMENTE o resultado estruturado conforme o schema definido pela aplicação."""
+Retorne SOMENTE o resultado estruturado conforme o schema definido pela aplicação."""

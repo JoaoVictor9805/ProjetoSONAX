@@ -8,5 +8,5 @@ psycopg-binary==3.3.5
 python-dotenv==1.2.3
 rarfile==4.5
 soundfile==0.14.0
-assemblyai>=1.5.5
+requests
 

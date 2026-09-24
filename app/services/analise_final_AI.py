@@ -146,9 +146,10 @@ client = ChatGoogleGenerativeAI(
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
-    model="nex-agi/nex-n2.5-mini:free", # Modelo gratuito confiável via OpenRouter
-    max_tokens=4096,
-    max_retries=3
+    model="openai/gpt-4o-mini",
+    temperature=0.0,  # Zero para garantir a precisão estrutural das chaves
+    max_tokens=1500,  # Margem segura para devolução completa do JSON
+    max_retries=3,
 )
 
 # ==========================================================
