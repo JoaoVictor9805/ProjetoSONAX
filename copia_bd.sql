@@ -22,8 +22,6 @@ CREATE TABLE registro_chamadas (
 
 alter table registro_chamadas add column revisao TEXT;
 
-
-
 -- ==========================
 -- Etapa 02
 -- ==========================
