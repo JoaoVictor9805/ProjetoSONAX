@@ -61,17 +61,9 @@ def obter_api_key() -> str:
     return chave.strip()
 
 
-def calcular_duracao_wav(caminho: Path) -> float:
-    """Calcula a duração em segundos de um arquivo WAV via biblioteca padrão."""
-    try:
-        with wave.open(str(caminho), "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            if rate > 0:
-                return round(frames / float(rate), 2)
-    except Exception:
-        pass
-    return 0.0
+from app.services.audio_inspector import obter_duracao_wav
+
+calcular_duracao_wav = obter_duracao_wav
 
 
 def transcrever_audio_openrouter(

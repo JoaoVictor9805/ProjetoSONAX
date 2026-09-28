@@ -1,16 +1,34 @@
-import os
+# -*- coding: utf-8 -*-
+"""
+============================================================================
+Serviço de Análise de Qualidade de Atendimento via IA (PEAH) do SONAX.
 
-from dotenv import load_dotenv
+Responsabilidades:
+    1. Avaliação estruturada da ligação conforme critérios de excelência PEAH:
+       - Chamar pelo nome
+       - Agir com empatia
+       - Ouvir com atenção
+       - Eficiência operacional
+       - Surpreender
+    2. Detecção automática e tratamento de ligações de URA e chamadas inválidas.
+    3. Extração de feedback executivo, título resumido, pontos fortes, fragilidades
+       e oportunidades práticas de melhoria.
+    4. Cálculo determinístico da nota final da chamada com base nas notas dos critérios.
+    5. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
+============================================================================
+"""
+from __future__ import annotations
+
+import os
 from typing import Literal
 
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-
 from app.config.prompts import prompt_analise
-
 
 load_dotenv()
 

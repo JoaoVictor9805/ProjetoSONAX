@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Funções de parsing de strings para tipos do domínio do SONAX.
+============================================================================
+Módulo de Parsing e Conversão de Tipos de Domínio do SONAX.
 
-Reúne em um único módulo os conversores de string para `date`/`time`/`float`
-(vindos do `chamadas_dao`) e o parser do nome de arquivo `.wav` (vindo do
-`script`), que decompõe o nome em blocos de identificação da chamada.
-
+Responsabilidades:
+    1. Parsing e decomposição do padrão de nomenclatura de arquivos .wav do SONAX:
+       - Extração de ramal, telefone (DDI+DDD+número), data, hora, timestamp epoch e call_id.
+    2. Conversão e validação de strings temporais para objetos `datetime.date` e `datetime.time`.
+    3. Isolamento das regras de formatação e decodificação de metadados das gravações.
+============================================================================
 """
+from __future__ import annotations
 
 from datetime import date, time
 from pathlib import Path

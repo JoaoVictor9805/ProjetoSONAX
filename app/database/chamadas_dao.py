@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Acesso a dados (INSERTs/SELECTs) das tabelas `origem` e `registro_chamadas`.
-Mantém todo SQL isolado do resto do script.
+Acesso a dados (INSERTs/SELECTs/UPDATEs) das tabelas `origem`, `registro_chamadas`,
+`avaliacao_ia`, `avaliacao_criterio` e `perfil_agente`.
+Mantém todo SQL e mapeamento relacional isolado na camada de persistência (`app/database/`).
 """
+from __future__ import annotations
 
 from datetime import date, datetime
-
 
 import psycopg
 
@@ -18,7 +19,7 @@ def buscar_nome_atendente(
     cur: psycopg.Cursor, 
     ramal: int,
     data_ligacao: datetime
-    ) -> str | None:
+) -> str | None:
     """Resolve nome_atendente pelo ramal na tabela origem."""
     cur.execute(
         """
@@ -27,7 +28,7 @@ def buscar_nome_atendente(
             AND dt_inicio <= %s
             AND dt_fim >= %s
         """,
-        (ramal, data_ligacao, data_ligacao),  # A vírgula é obrigatória para criar uma tupla de um único elemento. Isso é usado pelo driver do banco para fazer a substituição parametrizada do %s. Apenas para o psycopg.
+        (ramal, data_ligacao, data_ligacao),
     )
 
     row = cur.fetchone()
@@ -35,16 +36,17 @@ def buscar_nome_atendente(
 
 
 def registro_ja_existe(cur: psycopg.Cursor, log_arquivo: str) -> bool:
-    cur.execute("""SELECT 1 FROM registro_chamadas 
-                    WHERE log = %s LIMIT 1""", 
-                    (log_arquivo,))
-                    
+    cur.execute(
+        """SELECT 1 FROM registro_chamadas 
+           WHERE log = %s LIMIT 1""", 
+        (log_arquivo,)
+    )
     return cur.fetchone() is not None
 
 
 def inserir_registro_chamada(
     cur: psycopg.Cursor,
-    *,  # Determina que: Você é obrigado a escrever o nome dos parâmetros para os parâmetros a baixo:
+    *,
     ramal: int,
     agente_nome: str,
     data_ligacao: datetime | date,
@@ -63,17 +65,16 @@ def inserir_registro_chamada(
         (ramal, agente_nome, data_ligacao, log_arquivo, transcricao),
     )
     resultado = cur.fetchone()
-
     if resultado is not None:
         return resultado[0]
-
     return None
+
 
 def buscar_transcricao(
     cur: psycopg.Cursor,
     log: str
 ) -> str | None:
-    """ Busca a transcricao na coluna transcricao do banco de dados """
+    """Busca a transcrição na coluna transcricao do banco de dados."""
     cur.execute(
         """
         SELECT transcricao FROM registro_chamadas 
@@ -90,7 +91,7 @@ def verificar_coluna_revisao(
     cur: psycopg.Cursor,
     log: str
 ) -> bool | None:
-    """ Verifica se a coluna de revisão está vazia no BD """
+    """Verifica se a coluna de revisão está preenchida no BD."""
     cur.execute(
         """
         SELECT revisao FROM registro_chamadas 
@@ -108,7 +109,7 @@ def inserir_revisao(
     log: str,
     revisao: str
 ) -> str | None:
-    """ Insere a revisao na coluna revisao do banco de dados """
+    """Insere a revisão na coluna revisao do banco de dados."""
     cur.execute(
         """
         UPDATE registro_chamadas
@@ -119,14 +120,14 @@ def inserir_revisao(
         (revisao, log),
     )
     resultado = cur.fetchone()
-    
     return resultado[0] if resultado else None
+
 
 def buscar_revisao(
     cur: psycopg.Cursor,
     log: str
 ) -> str | None:
-    """ Busca a revisão na coluna revisao do banco de dados """
+    """Busca a revisão na coluna revisao do banco de dados."""
     cur.execute(
         """
         SELECT revisao FROM registro_chamadas 
@@ -143,9 +144,7 @@ def verificar_tabela_analise(
     cur: psycopg.Cursor,
     log: str
 ) -> bool:
-
     """Verifica se a análise da ligação já foi realizada."""
-
     cur.execute(
         """
         SELECT id_avaliacao
@@ -155,13 +154,8 @@ def verificar_tabela_analise(
         """,
         (log,)
     )
-
     resultado = cur.fetchone()
-
-    if not resultado:
-        return False
-
-    return True
+    return resultado is not None
 
 
 def garantir_schema_atualizado(cur: psycopg.Cursor) -> None:
@@ -271,15 +265,11 @@ def inserir_analise(
     )
 
     resultado = cur.fetchone()
-
-
     if not resultado:
         return None
 
     id_avaliacao = resultado[0]
-
     criterios_inseridos = _inserir_criterio(cur, id_avaliacao, criterios)
-
     if not criterios_inseridos:
         return None
 
@@ -291,7 +281,6 @@ def _inserir_criterio(
     id_avaliacao: int,
     criterios: list,
 ) -> bool:
-
     for criterio in criterios:
         cur.execute(
             """
@@ -310,5 +299,4 @@ def _inserir_criterio(
                 criterio["justificativa_criterio"]
             )
         )
-
     return True

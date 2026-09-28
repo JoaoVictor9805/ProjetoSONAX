@@ -1,13 +1,31 @@
+# -*- coding: utf-8 -*-
+"""
+============================================================================
+Serviço de Revisão Textual e Diarização com IA do SONAX.
+
+Responsabilidades:
+    1. Segmentação e identificação de locutores (diarização textual):
+       - URA, Agente (Falavinha Next) e Cliente.
+    2. Correção de pontuação, concordância e ruídos fonéticos do ASR contínuo.
+    3. Preservação estrita do conteúdo e vocabulário original da chamada
+       (sem alucinar diálogos nem remover termos de negócio).
+    4. Limpeza de artefatos, tags especiais de parada e rótulos órfãos pós-processamento.
+    5. Integração com modelo LLM via LangChain (Qwen 30B Instruct via OpenRouter).
+============================================================================
+"""
+from __future__ import annotations
+
 import os
+
 from dotenv import load_dotenv
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+
 from app.config.prompts import prompt_revisao
 
 load_dotenv()
-
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
 
 """
 client = ChatGoogleGenerativeAI (
