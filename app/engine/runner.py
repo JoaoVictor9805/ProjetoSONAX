@@ -317,8 +317,9 @@ class PipelineRunner:
                         on_progress=_on_rpa_progress,
                     )
                     self.on_progress(len(telefones_validos), len(telefones_validos), "searching", "[INFO] Coleta RPA no Google concluída.", None)
-                    self.on_log("[INFO] Coleta RPA no Google concluída com sucesso.", "out", False, None)
+                    self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_validos)} telefone(s) consultado(s)).", "out", False, None)
                 else:
+                    self.on_log("[INFO] Nenhum telefone válido para consulta RPA no Google (etapa pulada).", "out", False, None)
                     textos_google = {k: "Não encontrado" for k in telefones_para_busca}
 
                 if self.cancel_event.is_set():
@@ -333,6 +334,10 @@ class PipelineRunner:
 
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
+                self.on_log(
+                    f"[INFO] Iniciando diarização e revisão com IA (Qwen 30B Instruct) de {total_copiados} chamada(s) ...",
+                    "out", False, None,
+                )
                 for idx, caminho in enumerate(copiados, 1):
                     if self.cancel_event.is_set():
                         break
@@ -372,8 +377,16 @@ class PipelineRunner:
                     total_copiados, total_copiados, "reviewing",
                     "[INFO] Diarização e revisão das transcrições finalizada.", None,
                 )
+                self.on_log(
+                    f"[INFO] Diarização e revisão finalizada com sucesso para {total_copiados} chamada(s).",
+                    "out", False, None,
+                )
 
                 # 4.75) Análise com IA (ChamadaIngestor)
+                self.on_log(
+                    f"[INFO] Iniciando avaliação de critérios comerciais (GPT-4o-mini) de {total_copiados} chamada(s) ...",
+                    "out", False, None,
+                )
                 for idx, caminho in enumerate(copiados, 1):
                     if self.cancel_event.is_set():
                         break
@@ -403,6 +416,10 @@ class PipelineRunner:
                 self.on_progress(
                     total_copiados, total_copiados, "analyzing",
                     "[INFO] Análise das ligações finalizada.", None,
+                )
+                self.on_log(
+                    f"[INFO] Avaliação comercial concluída com sucesso para {total_copiados} chamada(s).",
+                    "out", False, None,
                 )
 
                 # 5) Limpeza

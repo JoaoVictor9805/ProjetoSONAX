@@ -292,6 +292,7 @@ def coletar_textos_google_lote(
             telefones_unicos.append(tel)
 
     total_unicos = len(telefones_unicos)
+    from app.logs import log_dev
 
     for idx, tel in enumerate(telefones_unicos, 1):
         if cancel is not None and cancel.is_set():
@@ -300,6 +301,8 @@ def coletar_textos_google_lote(
         if on_progress is not None:
             on_progress(idx, total_unicos, tel)
 
+        print(f"  [INFO] [{idx}/{total_unicos}] Robô Google (RPA): Consultando telefone {tel} ...")
+
         texto = coletar_texto_google_telefone(
             tel,
             cancel=cancel,
@@ -307,6 +310,14 @@ def coletar_textos_google_lote(
             caminho_navegador=caminho_navegador,
         )
         cache_por_telefone[tel] = texto
+
+        if texto and texto != "Não encontrado":
+            print(f"  [INFO] Robô Google: Dados capturados com sucesso para {tel}")
+            preview = texto[:200].replace("\n", " ").strip()
+            log_dev(f"Google RPA ({tel}) conteúdo capturado ({len(texto)} chars): {preview}...")
+        else:
+            print(f"  [AVISO] Robô Google: Conteúdo não localizado para {tel} (fallback ativado)")
+            log_dev(f"Google RPA ({tel}): Busca finalizada sem retorno útil.")
 
         # Pequena pausa entre buscas se houver mais de uma
         if idx < total_unicos and cancel is not None and not cancel.is_set():
@@ -317,6 +328,7 @@ def coletar_textos_google_lote(
         if not tel:
             resultado_por_chave[chave] = "Não encontrado"
         else:
-            resultado_por_chave[chave] = cache_por_telefone.get(tel, "Não encontrado")
+            val = cache_por_telefone.get(tel, "Não encontrado")
+            resultado_por_chave[chave] = val
 
     return resultado_por_chave

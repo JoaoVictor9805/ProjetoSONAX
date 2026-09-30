@@ -272,6 +272,8 @@ class ChamadaIngestor:
         if not texto_diarizado or not texto_diarizado.strip():
             return None
 
+        print(f"  [INFO] Diarizando e revisando {nome_exibicao} (Qwen 30B Instruct)...")
+
         resultado_ia = None
         for tentativa in range(1, 4):
             try:
@@ -311,9 +313,15 @@ class ChamadaIngestor:
 
                     resultado = inserir_revisao(cur, log_arquivo, revisao_texto, id_empresa=id_empresa)
                     print(
-                        f"  [INFO] Revisão de {nome_exibicao} inserida com sucesso no banco "
-                        f"(Empresa: {empresa_nome} | ID: {id_empresa})"
+                        f"  [INFO] Revisão de {nome_exibicao} gravada com sucesso no banco:"
                     )
+                    print(
+                        f"    • Empresa vinculada: {empresa_nome} (ID: {id_empresa})"
+                    )
+                    from app.logs import log_dev
+                    if fonte_dados:
+                        log_dev(f"[{nome_exibicao}] Triangulação de dados:\n{fonte_dados}")
+                    log_dev(f"[{nome_exibicao}] Prévia da revisão ({len(revisao_texto)} caracteres):\n{revisao_texto[:250]}...")
                 break
             except Exception:
                 print(f"  [ERRO] Falha ao salvar a revisão '{nome_exibicao}' no banco de dados (tentativa {tentativa}/3)")
@@ -400,6 +408,7 @@ class ChamadaIngestor:
             log_dev_exc()
             return None
 
+        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} (SPIN/BANT/SDR - GPT-4o-mini)...")
         analise_ia = None
         for tentativa in range(1, 4):
             try:
@@ -429,7 +438,57 @@ class ChamadaIngestor:
                         log_arquivo,
                         analise_ia,
                     )
-                    print(f"  [INFO] Análise de {nome_exibicao} inserida com sucesso no banco")
+                    if isinstance(analise_ia, dict):
+                        av_ia = analise_ia.get("avaliacao_ia", {})
+                        av_sdr = analise_ia.get("avaliacao_sdr", {})
+                        crit_lista = analise_ia.get("avaliacao_criterio", [])
+                        crm_dados = analise_ia.get("crm", {})
+                        spin = analise_ia.get("analise_spin", {})
+                        bant = analise_ia.get("analise_bant", {})
+
+                        nota_sdr = av_sdr.get("nota_final")
+                        if nota_sdr is not None:
+                            op_cod = av_sdr.get("codigo_oportunidade") or "Nenhum"
+                            print(f"  [INFO] Análise de {nome_exibicao} gravada com sucesso no banco:")
+                            print(f"    • Nota SDR: {nota_sdr}/100 | Oportunidade: {op_cod}")
+                            crit_resumo = " | ".join(
+                                f"{c.get('codigo_criterio', '').replace('CRIT_', '')}: {c.get('nota_criterio')}"
+                                for c in crit_lista
+                                if isinstance(c, dict) and c.get("codigo_criterio")
+                            )
+                            if crit_resumo:
+                                print(f"    • Critérios: {crit_resumo}")
+                            print(
+                                f"    • Lead: {av_ia.get('resultado', 'N/A')} | "
+                                f"Reunião confirmada: {str(av_ia.get('reuniao_confirmada', 'n')).upper()} | "
+                                f"Data confirmada: {str(av_ia.get('data_confirmada', 'n')).upper()}"
+                            )
+                            if crm_dados.get("acao"):
+                                prazo_txt = f" ({crm_dados.get('prazo')})" if crm_dados.get("prazo") else ""
+                                print(f"    • Próximo Passo CRM: {crm_dados.get('acao')}{prazo_txt}")
+                        else:
+                            print(f"  [AVISO] {nome_exibicao} [Não Avaliável]: Análise gravada com notas NULL para Power BI")
+                            print(f"    • Motivo: {av_sdr.get('feedback_geral', 'Chamada sem conteúdo avaliável')}")
+                            print(f"    • Status comercial: {av_ia.get('resultado', 'N/A')}")
+
+                        from app.logs import log_dev
+                        log_dev(f"[{nome_exibicao}] Feedback SDR: {av_sdr.get('feedback_geral')}")
+                        if av_sdr.get("acertos"):
+                            log_dev(f"[{nome_exibicao}] Acertos SDR: {av_sdr.get('acertos')}")
+                        if av_sdr.get("melhorias"):
+                            log_dev(f"[{nome_exibicao}] Oportunidades Melhoria: {av_sdr.get('melhorias')}")
+                        if av_sdr.get("frase_alternativa"):
+                            log_dev(f"[{nome_exibicao}] Frase Sugerida: {av_sdr.get('frase_alternativa')}")
+                        if spin.get("problema"):
+                            log_dev(f"[{nome_exibicao}] SPIN - Problema: {spin.get('problema')}")
+                        if spin.get("implicacao"):
+                            log_dev(f"[{nome_exibicao}] SPIN - Implicação: {spin.get('implicacao')}")
+                        if bant:
+                            log_dev(f"[{nome_exibicao}] BANT: B={bant.get('budget_classificacao')} | A={bant.get('authority_classificacao')} | N={bant.get('need_classificacao')} | T={bant.get('timeline_classificacao')}")
+                        if crm_dados.get("resumo"):
+                            log_dev(f"[{nome_exibicao}] Resumo Executivo CRM: {crm_dados.get('resumo')}")
+                    else:
+                        print(f"  [INFO] Análise de {nome_exibicao} inserida com sucesso no banco")
                 break
             except Exception:
                 print(f"  [ERRO] Falha ao salvar a análise '{nome_exibicao}' no banco de dados (tentativa {tentativa}/3)")
