@@ -10,7 +10,7 @@ Responsabilidades:
     4. Parsing de metadados do nome do arquivo (ramal, data, hora).
     5. Associação do atendente e persistência em `registro_chamadas`.
     6. Diarização e revisão com IA (Qwen Instruct).
-    7. Análise de critérios PEAH com IA (GPT-4o-mini).
+    7. Análise de qualidade comercial com IA (SPIN/BANT/SDR).
 ============================================================================
 """
 from __future__ import annotations
