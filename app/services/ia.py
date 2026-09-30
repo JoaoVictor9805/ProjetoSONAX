@@ -7,7 +7,7 @@ Responsabilidades:
     1. Definir o Protocolo `ProvedorIA` (Strategy) unificando capacidades cognitivas:
        - Transcrição ASR
        - Diarização e Revisão Textual
-       - Avaliação de Atendimento (PEAH)
+       - Avaliação de Qualidade Comercial (SPIN/BANT/SDR)
     2. Fornecer a implementação de produção `ProvedorIAReal` (OpenRouter + OpenAI).
     3. Fornecer a implementação em memória `FakeProvedorIA` para testes determinísticos,
        offline, com suporte a simulação de falhas transitórias e retries.

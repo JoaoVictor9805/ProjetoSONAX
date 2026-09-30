@@ -378,7 +378,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando critérios PEAH (GPT-4o-mini): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial (SPIN/BANT/SDR): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "analyzing", msg, caminho.name)
 
                     self.ingestor.analisar_chamada(
