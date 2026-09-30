@@ -35,8 +35,13 @@ class TestCosturaIA(unittest.TestCase):
 
         # Análise
         res_ana = fake.analisar(res_rev["revisao"])
-        self.assertIn("nota_final", res_ana)
-        self.assertIn("criterios", res_ana)
+        self.assertIn("avaliacao_ia", res_ana)
+        self.assertIn("avaliacao_sdr", res_ana)
+        self.assertIn("avaliacao_criterio", res_ana)
+        self.assertIn("analise_spin", res_ana)
+        self.assertIn("analise_bant", res_ana)
+        self.assertIn("interlocutor", res_ana)
+        self.assertIn("crm", res_ana)
         self.assertEqual(len(fake.chamadas_analisar), 1)
 
     def test_fake_ia_cancelamento(self):

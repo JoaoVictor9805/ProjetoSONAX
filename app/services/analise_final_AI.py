@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Serviço de Análise de Qualidade de Atendimento via IA (PEAH) do SONAX.
+Serviço de Análise de Qualidade Comercial B2B via IA (Falavinha Next).
 
 Responsabilidades:
-    1. Avaliação estruturada da ligação conforme critérios de excelência PEAH:
-       - Chamar pelo nome
-       - Agir com empatia
-       - Ouvir com atenção
-       - Eficiência operacional
-       - Surpreender
-    2. Detecção automática e tratamento de ligações de URA e chamadas inválidas.
-    3. Extração de feedback executivo, título resumido, pontos fortes, fragilidades
-       e oportunidades práticas de melhoria.
-    4. Cálculo determinístico da nota final da chamada com base nas notas dos critérios.
-    5. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
+    1. Avaliação estruturada da ligação conforme metodologia SPIN Selling e BANT.
+    2. Avaliação de qualidade do SDR com 6 critérios pré-definidos (dim_criterio_avaliacao).
+    3. Seleção de exatamente 1 código de oportunidade (dim_oportunidade_treinamento).
+    4. Diagnóstico do interlocutor (dores, dúvidas, objeções) e próximo passo para CRM.
+    5. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
+       para integridade em agregações no Power BI.
+    6. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
 
+import json
 import os
-from typing import Literal
+import re
+from datetime import date
+from typing import Any, Literal
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -34,118 +34,160 @@ load_dotenv()
 
 
 # ==========================================================
-# SCHEMA
+# CATÁLOGO DE DIMENSÕES PRÉ-DEFINIDAS
 # ==========================================================
 
-NomeCriterio = Literal[
-    "chamar pelo nome",
-    "agir com empatia",
-    "ouvir com atencao",
-    "eficiencia operacional",
-    "surpreender",
-]
+CRITERIOS_OFICIAIS: dict[str, dict[str, Any]] = {
+    "CRIT_ABERTURA": {
+        "descricao": "Abertura clara, motivo do contato e relevância para o interlocutor",
+        "max_pontos": 10,
+    },
+    "CRIT_SPIN": {
+        "descricao": "Descoberta SPIN: Situação, Problema, Implicação, Necessidade de solução",
+        "max_pontos": 30,
+    },
+    "CRIT_PERFIL": {
+        "descricao": "Investigação adequada do perfil: setor, regime tributário, faturamento",
+        "max_pontos": 25,
+    },
+    "CRIT_BANT": {
+        "descricao": "Investigação BANT: viabilidade comercial, autoridade, necessidade, prazo",
+        "max_pontos": 15,
+    },
+    "CRIT_ESCUTA": {
+        "descricao": "Escuta, aprofundamento e tratamento respeitoso de dúvidas ou objeções",
+        "max_pontos": 10,
+    },
+    "CRIT_PROX_PASSO": {
+        "descricao": "Proposta de próximo passo pertinente e tentativa de obter compromisso claro",
+        "max_pontos": 10,
+    },
+}
+
+CODIGOS_OPORTUNIDADE_VALIDOS = {
+    "OP_ABERT_01", "OP_ABERT_02", "OP_ABERT_03", "OP_ABERT_04", "OP_ABERT_05", "OP_ABERT_06",
+    "OP_SPIN_01", "OP_SPIN_02", "OP_SPIN_03", "OP_SPIN_04", "OP_SPIN_05",
+    "OP_PERF_01", "OP_PERF_02", "OP_PERF_03", "OP_PERF_04",
+    "OP_BANT_01", "OP_BANT_02", "OP_BANT_03", "OP_BANT_04",
+    "OP_ESC_01", "OP_ESC_02", "OP_ESC_03", "OP_ESC_04", "OP_ESC_05",
+    "OP_PROX_01", "OP_PROX_02", "OP_PROX_03", "OP_PROX_04",
+    "OP_DIR_01", "OP_DIR_02", "OP_DIR_03",
+}
 
 
-class Criterio(BaseModel):
+# ==========================================================
+# MODELOS PYDANTIC (ESTRUTURA RELACIONAL 7 TABELAS)
+# ==========================================================
 
-    criterio: NomeCriterio
-
-    nota_criterio: int | None = Field(
-        default=None,
-        ge=0,
-        le=10,
-        description=(
-            "Nota inteira entre 0 e 10. A nota começa em 10 e vai diminuindo progressivamente por deslize. "
-            "Atribua null quando não for possível avaliar o critério a partir do contexto da chamada."
-        ),
+class AvaliacaoIAModel(BaseModel):
+    protocolo: int | None = Field(default=None, description="Número de protocolo da chamada")
+    data_avaliacao: str = Field(description="Data da avaliação no formato YYYY-MM-DD")
+    modelo_ia: str = Field(default="gpt-4o-mini", description="Identificador do modelo de IA utilizado")
+    interlocutor: str | None = Field(default=None, description="Nome do interlocutor contatado na empresa")
+    cargo: str | None = Field(default=None, description="Cargo ou área do interlocutor")
+    empresa_contatada: int | None = Field(default=None, description="ID numérico da empresa contatada")
+    resultado: str = Field(
+        description="Status comercial da empresa: 'Perfil confirmado', 'Perfil pendente', 'Fora do perfil desta campanha' ou 'Dados insuficientes'"
+    )
+    ligacao_relevante: Literal["s", "n"] = Field(
+        description="'s' se a chamada teve conversa substantiva relevante, 'n' caso contrário"
+    )
+    reuniao_confirmada: Literal["s", "n"] = Field(
+        description="'s' se reunião foi confirmada com aceite claro e data/horário, 'n' caso contrário"
+    )
+    data_confirmada: Literal["s", "n"] = Field(
+        description="'s' se houve confirmação explícita de data e horário para próximo passo, 'n' caso contrário"
+    )
+    resultado_frase: str = Field(
+        description="Resultado em uma frase: o que aconteceu e qual compromisso foi obtido"
     )
 
-    justificativa_criterio: str | None = Field(
-        default=None,
-        description=(
-            "Justificativa curta e objetiva baseada exclusivamente na transcrição. "
-            "Quando nota_criterio = null, a justificativa deve ser obrigatoriamente e exatamente: "
-            "'[Não houve contexto suficiente para a avaliação desse critério]'."
-        ),
-    )
+
+class AnaliseSpinModel(BaseModel):
+    situacao: str | None = Field(default=None, description="Contexto atual, estrutura fiscal/contábil e prioridades")
+    problema: str | None = Field(default=None, description="Dificuldades ou atritos fiscais reconhecidos pelo interlocutor")
+    implicacao: str | None = Field(default=None, description="Consequências operacionais, financeiras ou estratégicas")
+    necessidade_solucao: str | None = Field(default=None, description="Benefícios e resultados esperados pelo interlocutor")
+    evidencias: str | None = Field(default=None, description="Citações textuais curtas entre aspas")
+    lacunas: str | None = Field(default=None, description="O que o SDR deixou de aprofundar na descoberta SPIN")
 
 
-class AnaliseLigacao(BaseModel):
+class AnaliseBantModel(BaseModel):
+    budget_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    budget_evidencia: str | None = Field(default=None, description="Evidência curta sobre orçamento")
+    authority_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    authority_evidencia: str | None = Field(default=None, description="Evidência curta sobre autoridade")
+    need_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    need_evidencia: str | None = Field(default=None, description="Evidência curta sobre necessidade")
+    timeline_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    timeline_evidencia: str | None = Field(default=None, description="Evidência curta sobre prazos")
 
+
+class AvaliacaoSDRModel(BaseModel):
     nota_final: int | None = Field(
         default=None,
         ge=0,
-        le=10,
-        description=(
-            "Nota geral da ligação recalculada pela aplicação. Use null se a chamada for URA ou inválida."
-        ),
+        le=100,
+        description="Nota inteira de 0 a 100, ou null se a chamada não for avaliável",
     )
-
-    feedback_geral: str | None = Field(
+    feedback_geral: str = Field(
+        description="Feedback estruturado da atuação do SDR. Se não avaliável: 'Não avaliável: [motivo]'"
+    )
+    acertos: str | None = Field(default=None, description="Até 2 acertos observáveis na atuação do SDR")
+    melhorias: str | None = Field(default=None, description="Até 2 oportunidades pontuais de melhoria para o SDR")
+    frase_alternativa: str | None = Field(default=None, description="Uma frase ou pergunta concreta sugerida")
+    codigo_oportunidade: str | None = Field(
         default=None,
-        description=(
-            "Feedback sobre o atendimento. Em caso de URA ou chamada não avaliável, escreva exatamente: "
-            "'[A chamada retrata a fala de uma Unidade de resposta audível (URA)]' ou "
-            "'[A chamada é inválida para a avalião]' conforme a situação."
-        ),
+        description="Exatamente 1 código de dim_oportunidade_treinamento (ex: OP_SPIN_03), ou null se não avaliável",
     )
 
-    titulo: str | None = Field(
+
+class AvaliacaoCriterioItemModel(BaseModel):
+    criterio: str = Field(description="Descrição oficial do critério avaliado")
+    nota_criterio: int | None = Field(
         default=None,
-        max_length=255,
-        description=(
-            "Título curto e informativo (4 a 7 palavras) sobre o tema principal da chamada, "
-            "adequado para busca e identificação rápida em relatórios do Power BI. "
-            "Ex: 'Dúvida Tributária - Contato Financeiro', 'Solicitação de 2ª Via de Boleto'."
-        ),
+        ge=0,
+        le=30,
+        description="Nota numérica inteira atribuída ao critério, ou null se não avaliável",
+    )
+    justificativa_criterio: str = Field(
+        description="Justificativa sucinta da pontuação ou 'Não avaliável: [motivo]'"
+    )
+    codigo_criterio: str = Field(
+        description="Código pré-definido: CRIT_ABERTURA, CRIT_SPIN, CRIT_PERFIL, CRIT_BANT, CRIT_ESCUTA ou CRIT_PROX_PASSO"
     )
 
-    resumo_chamada: str | None = Field(
-        default=None,
-        description=(
-            "Resumo principal executivo da chamada (limite de até 340 caracteres) sobre o motivo do contato, "
-            "a postura do atendente e o desfecho da ligação (ou null se for URA/inválida)."
-        ),
-    )
 
-    pontos_fortes: str | None = Field(
-        default=None,
-        description=(
-            "Pontos fortes e boas práticas demonstradas na ligação (limite de até 210 caracteres) "
-            "(ou null se não houver destaques ou se for URA/inválida)."
-        ),
-    )
+class InterlocutorModel(BaseModel):
+    interesse_expresso: str | None = Field(default=None, description="Interesse verbalizado ou 'não houve'")
+    duvidas: str | None = Field(default=None, description="Dúvidas levantadas ou 'não houve'")
+    objecoes: str | None = Field(default=None, description="Objeções apresentadas ou 'não houve'")
+    resposta_sdr: str | None = Field(default=None, description="Como o SDR respondeu")
+    reacao_interlocutor: str | None = Field(default=None, description="Reação final do lead")
 
-    fragilidades: str | None = Field(
-        default=None,
-        description=(
-            "Pontos fracos, desvios pontuais ou deslizes observados na ligação (limite de até 210 caracteres) "
-            "(ou null se não houver ou se for URA/inválida)."
-        ),
-    )
 
-    oportunidades: str | None = Field(
-        default=None,
-        description=(
-            "Oportunidades práticas e pontuais de melhoria para o atendente (limite de até 280 caracteres) "
-            "(ou null se não houver ou se for URA/inválida)."
-        ),
-    )
+class CrmModel(BaseModel):
+    acao: str | None = Field(default=None, description="Próximo passo comercial concreto")
+    responsavel: str | None = Field(default=None, description="Responsável pelo próximo passo")
+    prazo: str | None = Field(default=None, description="Data e horário agendados ou 'não informado'")
+    dados_extras: str | None = Field(default=None, description="Dados pendentes de confirmação")
+    resumo: str | None = Field(default=None, description="Resumo executivo de até 80 palavras para colar no CRM")
 
-    criterios: list[Criterio] = Field(
-        min_length=5,
-        max_length=5,
-        description=(
-            "Exatamente cinco critérios, utilizando uma única vez "
-            "cada um dos critérios definidos."
-        ),
-    )
 
+class AnaliseCompletaModel(BaseModel):
+    avaliacao_ia: AvaliacaoIAModel
+    analise_spin: AnaliseSpinModel
+    analise_bant: AnaliseBantModel
+    avaliacao_sdr: AvaliacaoSDRModel
+    avaliacao_criterio: list[AvaliacaoCriterioItemModel] = Field(min_length=6, max_length=6)
+    interlocutor: InterlocutorModel
+    crm: CrmModel
 
 
 # ==========================================================
-# MODELO
+# CLIENTE E CHAIN LANGCHAIN
 # ==========================================================
+
 MODELO_ANALISE = os.getenv("GEMINI_ANALISE_MODEL", "gemini-3.1-flash-lite")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI API_KEY")
 
@@ -157,63 +199,144 @@ client = ChatGoogleGenerativeAI(
     max_retries=3,
 )
 
-# ==========================================================
-# STRUCTURED OUTPUT
-# ==========================================================
-
 structured_client = client.with_structured_output(
-    AnaliseLigacao,
+    AnaliseCompletaModel,
 )
-
-
-# ==========================================================
-# PROMPT
-# ==========================================================
 
 prompt = ChatPromptTemplate.from_messages(
     [
-        (
-            "system",
-            prompt_analise,
-        ),
+        SystemMessage(content=prompt_analise),
         (
             "user",
             """
-TRANSCRIÇÃO DA LIGAÇÃO A SER AVALIADA:
+### METADADOS DA LIGAÇÃO:
+- Protocolo: {protocolo}
+- ID da Empresa: {empresa_contatada}
+- Nome da Empresa: {empresa_nome}
+- SDR Responsável: {nome_sdr}
 
+### TRANSCRIÇÃO REVISADA DA LIGAÇÃO A SER AVALIADA:
 {ligacao}
 """,
         ),
     ]
 )
 
-
-# ==========================================================
-# CHAIN
-# ==========================================================
-
 chain = prompt | structured_client
 
 
 # ==========================================================
-# CÁLCULO DA NOTA FINAL
+# FUNÇÕES DE CÁLCULO E TRATAMENTO
 # ==========================================================
 
-def calcular_nota_final(resultado: dict) -> dict:
+def _limpar_resposta_json(texto: str) -> dict[str, Any] | None:
+    """Extrai JSON válido de strings que possam conter blocos de markdown."""
+    texto_limpo = texto.strip()
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", texto_limpo, re.DOTALL)
+    if match:
+        texto_limpo = match.group(1).strip()
+    try:
+        return json.loads(texto_limpo)
+    except Exception:
+        return None
 
-    notas = [
-        criterio["nota_criterio"]
-        for criterio in resultado.get("criterios", [])
-        if criterio.get("nota_criterio") is not None
+
+def calcular_e_sanitizar_analise(
+    resultado: dict[str, Any],
+    *,
+    protocolo: int | None = None,
+    empresa_contatada: int | None = None,
+) -> dict[str, Any]:
+    """
+    Aplica regras determinísticas de negócio:
+        - Ajusta protocolo e ID de empresa contatada.
+        - Identifica chamadas não avaliáveis (URA, queda, recusa) e força nota_final = null
+          e nota_criterio = null para proteção do Power BI.
+        - Calcula nota_final como a soma dos 6 critérios quando a ligação for avaliável.
+        - Garante que os 6 critérios oficiais existam na lista avaliacao_criterio.
+        - Valida que codigo_oportunidade seja um código dimensional válido.
+    """
+    # 1. Metadados de avaliacao_ia
+    av_ia = resultado.setdefault("avaliacao_ia", {})
+    if protocolo is not None and not av_ia.get("protocolo"):
+        av_ia["protocolo"] = protocolo
+    if empresa_contatada is not None and not av_ia.get("empresa_contatada"):
+        av_ia["empresa_contatada"] = empresa_contatada
+    if not av_ia.get("data_avaliacao"):
+        av_ia["data_avaliacao"] = str(date.today())
+    if not av_ia.get("modelo_ia"):
+        av_ia["modelo_ia"] = MODELO_ANALISE
+
+    # 2. Avaliação SDR e Critérios
+    av_sdr = resultado.setdefault("avaliacao_sdr", {})
+    criterios = resultado.setdefault("avaliacao_criterio", [])
+    feedback = (av_sdr.get("feedback_geral") or "").strip()
+
+    # Notas numéricas presentes nos critérios
+    notas_validas = [
+        c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
     ]
 
-    if not notas:
-        resultado["nota_final"] = None
-        return resultado
+    # Detecção de URA ou chamadas não avaliáveis
+    eh_nao_avaliavel = (
+        "não avaliável" in feedback.lower()
+        or "nao avaliavel" in feedback.lower()
+        or "ura" in feedback.lower()
+        or "inválida para a avali" in feedback.lower()
+        or (not notas_validas and av_sdr.get("nota_final") is None)
+    )
 
-    media = sum(notas) / len(notas)
+    if eh_nao_avaliavel:
+        av_sdr["nota_final"] = None
+        av_sdr["codigo_oportunidade"] = None
+        if not feedback.lower().startswith("não avaliável"):
+            av_sdr["feedback_geral"] = f"Não avaliável: {feedback}" if feedback else "Não avaliável: Sem diálogo suficiente para avaliação."
 
-    resultado["nota_final"] = round(media)
+        for crit in criterios:
+            crit["nota_criterio"] = None
+            just = (crit.get("justificativa_criterio") or "").strip()
+            if not just.lower().startswith("não avaliável"):
+                crit["justificativa_criterio"] = f"Não avaliável: {just}" if just else "Não avaliável: Sem contexto para este critério."
+
+        av_ia["ligacao_relevante"] = "n"
+        av_ia["reuniao_confirmada"] = "n"
+        av_ia["data_confirmada"] = "n"
+
+    else:
+        # Ligações avaliáveis: soma determinística dos 6 critérios
+        notas_validas = [
+            c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
+        ]
+        if notas_validas:
+            soma = sum(notas_validas)
+            av_sdr["nota_final"] = max(0, min(100, soma))
+        else:
+            av_sdr["nota_final"] = None
+
+        # Validação do código de oportunidade contra a dimensão
+        cod_op = av_sdr.get("codigo_oportunidade")
+        if cod_op and cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS:
+            # Fallback seguro para código existente mais genérico de fechamento
+            av_sdr["codigo_oportunidade"] = "OP_DIR_03"
+
+    # 3. Garantia dos 6 critérios pré-definidos
+    codigos_presentes = {c.get("codigo_criterio") for c in criterios if c.get("codigo_criterio")}
+    for cod_crit, meta in CRITERIOS_OFICIAIS.items():
+        if cod_crit not in codigos_presentes:
+            criterios.append({
+                "criterio": meta["descricao"],
+                "nota_criterio": None,
+                "justificativa_criterio": "Não avaliável: Critério ausente na resposta da IA.",
+                "codigo_criterio": cod_crit,
+            })
+
+    # 4. Limite de 80 palavras no resumo CRM
+    crm = resultado.setdefault("crm", {})
+    resumo_crm = (crm.get("resumo") or "").strip()
+    if resumo_crm:
+        palavras = resumo_crm.split()
+        if len(palavras) > 80:
+            crm["resumo"] = " ".join(palavras[:80]) + "..."
 
     return resultado
 
@@ -222,96 +345,43 @@ def calcular_nota_final(resultado: dict) -> dict:
 # FUNÇÃO PRINCIPAL
 # ==========================================================
 
-def analisar_ligacao(ligacao: str) -> dict:
+def analisar_ligacao(
+    ligacao: str,
+    *,
+    protocolo: int | None = None,
+    empresa_contatada: int | None = None,
+    empresa_nome: str | None = None,
+    nome_sdr: str | None = None,
+) -> dict[str, Any]:
+    """
+    Submete a transcrição revisada ao GPT-4o-mini e devolve o dicionário
+    completo com as 7 chaves relacionais padronizadas.
+    """
+    inputs = {
+        "ligacao": ligacao,
+        "protocolo": protocolo or "Não informado",
+        "empresa_contatada": empresa_contatada or "Não informado",
+        "empresa_nome": empresa_nome or "Não informado",
+        "nome_sdr": nome_sdr or "Não informado",
+    }
 
-    resposta = chain.invoke(
-        {
-            "ligacao": ligacao
-        }
-    )
+    resposta = chain.invoke(inputs)
 
-    # Converte para dict caso seja um modelo Pydantic, ou preserva se já for dict
+    # Conversão Pydantic -> dict
     if isinstance(resposta, BaseModel):
         resultado = resposta.model_dump()
     elif isinstance(resposta, dict):
         resultado = resposta
+    elif isinstance(resposta, str):
+        parsed = _limpar_resposta_json(resposta)
+        resultado = parsed if parsed else {}
     else:
         resultado = dict(resposta)
 
-    feedback = (resultado.get("feedback_geral") or "").strip()
+    resultado = calcular_e_sanitizar_analise(
+        resultado,
+        protocolo=protocolo,
+        empresa_contatada=empresa_contatada,
+    )
 
-    # Tratamento de URA ou chamadas inválidas
-    if "[A chamada retrata a fala de uma Unidade de resposta audível (URA)]" in feedback:
-        resultado["feedback_geral"] = "[A chamada retrata a fala de uma Unidade de resposta audível (URA)]"
-        resultado["nota_final"] = None
-        resultado["resumo_chamada"] = None
-        resultado["pontos_fortes"] = None
-        resultado["fragilidades"] = None
-        resultado["oportunidades"] = None
-        for crit in resultado.get("criterios", []):
-            crit["nota_criterio"] = None
-            crit["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
-
-    elif "[A chamada é inválida para a avali" in feedback or "inválida para a avali" in feedback.lower():
-        resultado["feedback_geral"] = "[A chamada é inválida para a avalião]"
-        resultado["nota_final"] = None
-        resultado["resumo_chamada"] = None
-        resultado["pontos_fortes"] = None
-        resultado["fragilidades"] = None
-        resultado["oportunidades"] = None
-        for crit in resultado.get("criterios", []):
-            crit["nota_criterio"] = None
-            crit["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
-
-    # Regra: quando nota_criterio = null, justificativa obrigatória padronizada
-    for criterio in resultado.get("criterios", []):
-        if criterio.get("nota_criterio") is None:
-            criterio["justificativa_criterio"] = "[Não houve contexto suficiente para a avaliação desse critério]"
-
-    # Limites estritos de caracteres (salvaguarda de comprimento)
-    if resultado.get("resumo_chamada") and len(resultado["resumo_chamada"]) > 340:
-        resultado["resumo_chamada"] = resultado["resumo_chamada"][:337] + "..."
-    if resultado.get("pontos_fortes") and len(resultado["pontos_fortes"]) > 210:
-        resultado["pontos_fortes"] = resultado["pontos_fortes"][:207] + "..."
-    if resultado.get("fragilidades") and len(resultado["fragilidades"]) > 210:
-        resultado["fragilidades"] = resultado["fragilidades"][:207] + "..."
-    if resultado.get("oportunidades") and len(resultado["oportunidades"]) > 280:
-        resultado["oportunidades"] = resultado["oportunidades"][:277] + "..."
-
-    # Calcula deterministicamente a nota final
-    resultado = calcular_nota_final(resultado)
-
-    return resultado
-
-
-# ==========================================================
-# TESTE
-# ==========================================================
-
-if __name__ == "__main__":
-
-    LIGACAO_TESTE = """
-URA: Olá, bem-vindo à empresa. Digite uma das opções para atendimento.
-
-Agente (Falavinha): Boa tarde, Maria, tudo bem com você?
-
-Cliente (Empresa): Tudo bem.
-
-Agente (Falavinha): Que ótimo. Estou entrando em contato porque
-identificamos algumas oportunidades tributárias para a empresa de vocês.
-
-Cliente (Empresa): Entendi. Essa questão seria mais com o nosso financeiro.
-
-Agente (Falavinha): Perfeito. Você consegue me informar quem é a pessoa
-responsável por essa área?
-
-Cliente (Empresa): Pode falar com a Jaqueline.
-
-Agente (Falavinha): Perfeito. Você teria um telefone ou WhatsApp dela?
-
-Cliente (Empresa): Tenho sim.
-"""
-
-    resultado = analisar_ligacao(LIGACAO_TESTE)
-
-    print(resultado)
+    return resultado
