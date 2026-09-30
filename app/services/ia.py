@@ -65,8 +65,8 @@ class ProvedorIAReal:
         on_progress: SubProgressCallback | None = None,
         timeout: int = 90,
     ) -> dict[str, Any]:
-        from app.services.transcricao import transcrever_audio_openrouter
-        return transcrever_audio_openrouter(
+        from app.services.transcricao import transcrever_audio_assemblyai
+        return transcrever_audio_assemblyai(
             caminho,
             cancel=cancel,
             on_progress=on_progress,

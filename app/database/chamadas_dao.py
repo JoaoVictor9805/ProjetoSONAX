@@ -260,6 +260,7 @@ def inserir_analise(
     pontos_fortes: str | None = None,
     fragilidades: str | None = None,
     oportunidades: str | None = None,
+    modelo_ia: str = "Revisão: gemini-3.1-flash-lite | Análise: gemini-3.1-flash-lite",
 ) -> int | None:
     cur.execute(
         """
@@ -284,7 +285,7 @@ def inserir_analise(
             nota_final,
             feedback_geral,
             date.today(),
-            "Revisão: gemini-3.1-flash-lite | Análise: gemini-3.5-flash-lite",
+            modelo_ia,
             titulo,
             resumo_chamada,
             pontos_fortes,

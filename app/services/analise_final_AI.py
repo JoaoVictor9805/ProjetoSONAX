@@ -146,25 +146,14 @@ class AnaliseLigacao(BaseModel):
 # ==========================================================
 # MODELO
 # ==========================================================
-"""
+MODELO_ANALISE = os.getenv("GEMINI_ANALISE_MODEL", "gemini-3.1-flash-lite")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI API_KEY")
+
 client = ChatGoogleGenerativeAI(
-    model="gemini-3.5-flash-lite",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
-
-    # Mantém o comportamento mais determinístico.
-    temperature=0,
-
+    model=MODELO_ANALISE,
+    google_api_key=GEMINI_KEY,
+    temperature=0.0,
     max_output_tokens=4096,
-    max_retries=3,
-)
-"""
-
-client = ChatOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    model="openai/gpt-4o-mini",
-    temperature=0.0,  # Zero para garantir a precisão estrutural das chaves
-    max_tokens=1500,  # Margem segura para devolução completa do JSON
     max_retries=3,
 )
 
@@ -174,7 +163,6 @@ client = ChatOpenAI(
 
 structured_client = client.with_structured_output(
     AnaliseLigacao,
-    method="json_schema",
 )
 
 

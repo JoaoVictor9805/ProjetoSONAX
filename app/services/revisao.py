@@ -27,21 +27,14 @@ from app.config.prompts import prompt_revisao
 
 load_dotenv()
 
-"""
-client = ChatGoogleGenerativeAI (
-    model="gemini-3.1-flash-lite",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
-    max_output_tokens=4096,
-    max_retries=3
-)
-"""
+MODELO_REVISAO = os.getenv("GEMINI_REVISAO_MODEL", "gemini-3.1-flash-lite")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI API_KEY")
 
-client = ChatOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
-    model="qwen/qwen3-30b-a3b-instruct-2507",
-    temperature=0.0,  # Zero para evitar criação de diálogos falsos
-    max_tokens=2000,  # Margem segura para devolver a transcrição inteira
+client = ChatGoogleGenerativeAI(
+    model=MODELO_REVISAO,
+    google_api_key=GEMINI_KEY,
+    temperature=0.0,
+    max_output_tokens=4096,
     max_retries=3,
 )
 
@@ -158,7 +151,7 @@ def revisar_texto(
         "nome_agente": atendente_str,
     })
 
-    empresa, revisao = parsear_resposta_revisao(resultado_raw)
+    empresa, revisao = parsear_resposta_revisao(str(resultado_raw))
 
     # Tenta extrair menção ao nome da empresa rotulada nos turnos do Cliente
     nome_diarizado = None

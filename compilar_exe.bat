@@ -24,6 +24,8 @@ pyinstaller --noconsole --onefile --name "SONAX" ^
     --collect-all psycopg ^
     --collect-all langchain ^
     --collect-all langchain_openai ^
+    --collect-all langchain_google_genai ^
+    --collect-all assemblyai ^
     --collect-all requests ^
     run_gui.py
 
