@@ -14,6 +14,21 @@ from app.database.chamadas_dao import (
 
 class TestChamadasDao(unittest.TestCase):
 
+    def setUp(self):
+        import app.database.chamadas_dao as dao
+        dao._SCHEMA_EMPRESA_GARANTIDO = True
+        dao._SCHEMA_AVALIACAO_GARANTIDO = True
+
+    def test_garantir_schema_empresa_executa_ddl(self):
+        import app.database.chamadas_dao as dao
+        dao._SCHEMA_EMPRESA_GARANTIDO = False
+        cur = MagicMock()
+        dao.garantir_schema_empresa(cur)
+        self.assertTrue(cur.execute.called)
+        ddl = cur.execute.call_args[0][0]
+        self.assertIn("ALTER TABLE empresa ADD COLUMN IF NOT EXISTS telefone", ddl)
+        self.assertTrue(dao._SCHEMA_EMPRESA_GARANTIDO)
+
     def test_buscar_chamada_valida_retorna_dados_completos(self):
         cur = MagicMock()
         cur.fetchone.return_value = (123456, "1001", "Lucas", "33101010", "41")

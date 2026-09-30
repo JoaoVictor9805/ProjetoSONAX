@@ -46,6 +46,27 @@ def buscar_chamada_valida(
     }
 
 
+_SCHEMA_EMPRESA_GARANTIDO = False
+
+
+def garantir_schema_empresa(cur: psycopg.Cursor) -> None:
+    """Garante que a tabela empresa contenha a coluna telefone, índice e remova a restrição UNIQUE em nome."""
+    global _SCHEMA_EMPRESA_GARANTIDO
+    if _SCHEMA_EMPRESA_GARANTIDO:
+        return
+    try:
+        cur.execute(
+            """
+            ALTER TABLE empresa ADD COLUMN IF NOT EXISTS telefone VARCHAR(20);
+            CREATE INDEX IF NOT EXISTS empresa_telefone ON empresa(telefone);
+            ALTER TABLE empresa DROP CONSTRAINT IF EXISTS empresa_nome_key;
+            """
+        )
+        _SCHEMA_EMPRESA_GARANTIDO = True
+    except Exception:
+        pass
+
+
 def inserir_empresa(
     cur: psycopg.Cursor,
     nome: str,
@@ -64,6 +85,7 @@ def inserir_empresa(
     3. Inserção: se for um novo cadastro (ou se o nome for 'Não encontrado' sem telefone pré-existente),
        insere novo registro e retorna o id_empresa gerado.
     """
+    garantir_schema_empresa(cur)
     nome_limpo = (nome or "").strip()[:100]
     if not nome_limpo:
         nome_limpo = "Não encontrado"
