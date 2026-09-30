@@ -277,12 +277,17 @@ def calcular_e_sanitizar_analise(
         c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
     ]
 
-    # Detecção de URA ou chamadas não avaliáveis
+    # Detecção de URA ou chamadas não avaliáveis (apenas quando não há pontuação positiva válida)
+    tem_pontos_positivos = any(n > 0 for n in notas_validas)
     eh_nao_avaliavel = (
-        "não avaliável" in feedback.lower()
-        or "nao avaliavel" in feedback.lower()
-        or "ura" in feedback.lower()
-        or "inválida para a avali" in feedback.lower()
+        feedback.lower().startswith("não avaliável")
+        or feedback.lower().startswith("nao avaliavel")
+        or (not tem_pontos_positivos and (
+            "não avaliável" in feedback.lower()
+            or "nao avaliavel" in feedback.lower()
+            or "ura" in feedback.lower()
+            or "inválida para a avali" in feedback.lower()
+        ))
         or (not notas_validas and av_sdr.get("nota_final") is None)
     )
 
