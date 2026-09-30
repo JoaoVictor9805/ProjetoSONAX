@@ -196,19 +196,25 @@ Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que mel
 - `OP_DIR_03`: Consolidação de status claro (evitar terminar a ligação deixando a empresa em área cinzenta indefinida).
 
 #### 6. Destaques Qualitativos do SDR
-- `acertos`: até dois acertos concretos observados na ligação.
-- `melhorias`: até duas oportunidades de melhoria pontuais e práticas.
-- `frase_alternativa`: uma frase ou pergunta concreta que o SDR poderia ter utilizado.
+- `acertos`: até dois acertos concretos observados na ligação (ou "Não se aplica").
+- `melhorias`: até duas oportunidades de melhoria pontuais e práticas (ou "Não se aplica").
+- `frase_alternativa`: uma frase ou pergunta concreta que o SDR poderia ter utilizado (ou "Não se aplica").
 
 #### 7. Sinais, Dúvidas e Objeções (`interlocutor`)
-Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_interlocutor`. Use "não houve" quando não ocorrer.
+Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_interlocutor`. Use SEMPRE "Não se aplica" quando não ocorrer.
 
 #### 8. Próximo Passo e CRM (`crm`)
 - `acao`: avanço comercial ("Reunião confirmada", "Reunião proposta sem aceite", "Retorno com data combinado", "Envio de material solicitado", "Sem próximo passo definido", "Sem interesse explícito").
-- `responsavel`: SDR ou responsável nomeado.
-- `prazo`: data e horário combinados (ou null / "não informado").
-- `dados_extras`: dados pendentes que ainda precisam ser validados.
-- `resumo`: resumo executivo para colar no CRM de NO MÁXIMO 80 PALAVRAS, sem informações inferidas apresentadas como fatos.
+- `responsavel`: SDR ou responsável nomeado (ou "Não se aplica").
+- `prazo`: data e horário combinados (ou "Não se aplica").
+- `dados_extras`: dados pendentes que ainda precisam ser validados (ou "Não se aplica").
+- `resumo`: resumo executivo para colar no CRM de NO MÁXIMO 80 PALAVRAS, sem informações inferidas apresentadas como fatos (ou "Não se aplica").
+
+#### 9. Regra Estrita de Padronização para Ausência de Ocorrência
+- Em todos os campos de texto onde NÃO houver ocorrência, evidência, dúvida, objeção, sugestão ou dado pendente (ex.: `duvidas`, `objecoes`, `interesse_expresso`, `resposta_sdr`, `reacao_interlocutor`, `acertos`, `melhorias`, `frase_alternativa`, `evidencias`, `lacunas`, `responsavel`, `prazo`, `dados_extras`), utilize OBRIGATORIAMENTE o texto: `"Não se aplica"`.
+- NUNCA use reticências (ex: "Não se aplica..."), NUNCA use "não houve", nem outras variações informais.
+- O que for justificativa ou feedback livre (`feedback_geral`, `justificativa_criterio`, `resultado_frase`, `resumo`) pode manter sem padrão, explicando com texto livre.
+- Para campos que NÃO permitem texto (numéricos ou Foreign Keys como `nota_final`, `nota_criterio`, `codigo_oportunidade`, `empresa_contatada`) quando não avaliáveis ou não aplicáveis, retorne estritamente `null`.
 
 ### Formato de Saída Obrigatório (JSON Estrito)
 Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 7 chaves principais abaixo, sem texto antes ou depois:

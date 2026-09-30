@@ -241,6 +241,42 @@ def _limpar_resposta_json(texto: str) -> dict[str, Any] | None:
         return None
 
 
+def normalizar_texto_nao_se_aplica(valor: Any) -> str:
+    """Normaliza campos de texto que representam ausência ou vazio para 'Não se aplica'."""
+    if valor is None:
+        return "Não se aplica"
+    val_str = str(valor).strip()
+    if not val_str:
+        return "Não se aplica"
+
+    val_norm = val_str.lower().rstrip(".").strip()
+    termos_ausencia = {
+        "não se aplica", "nao se aplica",
+        "não houve", "nao houve",
+        "não informado", "nao informado",
+        "não identificado", "nao identificado",
+        "nenhum", "nenhuma",
+        "não há", "nao ha",
+        "nada", "n/a", "sem retorno",
+        "null", "none",
+        "não ocorreu", "nao ocorreu",
+        "sem informações", "sem informacoes",
+        "não mencionou", "nao mencionou",
+        "não relatado", "nao relatado",
+        "sem dados", "sem dado",
+    }
+    if (
+        val_norm in termos_ausencia
+        or val_norm.startswith("não se aplica")
+        or val_norm.startswith("nao se aplica")
+        or val_norm.startswith("não houve")
+        or val_norm.startswith("nao houve")
+    ):
+        return "Não se aplica"
+
+    return val_str
+
+
 def calcular_e_sanitizar_analise(
     resultado: dict[str, Any],
     *,
@@ -255,6 +291,7 @@ def calcular_e_sanitizar_analise(
         - Calcula nota_final como a soma dos 6 critérios quando a ligação for avaliável.
         - Garante que os 6 critérios oficiais existam na lista avaliacao_criterio.
         - Valida que codigo_oportunidade seja um código dimensional válido.
+        - Padroniza campos textuais sem ocorrência para 'Não se aplica'.
     """
     # 1. Metadados de avaliacao_ia
     av_ia = resultado.setdefault("avaliacao_ia", {})
@@ -266,6 +303,10 @@ def calcular_e_sanitizar_analise(
         av_ia["data_avaliacao"] = str(date.today())
     if not av_ia.get("modelo_ia"):
         av_ia["modelo_ia"] = MODELO_ANALISE
+
+    # Normalização de interlocutor e cargo quando ausentes/vazios
+    av_ia["interlocutor"] = normalizar_texto_nao_se_aplica(av_ia.get("interlocutor"))
+    av_ia["cargo"] = normalizar_texto_nao_se_aplica(av_ia.get("cargo"))
 
     # 2. Avaliação SDR e Critérios
     av_sdr = resultado.setdefault("avaliacao_sdr", {})
@@ -324,6 +365,10 @@ def calcular_e_sanitizar_analise(
             # Fallback seguro para código existente mais genérico de fechamento
             av_sdr["codigo_oportunidade"] = "OP_DIR_03"
 
+    # Padronização de campos de avaliação SDR
+    for k in ("acertos", "melhorias", "frase_alternativa"):
+        av_sdr[k] = normalizar_texto_nao_se_aplica(av_sdr.get(k))
+
     # 3. Garantia dos 6 critérios pré-definidos
     codigos_presentes = {c.get("codigo_criterio") for c in criterios if c.get("codigo_criterio")}
     for cod_crit, meta in CRITERIOS_OFICIAIS.items():
@@ -335,13 +380,34 @@ def calcular_e_sanitizar_analise(
                 "codigo_criterio": cod_crit,
             })
 
-    # 4. Limite de 80 palavras no resumo CRM
+    # 4. Padronização de campos em analise_spin
+    spin = resultado.setdefault("analise_spin", {})
+    for k in ("situacao", "problema", "implicacao", "necessidade_solucao", "evidencias", "lacunas"):
+        spin[k] = normalizar_texto_nao_se_aplica(spin.get(k))
+
+    # 5. Padronização de campos em analise_bant
+    bant = resultado.setdefault("analise_bant", {})
+    for k in ("budget_evidencia", "authority_evidencia", "need_evidencia", "timeline_evidencia"):
+        bant[k] = normalizar_texto_nao_se_aplica(bant.get(k))
+
+    # 6. Padronização de campos em interlocutor
+    inter = resultado.setdefault("interlocutor", {})
+    for k in ("interesse_expresso", "duvidas", "objecoes", "resposta_sdr", "reacao_interlocutor"):
+        inter[k] = normalizar_texto_nao_se_aplica(inter.get(k))
+
+    # 7. Padronização de campos em crm
     crm = resultado.setdefault("crm", {})
+    crm["acao"] = crm.get("acao") or "Sem próximo passo definido"
+    for k in ("responsavel", "prazo", "dados_extras"):
+        crm[k] = normalizar_texto_nao_se_aplica(crm.get(k))
+
     resumo_crm = (crm.get("resumo") or "").strip()
     if resumo_crm:
         palavras = resumo_crm.split()
         if len(palavras) > 80:
             crm["resumo"] = " ".join(palavras[:80]) + "..."
+    else:
+        crm["resumo"] = "Não se aplica"
 
     return resultado
 
