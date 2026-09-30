@@ -18,15 +18,21 @@ from app.services.rpa_google import (
 class TestRpaGoogle(unittest.TestCase):
 
     def test_formatar_telefone_com_ddd_e_numero(self):
-        # Número com DDI 55 e 8 dígitos (exemplo do Ramon)
+        # Número com DDI 55 e 8 dígitos (exemplo do Ramon / áudio WAV real)
+        self.assertEqual(formatar_telefone_busca("554136682223"), "(41) 3668-2223")
         self.assertEqual(formatar_telefone_busca("554133462828"), "(41) 3346-2828")
         # Número com DDI 55 e celular (9 dígitos)
         self.assertEqual(formatar_telefone_busca("5541999992828"), "(41) 99999-2828")
-        # 8 dígitos com DDD separado
+        # 8 dígitos com DDD separado (com zero ou sem zero)
+        self.assertEqual(formatar_telefone_busca("36682223", "041"), "(41) 3668-2223")
         self.assertEqual(formatar_telefone_busca("33101010", "41"), "(41) 3310-1010")
-        # 9 dígitos com DDD separado
+        # 9 dígitos com DDD separado (com zero ou sem zero)
+        self.assertEqual(formatar_telefone_busca("988887777", "041"), "(41) 98888-7777")
         self.assertEqual(formatar_telefone_busca("999991234", "41"), "(41) 99999-1234")
-        # Número já com DDD embutido
+        # Número já com DDD embutido e com prefixo de operadora
+        self.assertEqual(formatar_telefone_busca("41988887777", "041"), "(41) 98888-7777")
+        self.assertEqual(formatar_telefone_busca("04141988887777", "041"), "(41) 98888-7777")
+        self.assertEqual(formatar_telefone_busca("04136682223"), "(41) 3668-2223")
         self.assertEqual(formatar_telefone_busca("4133101010"), "(41) 3310-1010")
         # 0800
         self.assertEqual(formatar_telefone_busca("08005912117"), "0800 591 2117")
@@ -43,7 +49,7 @@ class TestRpaGoogle(unittest.TestCase):
 
         texto = coletar_texto_google_telefone("(41) 3310-1010", tempo_espera_pagina=0.01)
 
-        mock_abrir.assert_called_once()
+        mock_abrir.assert_called_once_with("https://www.google.com/search?q=%2841%29+3310-1010", caminho_navegador=None)
         self.assertIn("Empresa Modelo", texto)
         self.assertEqual(mock_send_keys.call_count, 3)
 

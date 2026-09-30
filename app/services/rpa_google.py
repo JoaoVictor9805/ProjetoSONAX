@@ -54,11 +54,23 @@ def formatar_telefone_busca(numero: str | None, estado_ddd: str | None = None) -
             return f"{num_limpo[:4]} {num_limpo[4:7]} {num_limpo[7:]}"
         return num_limpo
 
+    # Normalizar DDD fornecido (ex: '041' -> '41')
+    if len(ddd_limpo) >= 2:
+        ddd_limpo = ddd_limpo[-2:]
+
     # 2. Se começa com DDI 55 (Brasil): remove 55 se o restante tiver tamanho de telefone válido (10 ou 11 dígitos)
     if num_limpo.startswith("55") and len(num_limpo) in (12, 13):
         num_limpo = num_limpo[2:]
 
-    # 3. Se agora num_limpo tem 10 ou 11 dígitos (já contém DDD + número)
+    # 3. Operadora + DDD (ex: 04141988887777 ou 01541988887777)
+    if num_limpo.startswith("0") and len(num_limpo) in (13, 14):
+        num_limpo = num_limpo[3:]
+
+    # 4. Zero à esquerda simples (ex: 04136682223 -> 4136682223)
+    if num_limpo.startswith("0") and len(num_limpo) in (11, 12):
+        num_limpo = num_limpo[1:]
+
+    # 5. Se agora num_limpo tem 10 ou 11 dígitos (já contém DDD + número)
     if len(num_limpo) in (10, 11):
         ddd = num_limpo[:2]
         resto = num_limpo[2:]
@@ -68,15 +80,14 @@ def formatar_telefone_busca(numero: str | None, estado_ddd: str | None = None) -
             return f"({ddd}) {resto[:5]}-{resto[5:]}"
         return f"({ddd}) {resto}"
 
-    # 4. Se num_limpo tem 8 ou 9 dígitos e temos DDD fornecido
+    # 6. Se num_limpo tem 8 ou 9 dígitos e temos DDD fornecido
     if len(num_limpo) in (8, 9) and ddd_limpo:
-        ddd = ddd_limpo[:2]
         if len(num_limpo) == 8:
-            return f"({ddd}) {num_limpo[:4]}-{num_limpo[4:]}"
+            return f"({ddd_limpo}) {num_limpo[:4]}-{num_limpo[4:]}"
         elif len(num_limpo) == 9:
-            return f"({ddd}) {num_limpo[:5]}-{num_limpo[5:]}"
+            return f"({ddd_limpo}) {num_limpo[:5]}-{num_limpo[5:]}"
 
-    # 5. Fallback com DDD caso falte formatação específica
+    # 7. Fallback com DDD caso falte formatação específica
     if ddd_limpo and not num_limpo.startswith(ddd_limpo):
         return f"({ddd_limpo}) {num_str}".strip()
 
@@ -218,7 +229,7 @@ def coletar_texto_google_telefone(
     import pyperclip
     from pywinauto import keyboard
 
-    query = f"{telefone.strip()} telefone"
+    query = telefone.strip()
     url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
 
     try:
