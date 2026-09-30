@@ -25,6 +25,7 @@ from app.database.db import conectar
 from app.logs import log_dev_exc
 from app.database.chamadas_dao import (
     buscar_chamada_valida,
+    buscar_identificacao_cliente,
     buscar_revisao,
     buscar_transcricao,
     inserir_analise,
@@ -57,6 +58,7 @@ class TranscricaoItemResult:
     agente_nome: str | None = None
     numero: str | None = None
     estado_ddd: str | None = None
+    identificacao_cliente: Any | None = None
     motivo_descarte: str | None = None
 
 
@@ -120,6 +122,7 @@ class ChamadaIngestor:
                         agente_nome=chamada.get("agente_nome") if chamada else None,
                         numero=chamada.get("numero") if chamada else None,
                         estado_ddd=chamada.get("estado_ddd") if chamada else None,
+                        identificacao_cliente=chamada.get("identificacao_cliente") if chamada else None,
                         motivo_descarte="Transcrição já registrada no banco.",
                     )
 
@@ -136,6 +139,7 @@ class ChamadaIngestor:
                 nome_atendente = chamada.get("agente_nome")
                 numero = chamada.get("numero")
                 estado_ddd = chamada.get("estado_ddd")
+                identificacao_cliente = chamada.get("identificacao_cliente")
         except Exception:
             print(f"  [ERRO] Falha ao verificar '{rotulo_audio}' no banco de dados")
             log_dev_exc()
@@ -229,6 +233,7 @@ class ChamadaIngestor:
             agente_nome=nome_atendente,
             numero=numero,
             estado_ddd=estado_ddd,
+            identificacao_cliente=identificacao_cliente,
         )
 
     # ------------------------------------------------------------------------
@@ -242,6 +247,7 @@ class ChamadaIngestor:
         agente_nome: str | None = None,
         texto_google: str | None = None,
         telefone: str | None = None,
+        identificacao_cliente: Any | None = None,
         rotulo_audio: str | None = None,
         cancel: threading.Event | None = None,
     ) -> dict[str, Any] | None:
@@ -306,9 +312,20 @@ class ChamadaIngestor:
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
+                    # Telefone em empresa precisa ser preenchido com identificacao_cliente da tabela chamadas
+                    id_cli = identificacao_cliente
+                    if not id_cli:
+                        id_cli = buscar_identificacao_cliente(cur, log_arquivo=log_arquivo)
+
+                    tel_empresa = (
+                        str(int(id_cli)).strip() if isinstance(id_cli, (int, float))
+                        else str(id_cli).strip() if id_cli is not None
+                        else telefone
+                    )
+
                     try:
                         with cur.connection.transaction():
-                            id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados, telefone=telefone)
+                            id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados, telefone=tel_empresa)
                     except Exception:
                         log_dev_exc()
 

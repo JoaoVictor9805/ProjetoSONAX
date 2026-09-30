@@ -230,6 +230,7 @@ class PipelineRunner:
                             "agente_nome": res.agente_nome,
                             "numero": res.numero,
                             "estado_ddd": res.estado_ddd,
+                            "identificacao_cliente": res.identificacao_cliente,
                         }
                         self.on_progress(
                             i,
@@ -245,6 +246,7 @@ class PipelineRunner:
                             "agente_nome": res.agente_nome,
                             "numero": res.numero,
                             "estado_ddd": res.estado_ddd,
+                            "identificacao_cliente": res.identificacao_cliente,
                         }
                         self.on_progress(
                             i,
@@ -332,12 +334,19 @@ class PipelineRunner:
                     self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 
                     dados_audio = mapa_diarizacao.get(caminho.name, {})
+                    id_cliente = dados_audio.get("identificacao_cliente")
+                    tel_para_empresa = (
+                        str(int(id_cliente)).strip() if isinstance(id_cliente, (int, float))
+                        else str(id_cliente).strip() if id_cliente is not None
+                        else telefones_para_busca.get(caminho.name)
+                    )
                     res_rev = self.ingestor.revisar_transcricao(
                         caminho.name,
                         texto_diarizado=dados_audio.get("texto_diarizado"),
                         agente_nome=dados_audio.get("agente_nome"),
                         texto_google=textos_google.get(caminho.name),
-                        telefone=telefones_para_busca.get(caminho.name),
+                        telefone=tel_para_empresa,
+                        identificacao_cliente=id_cliente,
                         rotulo_audio=rotulo_audio,
                         cancel=self.cancel_event,
                     )

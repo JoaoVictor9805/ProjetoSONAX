@@ -27,7 +27,7 @@ def buscar_chamada_valida(
     """
     cur.execute(
         """
-        SELECT protocolo, ramal, agente_nome, numero, estado_ddd 
+        SELECT protocolo, ramal, agente_nome, numero, estado_ddd, identificacao_cliente 
         FROM chamadas 
         WHERE protocolo = %s AND ramal = %s
         LIMIT 1;
@@ -43,7 +43,39 @@ def buscar_chamada_valida(
         "agente_nome": row[2],
         "numero": row[3],
         "estado_ddd": row[4],
+        "identificacao_cliente": row[5] if len(row) > 5 else None,
     }
+
+
+def buscar_identificacao_cliente(
+    cur: psycopg.Cursor,
+    log_arquivo: str | None = None,
+    protocolo: int | None = None,
+) -> str | None:
+    """Busca identificacao_cliente na tabela chamadas através do protocolo ou do log de gravação."""
+    if protocolo:
+        cur.execute(
+            "SELECT identificacao_cliente FROM chamadas WHERE protocolo = %s LIMIT 1;",
+            (protocolo,),
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return str(row[0]).strip()
+    if log_arquivo:
+        cur.execute(
+            """
+            SELECT c.identificacao_cliente
+            FROM registro_chamadas r
+            JOIN chamadas c ON r.protocolo = c.protocolo
+            WHERE r.log = %s
+            LIMIT 1;
+            """,
+            (log_arquivo,),
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return str(row[0]).strip()
+    return None
 
 
 _SCHEMA_EMPRESA_GARANTIDO = False
