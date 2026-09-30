@@ -15,6 +15,7 @@ Responsabilidades:
 """
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -49,8 +50,13 @@ class ProvedorIA(Protocol):
     def analisar(
         self,
         ligacao: str,
+        *,
+        protocolo: int | None = None,
+        empresa_contatada: int | None = None,
+        empresa_nome: str | None = None,
+        nome_sdr: str | None = None,
     ) -> dict[str, Any]:
-        """Avalia critérios PEAH e gera resumo, notas e feedbacks da ligação."""
+        """Avalia qualidade comercial B2B (SPIN, BANT, SDR, CRM) da ligação."""
         ...
 
 
@@ -90,9 +96,20 @@ class ProvedorIAReal:
     def analisar(
         self,
         ligacao: str,
+        *,
+        protocolo: int | None = None,
+        empresa_contatada: int | None = None,
+        empresa_nome: str | None = None,
+        nome_sdr: str | None = None,
     ) -> dict[str, Any]:
         from app.services.analise_final_AI import analisar_ligacao
-        return analisar_ligacao(ligacao)
+        return analisar_ligacao(
+            ligacao,
+            protocolo=protocolo,
+            empresa_contatada=empresa_contatada,
+            empresa_nome=empresa_nome,
+            nome_sdr=nome_sdr,
+        )
 
 
 class FakeProvedorIA:
@@ -130,20 +147,97 @@ class FakeProvedorIA:
             "[GOOGLE]\nTexto Google Teste\n\n[DIARIZAÇÃO]\nEmpresa Teste"
         )
         self.analise_padrao = analise_padrao or {
-            "nota_final": 9,
-            "feedback_geral": "Atendimento cordial e muito eficiente.",
-            "titulo": "Contato Financeiro - Agendamento",
-            "resumo_chamada": "Atendente confirmou dados e agendou retorno com o cliente.",
-            "pontos_fortes": "Boa comunicação e agilidade.",
-            "fragilidades": None,
-            "oportunidades": None,
-            "criterios": [
-                {"criterio": "chamar pelo nome", "nota_criterio": 10, "justificativa_criterio": "Chamou pelo nome do cliente."},
-                {"criterio": "agir com empatia", "nota_criterio": 9, "justificativa_criterio": "Demonstrou empatia."},
-                {"criterio": "ouvir com atencao", "nota_criterio": 9, "justificativa_criterio": "Ouviu com atenção."},
-                {"criterio": "eficiencia operacional", "nota_criterio": 9, "justificativa_criterio": "Muito eficiente."},
-                {"criterio": "surpreender", "nota_criterio": 8, "justificativa_criterio": "Bom atendimento."},
+            "avaliacao_ia": {
+                "protocolo": 123456789,
+                "data_avaliacao": "2026-09-30",
+                "modelo_ia": "gpt-4o-mini",
+                "interlocutor": "Carlos Silva",
+                "cargo": "Diretor Financeiro",
+                "empresa_contatada": 1,
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+                "resultado_frase": "O SDR validou o regime de Lucro Real e agendou reunião técnica.",
+            },
+            "analise_spin": {
+                "situacao": "Empresa industrial com contabilidade interna.",
+                "problema": "Dificuldades com obrigações fiscais.",
+                "implicacao": "Risco de multas e sobrecarga.",
+                "necessidade_solucao": "Consultoria tributária especializada.",
+                "evidencias": "\"A nossa principal dor hoje é cruzar dados\" (14:22).",
+                "lacunas": "Não aprofundou impacto financeiro.",
+            },
+            "analise_bant": {
+                "budget_classificacao": "não informado",
+                "budget_evidencia": "Não abordado.",
+                "authority_classificacao": "confirmado",
+                "authority_evidencia": "Interlocutor é o decisor.",
+                "need_classificacao": "confirmado",
+                "need_evidencia": "Reconheceu risco fiscal.",
+                "timeline_classificacao": "indício",
+                "timeline_evidencia": "Até fechamento do trimestre.",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 85,
+                "feedback_geral": "Postura consultiva e boa qualificação.",
+                "acertos": "1. Escuta ativa. 2. Investigação do regime tributário.",
+                "melhorias": "1. Explorar implicações. 2. Confirmar decisores.",
+                "frase_alternativa": "Que impacto financeiro esses erros trouxeram?",
+                "codigo_oportunidade": "OP_SPIN_03",
+            },
+            "avaliacao_criterio": [
+                {
+                    "criterio": "Abertura clara, motivo do contato e relevância para o interlocutor",
+                    "nota_criterio": 10,
+                    "justificativa_criterio": "Apresentou motivo claro.",
+                    "codigo_criterio": "CRIT_ABERTURA",
+                },
+                {
+                    "criterio": "Descoberta SPIN: Situação, Problema, Implicação, Necessidade de solução",
+                    "nota_criterio": 22,
+                    "justificativa_criterio": "Boa descoberta inicial.",
+                    "codigo_criterio": "CRIT_SPIN",
+                },
+                {
+                    "criterio": "Investigação adequada do perfil: setor, regime tributário, faturamento",
+                    "nota_criterio": 25,
+                    "justificativa_criterio": "Validou setor e faturamento.",
+                    "codigo_criterio": "CRIT_PERFIL",
+                },
+                {
+                    "criterio": "Investigação BANT: viabilidade comercial, autoridade, necessidade, prazo",
+                    "nota_criterio": 12,
+                    "justificativa_criterio": "Mapeou autoridade e necessidade.",
+                    "codigo_criterio": "CRIT_BANT",
+                },
+                {
+                    "criterio": "Escuta, aprofundamento e tratamento respeitoso de dúvidas ou objeções",
+                    "nota_criterio": 8,
+                    "justificativa_criterio": "Tratamento respeitoso.",
+                    "codigo_criterio": "CRIT_ESCUTA",
+                },
+                {
+                    "criterio": "Proposta de próximo passo pertinente e tentativa de obter compromisso claro",
+                    "nota_criterio": 8,
+                    "justificativa_criterio": "Compromisso agendado.",
+                    "codigo_criterio": "CRIT_PROX_PASSO",
+                },
             ],
+            "interlocutor": {
+                "interesse_expresso": "Interesse em avaliar créditos.",
+                "duvidas": "Questionou impacto na contabilidade.",
+                "objecoes": "não houve",
+                "resposta_sdr": "Explicou modelo complementar.",
+                "reacao_interlocutor": "Aceitou explicação.",
+            },
+            "crm": {
+                "acao": "Reunião confirmada (apresentação técnica)",
+                "responsavel": "SDR Carlos",
+                "prazo": "06/10/2026 às 14:00",
+                "dados_extras": "Confirmar presenças.",
+                "resumo": "Empresa industrial em Lucro Real com faturamento > 1M. Agendada reunião técnica.",
+            },
         }
         self.chamadas_transcrever: list[Path] = []
         self.chamadas_revisar: list[str] = []
@@ -193,13 +287,22 @@ class FakeProvedorIA:
             "fonte_dados": self.fonte_dados_padrao,
         }
 
-
     def analisar(
         self,
         ligacao: str,
+        *,
+        protocolo: int | None = None,
+        empresa_contatada: int | None = None,
+        empresa_nome: str | None = None,
+        nome_sdr: str | None = None,
     ) -> dict[str, Any]:
         self.chamadas_analisar.append(ligacao)
         if self.falhas_restantes > 0:
             self.falhas_restantes -= 1
             raise self.excecao_falha
-        return dict(self.analise_padrao)
+        res = json.loads(json.dumps(self.analise_padrao))
+        if protocolo is not None:
+            res["avaliacao_ia"]["protocolo"] = protocolo
+        if empresa_contatada is not None:
+            res["avaliacao_ia"]["empresa_contatada"] = empresa_contatada
+        return res

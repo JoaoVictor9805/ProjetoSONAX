@@ -225,6 +225,12 @@ class PipelineRunner:
 
                     if res.ja_existente:
                         ja_existentes += 1
+                        mapa_diarizacao[caminho.name] = {
+                            "texto_diarizado": res.texto_transcricao,
+                            "agente_nome": res.agente_nome,
+                            "numero": res.numero,
+                            "estado_ddd": res.estado_ddd,
+                        }
                         self.on_progress(
                             i,
                             total,
@@ -269,7 +275,11 @@ class PipelineRunner:
                 )
 
                 # 4.25) Coleta RPA Google (Triangulação de Dados)
-                from app.services.rpa_google import formatar_telefone_busca, coletar_textos_google_lote
+                from app.services.rpa_google import (
+                    coletar_textos_google_lote,
+                    formatar_telefone_busca,
+                    obter_caminho_chrome_instalado,
+                )
 
                 telefones_para_busca: dict[str, str | None] = {}
                 for arq_name, dados_audio in mapa_diarizacao.items():
@@ -281,6 +291,12 @@ class PipelineRunner:
                 textos_google: dict[str, str] = {}
 
                 if telefones_validos:
+                    chrome_exec = obter_caminho_chrome_instalado()
+                    if chrome_exec:
+                        self.on_log(f"[INFO] Google Chrome detectado: {chrome_exec}", "out", True, None)
+                    else:
+                        self.on_log("[INFO] Usando navegador padrão do sistema para pesquisa.", "out", True, None)
+
                     self.on_log(
                         f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_validos)} telefone(s)...",
                         "out", False, None,
@@ -331,6 +347,7 @@ class PipelineRunner:
                         texto_diarizado=dados_audio.get("texto_diarizado"),
                         agente_nome=dados_audio.get("agente_nome"),
                         texto_google=textos_google.get(caminho.name),
+                        telefone=telefones_para_busca.get(caminho.name),
                         rotulo_audio=rotulo_audio,
                         cancel=self.cancel_event,
                     )
@@ -362,7 +379,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando critérios PEAH (GPT-4o-mini): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial SPIN/BANT/SDR (GPT-4o-mini): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "analyzing", msg, caminho.name)
 
                     self.ingestor.analisar_chamada(

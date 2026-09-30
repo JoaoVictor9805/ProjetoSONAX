@@ -18,12 +18,24 @@ class TestChamadaIngestor(unittest.TestCase):
         self.ingestor = ChamadaIngestor(provedor_ia=self.fake_ia)
 
     @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.buscar_transcricao")
+    @patch("app.services.ingestao.buscar_chamada_valida")
     @patch("app.services.ingestao.registro_ja_existe")
     @patch("app.services.ingestao.parse_nome_arquivo")
-    def test_transcrever_ja_existente(self, mock_parse_nome, mock_ja_existe, mock_conectar):
+    def test_transcrever_ja_existente(
+        self, mock_parse_nome, mock_ja_existe, mock_buscar_chamada, mock_buscar_transcricao, mock_conectar
+    ):
         mock_conectar.return_value.__enter__.return_value = MagicMock()
         mock_ja_existe.return_value = True
         mock_parse_nome.return_value = {"call_id": "21153502152", "ramal": "1001"}
+        mock_buscar_chamada.return_value = {
+            "protocolo": 21153502152,
+            "ramal": "1001",
+            "agente_nome": "Carlos Silva",
+            "numero": "33462828",
+            "estado_ddd": "41",
+        }
+        mock_buscar_transcricao.return_value = "Texto Transcrito Anteriormente"
 
         res = self.ingestor.transcrever_e_inserir(
             caminho=Path("1001-2026-09-28-10-00-00.wav"),
@@ -32,6 +44,10 @@ class TestChamadaIngestor(unittest.TestCase):
 
         self.assertFalse(res.sucesso)
         self.assertTrue(res.ja_existente)
+        self.assertEqual(res.agente_nome, "Carlos Silva")
+        self.assertEqual(res.numero, "33462828")
+        self.assertEqual(res.estado_ddd, "41")
+        self.assertEqual(res.texto_transcricao, "Texto Transcrito Anteriormente")
         self.assertEqual(len(self.fake_ia.chamadas_transcrever), 0)
 
     @patch("app.services.ingestao.conectar")

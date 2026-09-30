@@ -41,7 +41,7 @@ client = ChatOpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
     model="qwen/qwen3-30b-a3b-instruct-2507",
     temperature=0.0,  # Zero para evitar criação de diálogos falsos
-    max_tokens=2000,  # Margem segura para devolver a transcrição inteira
+    max_tokens=4096,  # Margem segura para devolver a transcrição inteira
     max_retries=3,
 )
 
@@ -78,16 +78,22 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
         return "Não encontrado", ""
 
     texto = resultado_raw.strip()
-    # Remove eventuais blocos de código markdown ```json ... ```
-    if texto.startswith("```"):
-        texto = re.sub(r"^```(?:json)?\s*", "", texto, flags=re.IGNORECASE)
-        texto = re.sub(r"\s*```$", "", texto)
+
+    # Remove eventuais blocos de raciocínio (<think>...</think>)
+    texto = re.sub(r"<think>[\s\S]*?</think>", "", texto).strip()
+
+    # Extrai o conteúdo de blocos markdown se existirem
+    match_bloco = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", texto, re.IGNORECASE)
+    if match_bloco:
+        texto_json = match_bloco.group(1).strip()
+    else:
+        texto_json = texto
 
     empresa = "Não encontrado"
     revisao = ""
 
     try:
-        dados = json.loads(texto)
+        dados = json.loads(texto_json)
         if isinstance(dados, list):
             for item in dados:
                 if isinstance(item, dict):

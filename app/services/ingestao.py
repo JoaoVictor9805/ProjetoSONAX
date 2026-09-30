@@ -110,10 +110,16 @@ class ChamadaIngestor:
         try:
             with conectar() as cur:
                 if registro_ja_existe(cur, caminho.name):
+                    chamada = buscar_chamada_valida(cur, protocolo=protocolo, ramal=ramal_str)
+                    texto_existente = buscar_transcricao(cur, caminho.name) or ""
                     return TranscricaoItemResult(
                         caminho=caminho,
                         sucesso=False,
                         ja_existente=True,
+                        texto_transcricao=texto_existente,
+                        agente_nome=chamada.get("agente_nome") if chamada else None,
+                        numero=chamada.get("numero") if chamada else None,
+                        estado_ddd=chamada.get("estado_ddd") if chamada else None,
                         motivo_descarte="Transcrição já registrada no banco.",
                     )
 
@@ -235,6 +241,7 @@ class ChamadaIngestor:
         texto_diarizado: str | None = None,
         agente_nome: str | None = None,
         texto_google: str | None = None,
+        telefone: str | None = None,
         rotulo_audio: str | None = None,
         cancel: threading.Event | None = None,
     ) -> dict[str, Any] | None:
@@ -298,7 +305,7 @@ class ChamadaIngestor:
             try:
                 with conectar() as cur:
                     try:
-                        id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados)
+                        id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados, telefone=telefone)
                     except Exception:
                         log_dev_exc()
 
@@ -333,13 +340,18 @@ class ChamadaIngestor:
         log_arquivo: str,
         rotulo_audio: str | None = None,
         cancel: threading.Event | None = None,
-    ) -> int | None:
-        """Gera análise de critérios de atendimento via IA e persiste no banco."""
+    ) -> str | None:
+        """Gera análise de qualidade comercial via IA e persiste nas 7 tabelas do banco."""
         nome_exibicao = rotulo_audio or log_arquivo
 
         if cancel is not None and cancel.is_set():
             print(f"  [CANCELADO] Análise de {nome_exibicao} não iniciada.")
             return None
+
+        protocolo = None
+        id_empresa = None
+        empresa_nome = None
+        agente_nome = None
 
         try:
             with conectar() as cur:
@@ -354,6 +366,35 @@ class ChamadaIngestor:
                 if verificar_tabela_analise(cur, log_arquivo):
                     print(f"  [AVISO] Análise de {nome_exibicao} já existe no banco (pulado)")
                     return None
+
+                # Obter metadados da ligação
+                cur.execute(
+                    "SELECT protocolo, id_empresa FROM registro_chamadas WHERE log = %s LIMIT 1;",
+                    (log_arquivo,),
+                )
+                row_reg = cur.fetchone()
+                if row_reg:
+                    protocolo = row_reg[0]
+                    id_empresa = row_reg[1]
+
+                if id_empresa:
+                    cur.execute(
+                        "SELECT nome FROM empresa WHERE id_empresa = %s LIMIT 1;",
+                        (id_empresa,),
+                    )
+                    row_emp = cur.fetchone()
+                    if row_emp:
+                        empresa_nome = row_emp[0]
+
+                if protocolo:
+                    cur.execute(
+                        "SELECT agente_nome FROM chamadas WHERE protocolo = %s LIMIT 1;",
+                        (protocolo,),
+                    )
+                    row_ch = cur.fetchone()
+                    if row_ch:
+                        agente_nome = row_ch[0]
+
         except Exception:
             print(f"  [ERRO] Falha ao verificar dados da análise de '{nome_exibicao}' no banco")
             log_dev_exc()
@@ -362,7 +403,13 @@ class ChamadaIngestor:
         analise_ia = None
         for tentativa in range(1, 4):
             try:
-                analise_ia = self.ia.analisar(revisao)
+                analise_ia = self.ia.analisar(
+                    revisao,
+                    protocolo=protocolo,
+                    empresa_contatada=id_empresa,
+                    empresa_nome=empresa_nome,
+                    nome_sdr=agente_nome,
+                )
                 break
             except Exception:
                 print(f"  [ERRO] Falha ao realizar análise final da ligação {nome_exibicao} (tentativa {tentativa}/3)")
@@ -380,14 +427,7 @@ class ChamadaIngestor:
                     id_avaliacao = inserir_analise(
                         cur,
                         log_arquivo,
-                        analise_ia["nota_final"],
-                        analise_ia["feedback_geral"],
-                        analise_ia["criterios"],
-                        titulo=analise_ia.get("titulo"),
-                        resumo_chamada=analise_ia.get("resumo_chamada"),
-                        pontos_fortes=analise_ia.get("pontos_fortes"),
-                        fragilidades=analise_ia.get("fragilidades"),
-                        oportunidades=analise_ia.get("oportunidades"),
+                        analise_ia,
                     )
                     print(f"  [INFO] Análise de {nome_exibicao} inserida com sucesso no banco")
                 break

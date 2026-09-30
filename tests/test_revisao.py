@@ -54,5 +54,25 @@ class TestRevisao(unittest.TestCase):
         self.assertIn("[DIARIZAÇÃO]\nNão identificado no diálogo", fonte)
 
 
+    def test_parsear_resposta_com_think_tags(self):
+        resposta_raw = """<think>
+O usuário quer identificar a empresa.
+Analisei a transcrição e identifiquei Metalúrgica Vale.
+</think>
+```json
+[
+  {
+    "Empresa": "Metalúrgica Vale"
+  },
+  {
+    "Revisao": "Agente (Falavinha): Bom dia.\\nCliente (Metalúrgica Vale): Olá!"
+  }
+]
+```"""
+        empresa, revisao = parsear_resposta_revisao(resposta_raw)
+        self.assertEqual(empresa, "Metalúrgica Vale")
+        self.assertIn("Cliente (Metalúrgica Vale): Olá!", revisao)
+
+
 if __name__ == "__main__":
     unittest.main()

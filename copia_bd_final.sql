@@ -27,13 +27,16 @@ CREATE TABLE IF NOT EXISTS chamadas (
 
 CREATE TABLE IF NOT EXISTS empresa (
     id_empresa INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    nome VARCHAR(100) NOT NULL UNIQUE,
+    nome VARCHAR(100) NOT NULL,
+    telefone VARCHAR(20),
     setor VARCHAR(100),
     regime_tributario VARCHAR(50),
     faturamento_mensal VARCHAR(100),
     status_comercial VARCHAR(100),
     fonte_dados TEXT
 );
+
+CREATE INDEX IF NOT EXISTS empresa_telefone ON empresa(telefone);
 
 
 CREATE TABLE IF NOT EXISTS registro_chamadas (
@@ -84,12 +87,12 @@ CREATE TABLE IF NOT EXISTS avaliacao_ia (
 
 CREATE TABLE IF NOT EXISTS avaliacao_sdr (
 	log VARCHAR(255) PRIMARY KEY NOT NULL,
-	nota_final VARCHAR(15) NOT NULL,
+	nota_final INT,
     feedback_geral TEXT NOT NULL,
     acertos TEXT,
     melhorias TEXT,
     frase_alternativa VARCHAR(500),
-    codigo_oportunidade VARCHAR(20) NOT NULL,    
+    codigo_oportunidade VARCHAR(20),    
    
     FOREIGN KEY (log) REFERENCES avaliacao_ia(log),
     FOREIGN KEY (codigo_oportunidade) REFERENCES dim_oportunidade_treinamento(codigo)
@@ -100,7 +103,7 @@ CREATE TABLE IF NOT EXISTS avaliacao_criterio (
     id_criterio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     log VARCHAR(255) NOT NULL,
     criterio VARCHAR(100) NOT NULL,
-    nota_criterio VARCHAR(15) NOT NULL,
+    nota_criterio INT,
     justificativa_criterio TEXT,
     codigo_criterio VARCHAR(20) NOT NULL,
    
