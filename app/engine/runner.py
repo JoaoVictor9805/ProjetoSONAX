@@ -282,6 +282,15 @@ class PipelineRunner:
                 telefones_para_busca: dict[str, str | None] = {}
                 for arq_name, dados_audio in mapa_diarizacao.items():
                     num = dados_audio.get("numero")
+                    if not num or not str(num).strip():
+                        id_cli = dados_audio.get("identificacao_cliente")
+                        if id_cli:
+                            num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
+                    if not num or not str(num).strip():
+                        from app.services.parses import parse_nome_arquivo
+                        info_arq = parse_nome_arquivo(Path(arq_name))
+                        num = info_arq.get("telefone")
+
                     ddd = dados_audio.get("estado_ddd")
                     telefones_para_busca[arq_name] = formatar_telefone_busca(num, ddd)
 
