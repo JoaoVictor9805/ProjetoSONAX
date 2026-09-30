@@ -24,10 +24,11 @@ from typing import Callable
 from app.database.db import conectar
 from app.logs import log_dev_exc
 from app.database.chamadas_dao import (
-    buscar_nome_atendente,
+    buscar_chamada_valida,
     buscar_revisao,
     buscar_transcricao,
     inserir_analise,
+    inserir_empresa,
     inserir_registro_chamada,
     inserir_revisao,
     registro_ja_existe,
@@ -35,7 +36,7 @@ from app.database.chamadas_dao import (
     verificar_tabela_analise,
 )
 from app.services.ia import ProvedorIA, ProvedorIAReal
-from app.services.parses import parse_data, parse_hora, parse_nome_arquivo
+from app.services.parses import parse_nome_arquivo
 from app.services.qualidade_transcricao import (
     analisar_transcricao,
     avaliar_qualidade_transcricao,
@@ -51,9 +52,11 @@ class TranscricaoItemResult:
     caminho: Path
     sucesso: bool
     ja_existente: bool = False
-    id_registro: int | None = None
+    id_registro: int | str | None = None
     texto_transcricao: str = ""
     agente_nome: str | None = None
+    numero: str | None = None
+    estado_ddd: str | None = None
     motivo_descarte: str | None = None
 
 
@@ -75,7 +78,35 @@ class ChamadaIngestor:
         on_sub_progress: SubProgressCallback | None = None,
     ) -> TranscricaoItemResult:
         """Transcreve um arquivo, valida qualidade, resolve atendente e insere no banco."""
-        # 1. Checagem prévia no banco
+        # 1. Parsing de metadados do nome do arquivo (protocolo e ramal) em memória
+        try:
+            info = parse_nome_arquivo(caminho)
+        except Exception:
+            print(f"  [ERRO] Falha ao interpretar o nome do arquivo '{rotulo_audio}'")
+            log_dev_exc()
+            return TranscricaoItemResult(
+                caminho=caminho, sucesso=False, motivo_descarte="Nome do arquivo em formato inválido."
+            )
+
+        call_id_str = info.get("call_id")
+        if not call_id_str or not call_id_str.isdigit():
+            print(f"  [AVISO] Protocolo (call_id) não encontrado em {rotulo_audio} — pulando")
+            return TranscricaoItemResult(
+                caminho=caminho,
+                sucesso=False,
+                motivo_descarte="Protocolo (call_id) não encontrado ou inválido no nome do arquivo.",
+            )
+        protocolo = int(call_id_str)
+
+        ramal_str = info.get("ramal")
+        if not ramal_str:
+            print(f"  [AVISO] Ramal não encontrado em {rotulo_audio} — pulando")
+            return TranscricaoItemResult(
+                caminho=caminho, sucesso=False, motivo_descarte="Ramal não encontrado no nome do arquivo."
+            )
+
+        # 2. Checagem prévia no banco: duplicata e existência na tabela chamadas (protocolo + ramal)
+        nome_atendente = None
         try:
             with conectar() as cur:
                 if registro_ja_existe(cur, caminho.name):
@@ -85,8 +116,22 @@ class ChamadaIngestor:
                         ja_existente=True,
                         motivo_descarte="Transcrição já registrada no banco.",
                     )
+
+                chamada = buscar_chamada_valida(cur, protocolo=protocolo, ramal=ramal_str)
+                if not chamada:
+                    print(
+                        f"  [AVISO] Chamada não encontrada na tabela chamadas (protocolo={protocolo}, ramal={ramal_str}) — pulando"
+                    )
+                    return TranscricaoItemResult(
+                        caminho=caminho,
+                        sucesso=False,
+                        motivo_descarte=f"Chamada com protocolo {protocolo} e ramal {ramal_str} não encontrada na tabela chamadas.",
+                    )
+                nome_atendente = chamada.get("agente_nome")
+                numero = chamada.get("numero")
+                estado_ddd = chamada.get("estado_ddd")
         except Exception:
-            print(f"  [ERRO] Falha ao verificar se '{rotulo_audio}' já existe no banco")
+            print(f"  [ERRO] Falha ao verificar '{rotulo_audio}' no banco de dados")
             log_dev_exc()
             return TranscricaoItemResult(
                 caminho=caminho, sucesso=False, motivo_descarte="Erro ao consultar banco de dados."
@@ -95,7 +140,7 @@ class ChamadaIngestor:
         if cancel is not None and cancel.is_set():
             raise TranscricaoCancelada()
 
-        # 2. Transcrição com retries
+        # 4. Transcrição com retries
         res_transcricao = None
         for tentativa in range(1, 4):
             try:
@@ -120,7 +165,7 @@ class ChamadaIngestor:
 
         texto_transcricao = res_transcricao.get("texto", "") if res_transcricao else ""
 
-        # 3. Avaliação de qualidade do texto transcrito
+        # 4. Avaliação de qualidade do texto transcrito
         try:
             dados_transcricao = analisar_transcricao(texto_transcricao)
             metricas_transcricao = res_transcricao.get("metricas", {}) if res_transcricao else {}
@@ -141,51 +186,15 @@ class ChamadaIngestor:
                 caminho=caminho, sucesso=False, motivo_descarte="Qualidade da transcrição insuficiente (Péssimo)."
             )
 
-        # 4. Parsing de metadados do nome do arquivo
-        try:
-            info = parse_nome_arquivo(caminho)
-        except Exception:
-            print(f"  [ERRO] Falha ao interpretar o nome do arquivo '{rotulo_audio}'")
-            log_dev_exc()
-            return TranscricaoItemResult(
-                caminho=caminho, sucesso=False, motivo_descarte="Nome do arquivo em formato inválido."
-            )
-
-        if not info["ramal"].isdigit():
-            print(f"  [AVISO] Ramal inválido em {rotulo_audio}: {info['ramal']!r} — pulando")
-            return TranscricaoItemResult(
-                caminho=caminho, sucesso=False, motivo_descarte="Ramal não numérico."
-            )
-
-        data = parse_data(info["data"])
-        if data is None:
-            print(f"  [AVISO] Data inválida em {rotulo_audio}: {info['data']!r} — pulando")
-            return TranscricaoItemResult(
-                caminho=caminho, sucesso=False, motivo_descarte="Data inválida no nome do arquivo."
-            )
-
-        hora = parse_hora(info["hora"])
-        data_ligacao = datetime.combine(data, hora) if hora else datetime(data.year, data.month, data.day)
-        ramal = int(info["ramal"])
-
-        # 5. Resolução de atendente e INSERT no banco
-        nome_atendente = None
+        # 5. INSERT no banco
         id_reg = None
-
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
-                    nome_atendente = buscar_nome_atendente(cur, ramal, data_ligacao)
-                    if nome_atendente is None:
-                        print(f"  [AVISO] ramal {ramal} não encontrado em `origem` ({rotulo_audio}) — pulando")
-                        break
-
                     id_reg = inserir_registro_chamada(
                         cur,
-                        ramal=ramal,
-                        agente_nome=nome_atendente,
-                        data_ligacao=data_ligacao,
                         log_arquivo=caminho.name,
+                        protocolo=protocolo,
                         transcricao=texto_transcricao,
                     )
                 break
@@ -200,11 +209,6 @@ class ChamadaIngestor:
                 caminho=caminho, sucesso=False, motivo_descarte="Falha ao inserir no banco após 3 tentativas."
             )
 
-        if nome_atendente is None:
-            return TranscricaoItemResult(
-                caminho=caminho, sucesso=False, motivo_descarte=f"Ramal {ramal} não encontrado na tabela de origem."
-            )
-
         if id_reg is None:
             print(f"  [AVISO] Transcrição de '{rotulo_audio}' já existe no banco — pulando")
             return TranscricaoItemResult(
@@ -217,6 +221,8 @@ class ChamadaIngestor:
             id_registro=id_reg,
             texto_transcricao=texto_transcricao,
             agente_nome=nome_atendente,
+            numero=numero,
+            estado_ddd=estado_ddd,
         )
 
     # ------------------------------------------------------------------------
@@ -228,10 +234,11 @@ class ChamadaIngestor:
         log_arquivo: str,
         texto_diarizado: str | None = None,
         agente_nome: str | None = None,
+        texto_google: str | None = None,
         rotulo_audio: str | None = None,
         cancel: threading.Event | None = None,
-    ) -> str | None:
-        """Gera revisão e diarização com IA e atualiza o registro no banco."""
+    ) -> dict[str, Any] | None:
+        """Gera revisão e diarização com IA, triangula dados da empresa e atualiza o banco."""
         nome_exibicao = rotulo_audio or log_arquivo
 
         if cancel is not None and cancel.is_set():
@@ -258,10 +265,14 @@ class ChamadaIngestor:
         if not texto_diarizado or not texto_diarizado.strip():
             return None
 
-        revisao = None
+        resultado_ia = None
         for tentativa in range(1, 4):
             try:
-                revisao = self.ia.revisar(texto_diarizado, nome_atendente=agente_nome)
+                resultado_ia = self.ia.revisar(
+                    texto_diarizado,
+                    texto_copiado_google=texto_google,
+                    nome_atendente=agente_nome,
+                )
                 break
             except Exception:
                 print(f"  [ERRO] Falha ao revisar transcrição de {nome_exibicao} (tentativa {tentativa}/3)")
@@ -272,12 +283,30 @@ class ChamadaIngestor:
             print(f"  [ERRO] Não foi possível revisar {nome_exibicao} após 3 tentativas — próximo arquivo.")
             return None
 
+        if isinstance(resultado_ia, dict):
+            revisao_texto = resultado_ia.get("revisao", "")
+            empresa_nome = resultado_ia.get("empresa", "Não encontrado")
+            fonte_dados = resultado_ia.get("fonte_dados")
+        else:
+            revisao_texto = str(resultado_ia)
+            empresa_nome = "Não encontrado"
+            fonte_dados = None
+
         resultado = None
+        id_empresa = None
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
-                    resultado = inserir_revisao(cur, log_arquivo, revisao)
-                    print(f"  [INFO] Revisão de {nome_exibicao} inserida com sucesso no banco")
+                    try:
+                        id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados)
+                    except Exception:
+                        log_dev_exc()
+
+                    resultado = inserir_revisao(cur, log_arquivo, revisao_texto, id_empresa=id_empresa)
+                    print(
+                        f"  [INFO] Revisão de {nome_exibicao} inserida com sucesso no banco "
+                        f"(Empresa: {empresa_nome} | ID: {id_empresa})"
+                    )
                 break
             except Exception:
                 print(f"  [ERRO] Falha ao salvar a revisão '{nome_exibicao}' no banco de dados (tentativa {tentativa}/3)")
@@ -288,7 +317,12 @@ class ChamadaIngestor:
             print(f"  [ERRO] Não foi possível salvar a revisão '{nome_exibicao}' após 3 tentativas.")
             return None
 
-        return resultado
+        return {
+            "revisao": revisao_texto,
+            "empresa": empresa_nome,
+            "fonte_dados": fonte_dados,
+            "id_empresa": id_empresa,
+        }
 
     # ------------------------------------------------------------------------
     # Fase 3: Análise de Critérios com IA (GPT-4o-mini)

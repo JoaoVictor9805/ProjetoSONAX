@@ -9,4 +9,6 @@ python-dotenv==1.2.3
 rarfile==4.5
 soundfile==0.14.0
 requests
+pywinauto==0.6.9
+pyperclip==1.11.0
 

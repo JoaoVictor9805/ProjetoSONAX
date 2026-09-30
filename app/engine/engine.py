@@ -9,7 +9,6 @@ Fornece uma interface mínima de alto nível (`start`, `cancel`, `subscribe`,
     2. Cancelamento cooperativo e preemptivo via `ThreadInterrupter` (ctypes).
     3. Normalização contínua das 8 fases do pipeline via `ProgressNormalizer`.
     4. Gerenciamento de privacidade e modo de desenvolvimento via `LogSessionManager`.
-    5. Execução unificada de tarefas (Pipeline de Transcrição e Fechamento Mensal).
 ============================================================================
 """
 from __future__ import annotations
@@ -31,8 +30,6 @@ from app.engine.interrupter import ThreadInterrupter
 from app.engine.log_session import LogSessionManager
 from app.engine.normalizer import ProgressNormalizer
 from app.engine.runner import PipelineRunner
-from app.engine.stream import redirect_engine_stdio
-from app.services.fechamento_ciclo import executar_fechamento_ciclo
 from app.services.ia import ProvedorIA
 from app.services.transcricao import TranscricaoCancelada
 
@@ -150,99 +147,7 @@ class PipelineEngine:
         if thread is not None and thread.ident is not None and thread.is_alive():
             ThreadInterrupter.interrupt(thread.ident, TranscricaoCancelada)
 
-    def start_fechamento_mensal(self, ano: int, mes: int, forcar: bool) -> None:
-        """Inicia a consolidação macro do fechamento mensal de forma assíncrona.
 
-        Raises:
-            RuntimeError: Se já houver um processamento em andamento.
-        """
-        with self._lock:
-            if self._state in (ExecutionState.RUNNING, ExecutionState.CANCELLING):
-                raise RuntimeError("Já existe um processamento em andamento na Engine.")
-
-            self._state = ExecutionState.RUNNING
-            self._cancel_event.clear()
-            self._log_session.limpar()
-
-        def _fechamento_task() -> None:
-            self._notify(
-                ProgressUpdateEvent(
-                    fraction=0.0,
-                    label=f"Consolidando ciclo {mes:02d}/{ano} ...",
-                    phase="closing",
-                    is_indeterminate=True,
-                )
-            )
-
-            def _progress_callback(frac: float, label: str) -> None:
-                self._notify(
-                    ProgressUpdateEvent(
-                        fraction=frac,
-                        label=label,
-                        phase="closing",
-                        is_indeterminate=False,
-                    )
-                )
-
-            def _log_callback(msg: str) -> None:
-                self._handle_runner_log(msg, "out", False, None)
-
-            def _stdio_callback(line: str, stream: Literal["out", "err"], dev: bool) -> None:
-                self._handle_runner_log(line, stream, dev, None)
-
-            try:
-                with redirect_engine_stdio(_stdio_callback):
-                    resultado = executar_fechamento_ciclo(
-                        ano=ano,
-                        mes=mes,
-                        forcar=forcar,
-                        cancel=self._cancel_event,
-                        on_progress=_progress_callback,
-                        on_log=_log_callback,
-                    )
-
-                    if resultado.cancelado or self._cancel_event.is_set():
-                        self._handle_runner_finished(
-                            exit_code=1,
-                            summary=f"Fechamento {mes:02d}/{ano} cancelado pelo usuário.",
-                            error=None,
-                            was_cancelled=True,
-                        )
-                    elif resultado.falhas > 0:
-                        self._handle_runner_finished(
-                            exit_code=2,
-                            summary=f"Fechamento finalizado: {resultado.processados} processado(s), {resultado.falhas} falha(s).",
-                            error=None,
-                            was_cancelled=False,
-                        )
-                    else:
-                        self._handle_runner_finished(
-                            exit_code=0,
-                            summary=f"Fechamento {mes:02d}/{ano} concluído com sucesso ({resultado.processados} agente(s)).",
-                            error=None,
-                            was_cancelled=False,
-                        )
-            except Exception as exc:
-                tb = traceback.format_exc()
-                self._handle_runner_log(
-                    "[FALHA TOTAL] Ocorreu uma falha no sistema e o fechamento mensal foi interrompido.",
-                    "err", False, None,
-                )
-                self._handle_runner_log(f"{type(exc).__name__}: {exc}", "err", True, None)
-                self._handle_runner_log(tb, "err", True, None)
-                self._handle_runner_finished(
-                    exit_code=2,
-                    summary="Erro durante a consolidação mensal.",
-                    error="Falha na consolidação mensal.",
-                    was_cancelled=False,
-                )
-
-        self._thread = threading.Thread(
-            target=_fechamento_task,
-            daemon=True,
-            name="sonax-engine-fechamento",
-        )
-        self._thread.start()
 
     # ------------------------------------------------------------------------
     # Handlers Internos e Notificação de Eventos

@@ -33,6 +33,7 @@ class ProgressNormalizer:
         "copying": (0.05, 0.05, "copiando  •  "),
         "transcribing": (0.10, 0.70, None),  # dinâmico: "{done}/{total} arquivos  •  "
         "inserting": (0.80, 0.03, "gravando no banco  •  "),
+        "searching": (0.83, 0.02, "coletando dados no Google  •  "),
         "reviewing": (0.83, 0.08, None),     # dinâmico: "revisando {done}/{total}  •  "
         "analyzing": (0.91, 0.07, None),     # dinâmico: "analisando {done}/{total}  •  "
         "cleanup": (0.98, 0.02, "limpando temporários  •  "),

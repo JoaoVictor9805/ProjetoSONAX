@@ -26,7 +26,7 @@ from app.engine import (
     PipelineEngine,
     ProgressUpdateEvent,
 )
-from app.view.dialogs import ModalFechamentoMensal, pick_archive, pick_folder
+from app.view.dialogs import pick_archive, pick_folder
 
 # Cor do texto de status por exit_code (consistente com semântica CLI).
 _COR_OK = "#2ecc71"
@@ -177,24 +177,12 @@ class App(ctk.CTk):
         self._progress.set(0)
 
     def _build_log(self) -> None:
-        header_log = ctk.CTkFrame(self, fg_color="transparent")
-        header_log.pack(fill="x", padx=20, pady=(10, 2))
-
         ctk.CTkLabel(
-            header_log,
-            text="Log de execução: ",
+            self,
+            text="Log de execução",
+            anchor="w",
             font=ctk.CTkFont(size=12, weight="bold"),
-        ).pack(side="left")
-
-        self._log_dev_button = ctk.CTkLabel(
-            header_log,
-            text="Log User",
-            text_color="#3498db",
-            font=ctk.CTkFont(size=12, underline=True),
-            cursor="hand2",
-        )
-        self._log_dev_button.pack(side="left")
-        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
+        ).pack(fill="x", padx=20, pady=(10, 2))
 
         self._log = ctk.CTkTextbox(
             self,
@@ -217,15 +205,15 @@ class App(ctk.CTk):
         )
         self._status.pack(side="left", fill="x", expand=True)
 
-        self._btn_fechamento = ctk.CTkButton(
+        self._log_dev_button = ctk.CTkLabel(
             footer,
-            text="Fechamento Mensal",
-            width=140,
-            fg_color="#D17004",
-            hover_color="#B5650D",
-            command=self._on_fechamento_mensal,
+            text="Log User",
+            text_color="#3498db",
+            font=ctk.CTkFont(size=11, underline=True),
+            cursor="hand2",
         )
-        self._btn_fechamento.pack(side="right")
+        self._log_dev_button.pack(side="right")
+        self._log_dev_button.bind("<Button-1>", self._on_log_dev_button)
 
     # ----------------------------------------------------------------
     # Handlers dos botões e ações de usuário
@@ -307,7 +295,6 @@ class App(ctk.CTk):
         self._set_status("Processando ...", cor=_COR_NEUTRO)
 
         self._btn_enviar.configure(state="disabled")
-        self._btn_fechamento.configure(state="disabled")
         self._btn_cancelar.configure(
             state="normal",
             text="Cancelar",
@@ -353,32 +340,6 @@ class App(ctk.CTk):
         self._log.see("end")
         self._log.configure(state="disabled")
 
-    def _on_fechamento_mensal(self) -> None:
-        """Abre o modal para configuração e execução do Fechamento Mensal."""
-        if self._engine.is_running:
-            self._set_status("Aguarde a operação atual finalizar.", cor=_COR_ERRO)
-            return
-
-        ModalFechamentoMensal(self, on_confirm=self._iniciar_consolidacao_macro)
-
-    def _iniciar_consolidacao_macro(self, ano: int, mes: int, forcar: bool) -> None:
-        """Dispara a consolidação mensal via Engine."""
-        self._limpar_log_visual()
-        self._btn_enviar.configure(state="disabled")
-        self._btn_fechamento.configure(state="disabled")
-        self._btn_cancelar.configure(
-            state="normal",
-            text="Cancelar",
-            fg_color=_COR_CANCELAR,
-            hover_color=_COR_CANCELAR_HOVER,
-        )
-
-        self._set_status(f"Consolidando ciclo {mes:02d}/{ano} ...", cor="#e67e22")
-        self._progress.configure(mode="indeterminate")
-        self._progress.start()
-        self._progress_label.configure(text="Iniciando consolidação...")
-
-        self._engine.start_fechamento_mensal(ano=ano, mes=mes, forcar=forcar)
 
     # ----------------------------------------------------------------
     # Recepção e Despacho de Eventos da Engine
@@ -451,8 +412,7 @@ class App(ctk.CTk):
             hover_color="#95a5a6",
         )
 
-        # Reabilita botão Fechamento e Enviar (se aplicável)
-        self._btn_fechamento.configure(state="normal")
+
         if self._entrada is not None:
             try:
                 get_database_url()

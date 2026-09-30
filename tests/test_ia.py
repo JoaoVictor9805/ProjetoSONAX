@@ -28,12 +28,13 @@ class TestCosturaIA(unittest.TestCase):
 
         # Revisão
         res_rev = fake.revisar("transcricao teste", nome_atendente="Lucas")
-        self.assertIsInstance(res_rev, str)
-        self.assertIn("Agente", res_rev)
+        self.assertIsInstance(res_rev, dict)
+        self.assertIn("Agente", res_rev["revisao"])
+        self.assertEqual(res_rev["empresa"], "Empresa Teste")
         self.assertEqual(len(fake.chamadas_revisar), 1)
 
         # Análise
-        res_ana = fake.analisar(res_rev)
+        res_ana = fake.analisar(res_rev["revisao"])
         self.assertIn("nota_final", res_ana)
         self.assertIn("criterios", res_ana)
         self.assertEqual(len(fake.chamadas_analisar), 1)

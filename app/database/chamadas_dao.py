@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Acesso a dados (INSERTs/SELECTs/UPDATEs) das tabelas `origem`, `registro_chamadas`,
-`avaliacao_ia`, `avaliacao_criterio` e `perfil_agente`.
+`avaliacao_ia` e `avaliacao_criterio`.
 Mantém todo SQL e mapeamento relacional isolado na camada de persistência (`app/database/`).
 """
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 import psycopg
 
@@ -35,6 +36,78 @@ def buscar_nome_atendente(
     return row[0] if row else None
 
 
+def buscar_chamada_valida(
+    cur: psycopg.Cursor,
+    protocolo: int,
+    ramal: str | int,
+) -> dict[str, Any] | None:
+    """Verifica se ramal e protocolo batem com um registro existente na tabela chamadas.
+
+    Retorna um dicionário com os dados cadastrais (ex.: agente_nome, numero, estado_ddd) ou None se não bater.
+    """
+    cur.execute(
+        """
+        SELECT protocolo, ramal, agente_nome, numero, estado_ddd 
+        FROM chamadas 
+        WHERE protocolo = %s AND ramal = %s
+        LIMIT 1;
+        """,
+        (protocolo, str(ramal)),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "protocolo": row[0],
+        "ramal": row[1],
+        "agente_nome": row[2],
+        "numero": row[3],
+        "estado_ddd": row[4],
+    }
+
+
+def inserir_empresa(
+    cur: psycopg.Cursor,
+    nome: str,
+    fonte_dados: str | None = None,
+) -> int | None:
+    """Insere ou busca empresa existente por nome (evitando duplicidades)."""
+    nome_limpo = (nome or "").strip()[:100]
+    if not nome_limpo:
+        nome_limpo = "Não encontrado"
+
+    # 1. Verifica se já existe uma empresa com esse nome (case-insensitive)
+    cur.execute(
+        "SELECT id_empresa, fonte_dados FROM empresa WHERE LOWER(nome) = LOWER(%s) LIMIT 1;",
+        (nome_limpo,),
+    )
+    row = cur.fetchone()
+    if row:
+        id_existente, fonte_existente = row[0], row[1]
+        # Se a fonte_dados anterior estava vazia e agora temos dados, atualiza
+        if fonte_dados and fonte_dados.strip() and not (fonte_existente and fonte_existente.strip()):
+            cur.execute(
+                "UPDATE empresa SET fonte_dados = %s WHERE id_empresa = %s;",
+                (fonte_dados, id_existente),
+            )
+        return id_existente
+
+    # 2. Se não existir, insere e devolve o novo id_empresa
+    cur.execute(
+        """
+        INSERT INTO empresa (nome, fonte_dados)
+        VALUES (%s, %s)
+        ON CONFLICT (nome) DO UPDATE
+            SET fonte_dados = COALESCE(empresa.fonte_dados, EXCLUDED.fonte_dados)
+        RETURNING id_empresa;
+        """,
+        (nome_limpo, fonte_dados),
+    )
+    novo_row = cur.fetchone()
+    return novo_row[0] if novo_row else None
+
+
+
 def registro_ja_existe(cur: psycopg.Cursor, log_arquivo: str) -> bool:
     cur.execute(
         """SELECT 1 FROM registro_chamadas 
@@ -47,22 +120,20 @@ def registro_ja_existe(cur: psycopg.Cursor, log_arquivo: str) -> bool:
 def inserir_registro_chamada(
     cur: psycopg.Cursor,
     *,
-    ramal: int,
-    agente_nome: str,
-    data_ligacao: datetime | date,
     log_arquivo: str,
+    protocolo: int,
     transcricao: str | None = None,
-) -> int | None:
-    """Insere em registro_chamadas e devolve o id gerado."""
+) -> str | None:
+    """Insere em registro_chamadas e devolve o log gerado/inserido."""
     cur.execute(
         """
         INSERT INTO registro_chamadas
-            (ramal, agente_nome, data_ligacao, log, transcricao)
-        VALUES (%s, %s, %s, %s, %s)
+            (log, protocolo, transcricao)
+        VALUES (%s, %s, %s)
         ON CONFLICT (log) DO NOTHING
-        RETURNING id
+        RETURNING log
         """,
-        (ramal, agente_nome, data_ligacao, log_arquivo, transcricao),
+        (log_arquivo, protocolo, transcricao),
     )
     resultado = cur.fetchone()
     if resultado is not None:
@@ -107,9 +178,29 @@ def verificar_coluna_revisao(
 def inserir_revisao(
     cur: psycopg.Cursor,
     log: str,
-    revisao: str
+    revisao: str,
+    id_empresa: int | None = None,
 ) -> str | None:
-    """Insere a revisão na coluna revisao do banco de dados."""
+    """Insere a revisão e opcionalmente o id_empresa na coluna revisao do banco de dados."""
+    if id_empresa is not None:
+        try:
+            cur.execute(
+                """
+                UPDATE registro_chamadas
+                SET revisao = %s,
+                    id_empresa = %s
+                WHERE log = %s
+                RETURNING revisao
+                """,
+                (revisao, id_empresa, log),
+            )
+            resultado = cur.fetchone()
+            if resultado:
+                return resultado[0]
+        except Exception:
+            # Caso a coluna id_empresa ainda não exista na base atual
+            pass
+
     cur.execute(
         """
         UPDATE registro_chamadas
@@ -158,66 +249,6 @@ def verificar_tabela_analise(
     return resultado is not None
 
 
-def garantir_schema_atualizado(cur: psycopg.Cursor) -> None:
-    """Garante que as colunas e tabelas das avaliações Micro e Macro existam no banco."""
-    cur.execute(
-        """
-        ALTER TABLE avaliacao_ia ALTER COLUMN nota_final DROP NOT NULL;
-        ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
-
-        ALTER TABLE avaliacao_ia 
-        ADD COLUMN IF NOT EXISTS titulo VARCHAR(255),
-        ADD COLUMN IF NOT EXISTS resumo_chamada TEXT,
-        ADD COLUMN IF NOT EXISTS pontos_fortes TEXT,
-        ADD COLUMN IF NOT EXISTS fragilidades TEXT,
-        ADD COLUMN IF NOT EXISTS oportunidades TEXT;
-
-        CREATE TABLE IF NOT EXISTS perfil_agente (
-            id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            agente_nome VARCHAR(100) NOT NULL REFERENCES origem(agente_nome),
-            mes_referencia DATE NOT NULL,
-            total_chamadas_mes INT NOT NULL DEFAULT 0,
-            nota_media_mes NUMERIC(4,2),
-            resumo_evolutivo TEXT,
-            principais_pontos_fortes TEXT,
-            principais_fragilidades TEXT,
-            plano_acao_oportunidades TEXT,
-            data_processamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT uk_perfil_agente_mes UNIQUE (agente_nome, mes_referencia)
-        );
-
-        ALTER TABLE perfil_agente
-        ADD COLUMN IF NOT EXISTS principais_pontos_fortes TEXT;
-
-        ALTER TABLE perfil_agente ALTER COLUMN nota_media_mes DROP NOT NULL;
-        ALTER TABLE perfil_agente ALTER COLUMN resumo_evolutivo DROP NOT NULL;
-        ALTER TABLE perfil_agente ALTER COLUMN principais_pontos_fortes DROP NOT NULL;
-        ALTER TABLE perfil_agente ALTER COLUMN principais_fragilidades DROP NOT NULL;
-        ALTER TABLE perfil_agente ALTER COLUMN plano_acao_oportunidades DROP NOT NULL;
-        ALTER TABLE avaliacao_criterio ALTER COLUMN justificativa_criterio DROP NOT NULL;
-        """
-    )
-    cur.execute(
-        """
-        SELECT column_name FROM information_schema.columns 
-        WHERE table_name = 'perfil_agente' AND column_name IN ('ciclo_inicio', 'ciclo_fim', 'total_chamadas_ciclo', 'nota_media_ciclo');
-        """
-    )
-    cols = [r[0] for r in cur.fetchall()]
-    if "ciclo_inicio" in cols:
-        cur.execute("ALTER TABLE perfil_agente RENAME COLUMN ciclo_inicio TO mes_referencia;")
-    if "ciclo_fim" in cols:
-        cur.execute("ALTER TABLE perfil_agente DROP COLUMN ciclo_fim;")
-    if "total_chamadas_ciclo" in cols:
-        cur.execute("ALTER TABLE perfil_agente RENAME COLUMN total_chamadas_ciclo TO total_chamadas_mes;")
-    if "nota_media_ciclo" in cols:
-        cur.execute("ALTER TABLE perfil_agente RENAME COLUMN nota_media_ciclo TO nota_media_mes;")
-    cur.execute("ALTER TABLE perfil_agente DROP CONSTRAINT IF EXISTS uk_perfil_agente_ciclo;")
-    cur.execute("SELECT 1 FROM pg_constraint WHERE conname = 'uk_perfil_agente_mes';")
-    if not cur.fetchone():
-        cur.execute("ALTER TABLE perfil_agente ADD CONSTRAINT uk_perfil_agente_mes UNIQUE (agente_nome, mes_referencia);")
-
-
 def inserir_analise(
     cur: psycopg.Cursor,
     log: str,
@@ -230,8 +261,6 @@ def inserir_analise(
     fragilidades: str | None = None,
     oportunidades: str | None = None,
 ) -> int | None:
-    garantir_schema_atualizado(cur)
-
     cur.execute(
         """
         INSERT INTO avaliacao_ia (

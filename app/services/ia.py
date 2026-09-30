@@ -76,10 +76,16 @@ class ProvedorIAReal:
     def revisar(
         self,
         transcricao: str,
+        *,
+        texto_copiado_google: str | None = None,
         nome_atendente: str | None = None,
-    ) -> str:
+    ) -> dict[str, str]:
         from app.services.revisao import revisar_texto
-        return revisar_texto(transcricao, nome_atendente=nome_atendente)
+        return revisar_texto(
+            transcricao,
+            texto_copiado_google=texto_copiado_google,
+            nome_atendente=nome_atendente,
+        )
 
     def analisar(
         self,
@@ -97,6 +103,8 @@ class FakeProvedorIA:
         *,
         transcricao_padrao: dict[str, Any] | None = None,
         revisao_padrao: str | None = None,
+        empresa_padrao: str | None = None,
+        fonte_dados_padrao: str | None = None,
         analise_padrao: dict[str, Any] | None = None,
         falhas_antes_de_acerto: int = 0,
         excecao_falha: Exception | None = None,
@@ -116,6 +124,10 @@ class FakeProvedorIA:
         self.revisao_padrao = revisao_padrao or (
             "Agente (Carlos): Bom dia, gostaria de falar com o financeiro da empresa.\n"
             "Cliente (Empresa): Olá, pode falar comigo."
+        )
+        self.empresa_padrao = empresa_padrao or "Empresa Teste"
+        self.fonte_dados_padrao = fonte_dados_padrao or (
+            "[GOOGLE]\nTexto Google Teste\n\n[DIARIZAÇÃO]\nEmpresa Teste"
         )
         self.analise_padrao = analise_padrao or {
             "nota_final": 9,
@@ -167,13 +179,20 @@ class FakeProvedorIA:
     def revisar(
         self,
         transcricao: str,
+        *,
+        texto_copiado_google: str | None = None,
         nome_atendente: str | None = None,
-    ) -> str:
+    ) -> dict[str, str]:
         self.chamadas_revisar.append(transcricao)
         if self.falhas_restantes > 0:
             self.falhas_restantes -= 1
             raise self.excecao_falha
-        return self.revisao_padrao
+        return {
+            "empresa": self.empresa_padrao,
+            "revisao": self.revisao_padrao,
+            "fonte_dados": self.fonte_dados_padrao,
+        }
+
 
     def analisar(
         self,

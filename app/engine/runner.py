@@ -237,6 +237,8 @@ class PipelineRunner:
                         mapa_diarizacao[caminho.name] = {
                             "texto_diarizado": res.texto_transcricao,
                             "agente_nome": res.agente_nome,
+                            "numero": res.numero,
+                            "estado_ddd": res.estado_ddd,
                         }
                         self.on_progress(
                             i,
@@ -266,6 +268,53 @@ class PipelineRunner:
                     None,
                 )
 
+                # 4.25) Coleta RPA Google (Triangulação de Dados)
+                from app.services.rpa_google import formatar_telefone_busca, coletar_textos_google_lote
+
+                telefones_para_busca: dict[str, str | None] = {}
+                for arq_name, dados_audio in mapa_diarizacao.items():
+                    num = dados_audio.get("numero")
+                    ddd = dados_audio.get("estado_ddd")
+                    telefones_para_busca[arq_name] = formatar_telefone_busca(num, ddd)
+
+                telefones_validos = [t for t in set(telefones_para_busca.values()) if t]
+                textos_google: dict[str, str] = {}
+
+                if telefones_validos:
+                    self.on_log(
+                        f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_validos)} telefone(s)...",
+                        "out", False, None,
+                    )
+                    self.on_log(
+                        "  [ATENÇÃO] O robô de consulta abrirá o navegador. Solte mouse e teclado.",
+                        "out", False, None,
+                    )
+
+                    def _on_rpa_progress(idx: int, tot: int, tel: str) -> None:
+                        msg = f"[INFO] [{idx}/{tot}] Consultando Google (RPA): {tel} ..."
+                        self.on_progress(idx - 1, tot, "searching", msg, None)
+
+                    textos_google = coletar_textos_google_lote(
+                        telefones_para_busca,
+                        cancel=self.cancel_event,
+                        tempo_espera_pagina=6.0,
+                        on_progress=_on_rpa_progress,
+                    )
+                    self.on_progress(len(telefones_validos), len(telefones_validos), "searching", "[INFO] Coleta RPA no Google concluída.", None)
+                    self.on_log("[INFO] Coleta RPA no Google concluída com sucesso.", "out", False, None)
+                else:
+                    textos_google = {k: "Não encontrado" for k in telefones_para_busca}
+
+                if self.cancel_event.is_set():
+                    self._limpar_temporarios()
+                    self.on_finished(
+                        0,
+                        f"[CANCELADO] Cancelado durante a coleta RPA ({inseridos} registro(s) inserido(s)).",
+                        None,
+                        True,
+                    )
+                    return
+
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
                 for idx, caminho in enumerate(copiados, 1):
@@ -277,13 +326,18 @@ class PipelineRunner:
                     self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 
                     dados_audio = mapa_diarizacao.get(caminho.name, {})
-                    self.ingestor.revisar_transcricao(
+                    res_rev = self.ingestor.revisar_transcricao(
                         caminho.name,
                         texto_diarizado=dados_audio.get("texto_diarizado"),
                         agente_nome=dados_audio.get("agente_nome"),
+                        texto_google=textos_google.get(caminho.name),
                         rotulo_audio=rotulo_audio,
                         cancel=self.cancel_event,
                     )
+                    if isinstance(res_rev, dict):
+                        dados_audio["id_empresa"] = res_rev.get("id_empresa")
+                        dados_audio["empresa"] = res_rev.get("empresa")
+
                     if self.cancel_event.wait(1.2):
                         break
 

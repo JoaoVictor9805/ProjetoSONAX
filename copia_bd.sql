@@ -2,25 +2,47 @@
 -- Etapa 01
 -- ==========================
 
-CREATE TABLE origem (
-	agente_nome varchar(100) PRIMARY KEY not null,
-	ramal INT not null,
-	dt_inicio TIMESTAMP(0) not null, -- primeira ligação do usuário
-	dt_fim TIMESTAMP(0) not null -- última ligação do usuário
+CREATE TABLE IF NOT EXISTS chamadas (
+    protocolo BIGINT,
+    identificacao_cliente BIGINT,
+    estado_ddd VARCHAR(3),
+    numero VARCHAR(20),
+    atendido CHAR(1),
+    ramal VARCHAR(20),
+    duracao_segundos INT,
+    fila_id INT,
+    fila_descricao VARCHAR(150),
+    tabulacao_id INT,
+    tabulacao_descricao VARCHAR(150),
+    agente_login VARCHAR(50),
+    agente_nome VARCHAR(100),
+    campanha_id INT,
+    campanha_descricao VARCHAR(150),
+    dt_inicio TIMESTAMP,
+    dt_fim TIMESTAMP,
+    status VARCHAR(50),
+    hash_registro VARCHAR(64),
+    last_sync TIMESTAMP
 );
 
-CREATE TABLE registro_chamadas (
-	id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	ramal INT not null,
-	agente_nome varchar(100) not null,
-	data_ligacao TIMESTAMP(0) not null,
-	log varchar(255) UNIQUE,
-	transcricao TEXT,
-	
-	foreign key (agente_nome) references origem(agente_nome)
+CREATE TABLE IF NOT EXISTS empresa (
+    id_empresa INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL UNIQUE,
+    setor VARCHAR(100),
+    regime_tributario VARCHAR(50),
+    faturamento_mensal VARCHAR(100),
+    status_comercial VARCHAR(100),
+    fonte_dados TEXT
 );
 
-alter table registro_chamadas add column revisao TEXT;
+CREATE TABLE IF NOT EXISTS registro_chamadas (
+    log VARCHAR(255) PRIMARY KEY,
+    protocolo BIGINT,
+    transcricao TEXT,
+    revisao TEXT,
+    id_empresa INT REFERENCES empresa(id_empresa)
+);
+
 
 -- ==========================
 -- Etapa 02

@@ -26,7 +26,7 @@ class TestAppGui(unittest.TestCase):
         self.app._status = MagicMock()
         self.app._btn_cancelar = MagicMock()
         self.app._btn_enviar = MagicMock()
-        self.app._btn_fechamento = MagicMock()
+        self.app._log_dev_button = MagicMock()
         self.app._entrada = None
 
     def test_handle_progress_determinate(self):
@@ -38,11 +38,11 @@ class TestAppGui(unittest.TestCase):
 
     def test_handle_progress_indeterminate(self):
         self.app._progress.cget.return_value = "determinate"
-        ev_prog = ProgressUpdateEvent(fraction=0.0, label="Consolidando...", phase="closing", is_indeterminate=True)
+        ev_prog = ProgressUpdateEvent(fraction=0.0, label="Processando...", phase="processing", is_indeterminate=True)
         self.app._handle_progress(ev_prog)
         self.app._progress.configure.assert_called_with(mode="indeterminate")
         self.app._progress.start.assert_called_once()
-        self.app._progress_label.configure.assert_called_with(text="Consolidando...")
+        self.app._progress_label.configure.assert_called_with(text="Processando...")
 
     def test_handle_log_message_user_mode(self):
         ev_log_user = LogMessageEvent(text="Arquivo copiado", stream="out", dev_only=False)
