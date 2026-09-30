@@ -209,6 +209,33 @@ def abrir_navegador_busca(url: str, caminho_navegador: str | None = None) -> boo
     return webbrowser.open(url)
 
 
+def focar_janela_navegador() -> bool:
+    """Tenta trazer a janela do Google Chrome ou navegador ativo para o primeiro plano."""
+    try:
+        import win32gui
+        import win32con
+
+        def _enum_cb(hwnd, lista):
+            if win32gui.IsWindowVisible(hwnd):
+                titulo = win32gui.GetWindowText(hwnd).lower()
+                if "chrome" in titulo or "google" in titulo or "pesquisa google" in titulo:
+                    lista.append(hwnd)
+
+        hwnds = []
+        win32gui.EnumWindows(_enum_cb, hwnds)
+        if hwnds:
+            hwnd = hwnds[0]
+            try:
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)
+                return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 def coletar_texto_google_telefone(
     telefone: str,
     *,
@@ -256,15 +283,19 @@ def coletar_texto_google_telefone(
         if cancel is not None and cancel.is_set():
             return "Não encontrado"
 
-        # 4. Seleciona Tudo (Ctrl + A)
+        # 4. Foca na janela do navegador para garantir recepção dos atalhos
+        focar_janela_navegador()
+        time.sleep(0.3)
+
+        # 5. Seleciona Tudo (Ctrl + A)
         keyboard.send_keys('^a')
         time.sleep(0.6)
 
-        # 5. Copia (Ctrl + C)
+        # 6. Copia (Ctrl + C)
         keyboard.send_keys('^c')
         time.sleep(0.6)
 
-        # 6. Fecha a aba atual (Ctrl + W)
+        # 7. Fecha a aba atual (Ctrl + W)
         keyboard.send_keys('^w')
         time.sleep(0.5)
 

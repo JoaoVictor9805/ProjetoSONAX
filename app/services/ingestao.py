@@ -114,13 +114,21 @@ class ChamadaIngestor:
                 if registro_ja_existe(cur, caminho.name):
                     chamada = buscar_chamada_valida(cur, protocolo=protocolo, ramal=ramal_str)
                     texto_existente = buscar_transcricao(cur, caminho.name) or ""
+                    num_existente = chamada.get("numero") if chamada else None
+                    if not num_existente or not str(num_existente).strip():
+                        id_cli_ex = chamada.get("identificacao_cliente") if chamada else None
+                        if id_cli_ex:
+                            num_existente = str(int(id_cli_ex) if isinstance(id_cli_ex, (int, float)) else id_cli_ex).strip()
+                        else:
+                            num_existente = info.get("telefone")
+
                     return TranscricaoItemResult(
                         caminho=caminho,
                         sucesso=False,
                         ja_existente=True,
                         texto_transcricao=texto_existente,
                         agente_nome=chamada.get("agente_nome") if chamada else None,
-                        numero=chamada.get("numero") if chamada else None,
+                        numero=num_existente,
                         estado_ddd=chamada.get("estado_ddd") if chamada else None,
                         identificacao_cliente=chamada.get("identificacao_cliente") if chamada else None,
                         motivo_descarte="Transcrição já registrada no banco.",
@@ -138,6 +146,12 @@ class ChamadaIngestor:
                     )
                 nome_atendente = chamada.get("agente_nome")
                 numero = chamada.get("numero")
+                if not numero or not str(numero).strip():
+                    id_cli = chamada.get("identificacao_cliente")
+                    if id_cli:
+                        numero = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
+                    else:
+                        numero = info.get("telefone")
                 estado_ddd = chamada.get("estado_ddd")
                 identificacao_cliente = chamada.get("identificacao_cliente")
         except Exception:
