@@ -149,13 +149,51 @@ Em `avaliacao_criterio`, avalie OBRIGATORIAMENTE os 6 critérios a seguir, utili
 
 #### 5. Código de Oportunidade de Treinamento (`dim_oportunidade_treinamento`)
 Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que melhor representa o principal ponto cego do SDR na ligação (ou `null` se não avaliável):
-- Abertura e Relevância: `OP_ABERT_01`, `OP_ABERT_02`, `OP_ABERT_03`, `OP_ABERT_04`, `OP_ABERT_05`, `OP_ABERT_06`
-- Descoberta SPIN: `OP_SPIN_01`, `OP_SPIN_02`, `OP_SPIN_03`, `OP_SPIN_04`, `OP_SPIN_05`
-- Investigação Perfil Técnico: `OP_PERF_01`, `OP_PERF_02`, `OP_PERF_03`, `OP_PERF_04`
-- Investigação BANT: `OP_BANT_01`, `OP_BANT_02`, `OP_BANT_03`, `OP_BANT_04`
-- Escuta e Objeções: `OP_ESC_01`, `OP_ESC_02`, `OP_ESC_03`, `OP_ESC_04`, `OP_ESC_05`
-- Próximo Passo e Compromisso: `OP_PROX_01`, `OP_PROX_02`, `OP_PROX_03`, `OP_PROX_04`
-- Direcionamento Final e Resolução: `OP_DIR_01`, `OP_DIR_02`, `OP_DIR_03`
+
+**1. Abertura e Relevância:**
+- `OP_ABERT_01`: Apresentar-se e situar a empresa com objetividade (sem monólogos institucionais, partindo direto para a razão da chamada).
+- `OP_ABERT_02`: Utilizar a oportunidade de crédito tributário mapeada como gancho inicial nos primeiros segundos.
+- `OP_ABERT_03`: Expor o benefício da oportunidade sem sobrecarga técnica, juridiquês ou complexidades fiscais na largada.
+- `OP_ABERT_04`: Confirmar alinhamento com o interlocutor antes de aprofundar (checar se lida com fiscal/financeiro).
+- `OP_ABERT_05`: Direcionar o contato para o responsável fiscal, tributário ou financeiro (ultrapassar recepção ou setor não correlato).
+- `OP_ABERT_06`: Evitar promessas de valores certos ou garantia de créditos recuperáveis sem análise técnica prévia.
+
+**2. Descoberta SPIN:**
+- `OP_SPIN_01`: Mapear o cenário inicial com perguntas rápidas e indispensáveis (Situação).
+- `OP_SPIN_02`: Mapear atritos fiscais ou lacunas na rotina da empresa (Problema).
+- `OP_SPIN_03`: Destacar implicações simples e tangíveis, como o risco iminente de prescrição da janela de 5 anos (Implicação).
+- `OP_SPIN_04`: Conectar a solução à dor e checar a viabilidade de avanço para resgate de caixa (Necessidade de solução).
+- `OP_SPIN_05`: Diferenciar dor reconhecida pelo lead de meros argumentos e teses levantadas pelo SDR.
+
+**3. Investigação de Perfil Técnico (Crucial):**
+- `OP_PERF_01`: Investigar ativamente o regime tributário da empresa (Lucro Real como eliminatório).
+- `OP_PERF_02`: Confirmar faturamento mínimo mensal igual ou superior a R$ 1 milhão.
+- `OP_PERF_03`: Mapear segmento de atuação (indústria preferencial).
+- `OP_PERF_04`: Garantir confirmação ativa dos dados pelo próprio interlocutor, sem suposições não validadas.
+
+**4. Investigação BANT:**
+- `OP_BANT_01`: Budget: Avaliar sutilmente viabilidade comercial, processo interno de aprovação e honorários.
+- `OP_BANT_02`: Authority: Investigar o papel do interlocutor (decisor, influenciador ou operacional) e quem mais precisa participar.
+- `OP_BANT_03`: Need: Estimular o lead a verbalizar interesse ou dor real em vez de apenas empurrar o pitch.
+- `OP_BANT_04`: Timeline: Mapear prioridade, evento motivador ou prazo para resolver a questão fiscal.
+
+**5. Escuta e Objeções:**
+- `OP_ESC_01`: Posicionar o trabalho como complementar à contabilidade atual, sem confrontar o contador da empresa.
+- `OP_ESC_02`: Retomar e espelhar termos utilizados pelo lead (demonstrar escuta ativa em vez de script rígido).
+- `OP_ESC_03`: Tratar com empatia e segurança o receio de riscos, autuações ou fiscalização do Fisco.
+- `OP_ESC_04`: Evitar interrupções e sobreposição de falas no fluxo da conversa.
+- `OP_ESC_05`: Investigar o motivo do desinteresse ("não temos interesse") para contornar a real objeção.
+
+**6. Próximo Passo e Compromisso:**
+- `OP_PROX_01`: Propor opções objetivas de data e horário usando técnica de dupla escolha.
+- `OP_PROX_02`: Alinhar formalmente a modalidade escolhida (online ou presencial).
+- `OP_PROX_03`: Contornar o pedido passivo de envio de material ("mande por e-mail") em busca de compromisso com data definida.
+- `OP_PROX_04`: Definir responsável e data concreta para retornos agendados quando a reunião imediata não for viável.
+
+**7. Direcionamento Final e Resolução:**
+- `OP_DIR_01`: Direcionamento assertivo com base no perfil (encerrar polidamente e sem insistir se fora do perfil).
+- `OP_DIR_02`: Condução para conversa substantiva (transpor barreira inicial da recepção).
+- `OP_DIR_03`: Consolidação de status claro (evitar terminar a ligação deixando a empresa em área cinzenta indefinida).
 
 #### 6. Destaques Qualitativos do SDR
 - `acertos`: até dois acertos concretos observados na ligação.

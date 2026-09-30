@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from typing import Any
 
 from app.database.db import conectar
 from app.logs import log_dev_exc
