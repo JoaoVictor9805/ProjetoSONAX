@@ -113,6 +113,57 @@ class TestAnaliseFinalAI(unittest.TestCase):
         palavras_resumo = res["crm"]["resumo"].replace("...", "").split()
         self.assertLessEqual(len(palavras_resumo), 80)
 
+    def test_padronizacao_campos_texto_nao_se_aplica(self):
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil pendente",
+                "interlocutor": "Não houve...",
+                "cargo": None,
+                "resultado_frase": "Conversa curta sem avanço.",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 50,
+                "feedback_geral": "Atendimento básico.",
+                "acertos": "não informado",
+                "melhorias": None,
+                "frase_alternativa": "   ",
+                "codigo_oportunidade": "OP_DIR_03",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+            ],
+            "analise_spin": {
+                "situacao": "Nenhum",
+                "problema": "não houve",
+            },
+            "analise_bant": {
+                "budget_evidencia": "n/a",
+            },
+            "interlocutor": {
+                "duvidas": "null",
+                "objecoes": "não se aplica...",
+            },
+            "crm": {
+                "responsavel": "não houve",
+                "prazo": None,
+            }
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        self.assertEqual(res["avaliacao_ia"]["interlocutor"], "Não se aplica")
+        self.assertEqual(res["avaliacao_ia"]["cargo"], "Não se aplica")
+        self.assertEqual(res["avaliacao_sdr"]["acertos"], "Não se aplica")
+        self.assertEqual(res["avaliacao_sdr"]["melhorias"], "Não se aplica")
+        self.assertEqual(res["avaliacao_sdr"]["frase_alternativa"], "Não se aplica")
+        self.assertEqual(res["analise_spin"]["situacao"], "Não se aplica")
+        self.assertEqual(res["analise_spin"]["problema"], "Não se aplica")
+        self.assertEqual(res["analise_bant"]["budget_evidencia"], "Não se aplica")
+        self.assertEqual(res["interlocutor"]["duvidas"], "Não se aplica")
+        self.assertEqual(res["interlocutor"]["objecoes"], "Não se aplica")
+        self.assertEqual(res["crm"]["responsavel"], "Não se aplica")
+        self.assertEqual(res["crm"]["prazo"], "Não se aplica")
+
 
 if __name__ == "__main__":
     unittest.main()
