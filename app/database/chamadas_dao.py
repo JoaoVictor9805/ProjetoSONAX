@@ -303,6 +303,27 @@ def verificar_tabela_analise(
     return resultado is not None
 
 
+_SCHEMA_AVALIACAO_GARANTIDO = False
+
+
+def garantir_schema_avaliacao(cur: psycopg.Cursor) -> None:
+    """Garante que as colunas das avaliações permitam NULL para chamadas não avaliáveis (ex: URA/recusa)."""
+    global _SCHEMA_AVALIACAO_GARANTIDO
+    if _SCHEMA_AVALIACAO_GARANTIDO:
+        return
+    try:
+        cur.execute(
+            """
+            ALTER TABLE avaliacao_sdr ALTER COLUMN nota_final DROP NOT NULL;
+            ALTER TABLE avaliacao_sdr ALTER COLUMN codigo_oportunidade DROP NOT NULL;
+            ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
+            """
+        )
+        _SCHEMA_AVALIACAO_GARANTIDO = True
+    except Exception:
+        pass
+
+
 def inserir_analise(
     cur: psycopg.Cursor,
     log: str,
@@ -312,6 +333,7 @@ def inserir_analise(
     Persiste a análise comercial completa nas 7 tabelas normalizadas
     dentro da transação ativa do cursor.
     """
+    garantir_schema_avaliacao(cur)
     av_ia = analise.get("avaliacao_ia", {})
     av_sdr = analise.get("avaliacao_sdr", {})
     av_criterios = analise.get("avaliacao_criterio", [])
