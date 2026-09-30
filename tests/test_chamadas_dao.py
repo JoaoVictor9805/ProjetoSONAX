@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from app.database.chamadas_dao import (
     buscar_chamada_valida,
+    buscar_identificacao_cliente,
     inserir_analise,
     inserir_empresa,
     inserir_revisao,
@@ -41,6 +42,32 @@ class TestChamadasDao(unittest.TestCase):
         self.assertEqual(resultado["agente_nome"], "Lucas")
         self.assertEqual(resultado["numero"], "33101010")
         self.assertEqual(resultado["estado_ddd"], "41")
+        self.assertIsNone(resultado["identificacao_cliente"])
+
+    def test_buscar_chamada_valida_retorna_identificacao_cliente(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = (123456, "1001", "Lucas", "33101010", "41", 98765432101)
+
+        resultado = buscar_chamada_valida(cur, protocolo=123456, ramal="1001")
+
+        self.assertIsNotNone(resultado)
+        self.assertEqual(resultado["identificacao_cliente"], 98765432101)
+
+    def test_buscar_identificacao_cliente_via_protocolo(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = (98765432101,)
+
+        res = buscar_identificacao_cliente(cur, protocolo=123456)
+        self.assertEqual(res, "98765432101")
+        self.assertIn("WHERE protocolo = %s", cur.execute.call_args[0][0])
+
+    def test_buscar_identificacao_cliente_via_log(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = (98765432102,)
+
+        res = buscar_identificacao_cliente(cur, log_arquivo="audio.wav")
+        self.assertEqual(res, "98765432102")
+        self.assertIn("WHERE r.log = %s", cur.execute.call_args[0][0])
 
     def test_inserir_empresa_nova(self):
         cur = MagicMock()
