@@ -307,7 +307,8 @@ class ChamadaIngestor:
             try:
                 with conectar() as cur:
                     try:
-                        id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados, telefone=telefone)
+                        with cur.connection.transaction():
+                            id_empresa = inserir_empresa(cur, empresa_nome, fonte_dados, telefone=telefone)
                     except Exception:
                         log_dev_exc()
 

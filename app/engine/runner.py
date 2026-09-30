@@ -225,6 +225,12 @@ class PipelineRunner:
 
                     if res.ja_existente:
                         ja_existentes += 1
+                        mapa_diarizacao[caminho.name] = {
+                            "texto_diarizado": res.texto_transcricao,
+                            "agente_nome": res.agente_nome,
+                            "numero": res.numero,
+                            "estado_ddd": res.estado_ddd,
+                        }
                         self.on_progress(
                             i,
                             total,
@@ -331,6 +337,7 @@ class PipelineRunner:
                         texto_diarizado=dados_audio.get("texto_diarizado"),
                         agente_nome=dados_audio.get("agente_nome"),
                         texto_google=textos_google.get(caminho.name),
+                        telefone=telefones_para_busca.get(caminho.name),
                         rotulo_audio=rotulo_audio,
                         cancel=self.cancel_event,
                     )
