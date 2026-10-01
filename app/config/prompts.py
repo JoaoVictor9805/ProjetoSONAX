@@ -87,6 +87,12 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
      * **Caso a ligação tenha resultado em um possível futuro contato** (ex: o interlocutor pediu retorno em outro dia ou horário, indicou quem procurar, solicitou envio de material prévio para análise posterior, combinou de verificar a agenda, ou deixou qualquer margem para novo contato). Marque `"s"` para garantir histórico e termos mais informações no status atual com aquela empresa específica!
    - **Marque como Não Relevante (`ligacao_relevante: "n"`)**:
      * APENAS quando for uma ligação 100% infrutífera e sem qualquer perspectiva de contato: caixa postal, URA eletrônica pura sem atendimento humano, queda instantânea antes de qualquer fala, engano ou recusa imediata e definitiva sem margem para retorno.
+     * Preencha Interlocutor com o nome da pessoa de cargo mais alto indentificada na ligação, caso a ligação seja repassada.
+     * Cargo: Preencha a função do contato APENAS se o atendente conseguiu dialogar com um perfil decisor ou influenciador que tenha relevância técnica ou estratégica para a negociação de créditos tributários. Em qualquer outro cenário, retorne estritamente "Não se aplica".
+        Exemplos de Perfis Relevantes (Preencher o cargo): Sócio, Proprietário, Diretor, CEO, CFO (Diretor Financeiro), Controller, Gerente Fiscal/Tributário, Contador.
+        Exemplos para usar "Não se aplica" (Não Decisores ou Filtros): Recepcionista, Secretária, Assistente Administrativo, Analista de RH, Operador de Máquina, ou caso a ligação termine antes da triagem inicial sem identificar com quem se falou.
+
+
 7. **Avaliação Parcial de Categorias e Critério de Penalização Justa**:
    - **Quando não for possível avaliar TODAS as categorias solicitadas**, avalie as que for possível e atribua uma nota geral (`nota_final`).
    - No `feedback_geral`, deixe expressamente claro o que pôde ser avaliado e **o que ficou faltante**.
