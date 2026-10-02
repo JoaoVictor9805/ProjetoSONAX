@@ -211,7 +211,7 @@ Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_i
 
 #### 8. Próximo Passo e CRM (`crm`)
 - `acao`: avanço comercial ("Reunião confirmada", "Reunião proposta sem aceite", "Retorno com data combinado", "Envio de material solicitado", "Sem próximo passo definido", "Sem interesse explícito").
-- `responsavel`: SDR ou responsável nomeado (ou "Não se aplica").
+- `responsavel`: SDR, Executivo do respectivo SDR  ou responsável nomeado (ou "Não se aplica").
 - `prazo`: data e horário combinados (ou "Não se aplica").
 - `dados_extras`: dados pendentes que ainda precisam ser validados (ou "Não se aplica").
 - `resumo`: resumo executivo para colar no CRM de NO MÁXIMO 80 PALAVRAS, sem informações inferidas apresentadas como fatos (ou "Não se aplica").
