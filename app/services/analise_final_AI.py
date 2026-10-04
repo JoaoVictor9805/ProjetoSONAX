@@ -166,8 +166,29 @@ class InterlocutorModel(BaseModel):
     reacao_interlocutor: str | None = Field(default=None, description="Reação final do lead")
 
 
+ACAO_CRM_VALIDAS = (
+    "Reunião confirmada",
+    "Retorno com data combinada",
+    "Recontatar (Follow-up)",
+    "Sem interesse",
+    "Não se aplica",
+)
+
+
 class CrmModel(BaseModel):
-    acao: str | None = Field(default=None, description="Próximo passo comercial concreto")
+    acao: Literal[
+        "Reunião confirmada",
+        "Retorno com data combinada",
+        "Recontatar (Follow-up)",
+        "Sem interesse",
+        "Não se aplica",
+    ] | None = Field(
+        default=None,
+        description=(
+            "Avanço comercial concreto padronizado: 'Reunião confirmada', 'Retorno com data combinada', "
+            "'Recontatar (Follow-up)', 'Sem interesse' ou 'Não se aplica'"
+        ),
+    )
     responsavel: str | None = Field(default=None, description="Responsável pelo próximo passo")
     prazo: str | None = Field(default=None, description="Data e horário agendados ou 'não informado'")
     dados_extras: str | None = Field(default=None, description="Dados pendentes de confirmação")
@@ -277,6 +298,38 @@ def normalizar_texto_nao_se_aplica(valor: Any) -> str:
     return val_str
 
 
+def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
+    """Normaliza o campo acao do CRM para uma das 5 categorias padrão."""
+    if eh_nao_avaliavel:
+        return "Não se aplica"
+    if acao is None:
+        return "Recontatar (Follow-up)"
+    val = str(acao).strip()
+    if not val:
+        return "Recontatar (Follow-up)"
+    val_norm = val.lower().rstrip(".").strip()
+
+    if val_norm in ("não se aplica", "nao se aplica", "n/a", "none", "null"):
+        return "Não se aplica"
+    if "reunião confirmada" in val_norm or "reuniao confirmada" in val_norm:
+        return "Reunião confirmada"
+    if "retorno" in val_norm and any(k in val_norm for k in ("data", "agendad", "combinad", "marcad")):
+        return "Retorno com data combinada"
+    if any(k in val_norm for k in ("sem interesse", "recusa", "descartad", "não tem interesse", "nao tem interesse")):
+        return "Sem interesse"
+    if any(k in val_norm for k in (
+        "recontatar", "follow-up", "follow up", "followup",
+        "nova tentativa", "proposta sem aceite", "sem próximo passo",
+        "sem proximo passo", "envio de material", "material", "pendente"
+    )):
+        return "Recontatar (Follow-up)"
+
+    if val in ACAO_CRM_VALIDAS:
+        return val
+
+    return "Recontatar (Follow-up)"
+
+
 def calcular_e_sanitizar_analise(
     resultado: dict[str, Any],
     *,
@@ -291,7 +344,7 @@ def calcular_e_sanitizar_analise(
         - Calcula nota_final como a soma dos 6 critérios quando a ligação for avaliável.
         - Garante que os 6 critérios oficiais existam na lista avaliacao_criterio.
         - Valida que codigo_oportunidade seja um código dimensional válido.
-        - Padroniza campos textuais sem ocorrência para 'Não se aplica'.
+        - Pa1droniza campos textuais sem ocorrência para 'Não se aplica'.
     """
     # 1. Metadados de avaliacao_ia
     av_ia = resultado.setdefault("avaliacao_ia", {})
@@ -347,6 +400,7 @@ def calcular_e_sanitizar_analise(
         av_ia["ligacao_relevante"] = "n"
         av_ia["reuniao_confirmada"] = "n"
         av_ia["data_confirmada"] = "n"
+        resultado.setdefault("crm", {})["acao"] = "Não se aplica"
 
     else:
         # Ligações avaliáveis: soma determinística dos 6 critérios
@@ -397,7 +451,7 @@ def calcular_e_sanitizar_analise(
 
     # 7. Padronização de campos em crm
     crm = resultado.setdefault("crm", {})
-    crm["acao"] = crm.get("acao") or "Sem próximo passo definido"
+    crm["acao"] = normalizar_acao_crm(crm.get("acao"), eh_nao_avaliavel=eh_nao_avaliavel)
     for k in ("responsavel", "prazo", "dados_extras"):
         crm[k] = normalizar_texto_nao_se_aplica(crm.get(k))
 
@@ -455,4 +509,4 @@ def analisar_ligacao(
         empresa_contatada=empresa_contatada,
     )
 
-    return resultado
+    return resultado
