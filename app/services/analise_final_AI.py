@@ -10,7 +10,7 @@ Responsabilidades:
     4. Diagnóstico do interlocutor (dores, dúvidas, objeções) e próximo passo para CRM.
     5. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
        para integridade em agregações no Power BI.
-    6. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
+    6. Estruturação tipada com Pydantic e chamada com Structured Output.
 ============================================================================
 """
 from __future__ import annotations
@@ -25,7 +25,6 @@ from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config.prompts import prompt_analise
@@ -79,15 +78,28 @@ CODIGOS_OPORTUNIDADE_VALIDOS = {
 # MODELOS PYDANTIC (ESTRUTURA RELACIONAL 7 TABELAS)
 # ==========================================================
 
+RESULTADOS_STATUS_COMERCIAL_VALIDOS = (
+    "Perfil confirmado",
+    "Perfil pendente",
+    "Fora do perfil desta campanha",
+    "Dados insuficientes",
+)
+
+
 class AvaliacaoIAModel(BaseModel):
     protocolo: int | None = Field(default=None, description="Número de protocolo da chamada")
     data_avaliacao: str = Field(description="Data da avaliação no formato YYYY-MM-DD")
-    modelo_ia: str = Field(default="gpt-4o-mini", description="Identificador do modelo de IA utilizado")
+    modelo_ia: str = Field(default="gemini-3.1-flash-lite", description="Identificador do modelo de IA utilizado")
     interlocutor: str | None = Field(default=None, description="Nome do interlocutor contatado na empresa")
     cargo: str | None = Field(default=None, description="Cargo ou área do interlocutor")
     empresa_contatada: int | None = Field(default=None, description="ID numérico da empresa contatada")
-    resultado: str = Field(
-        description="Status comercial da empresa: 'Perfil confirmado', 'Perfil pendente', 'Fora do perfil desta campanha' ou 'Dados insuficientes'"
+    resultado: Literal[
+        "Perfil confirmado",
+        "Perfil pendente",
+        "Fora do perfil desta campanha",
+        "Dados insuficientes",
+    ] = Field(
+        description="Qualificação técnica da empresa: 'Perfil confirmado', 'Perfil pendente', 'Fora do perfil desta campanha' ou 'Dados insuficientes'"
     )
     ligacao_relevante: Literal["s", "n"] = Field(
         description="'s' se a chamada teve conversa substantiva relevante, 'n' caso contrário"
@@ -298,6 +310,32 @@ def normalizar_texto_nao_se_aplica(valor: Any) -> str:
     return val_str
 
 
+def normalizar_resultado_status_comercial(resultado: Any, eh_nao_avaliavel: bool = False) -> str:
+    """Normaliza o status de qualificação da empresa para as 4 categorias oficiais."""
+    if eh_nao_avaliavel:
+        return "Dados insuficientes"
+    if resultado is None:
+        return "Dados insuficientes"
+    val = str(resultado).strip()
+    if not val:
+        return "Dados insuficientes"
+    val_norm = val.lower().rstrip(".").strip()
+
+    if val_norm in ("dados insuficientes", "insuficiente", "não avaliável", "nao avaliavel", "não se aplica", "nao se aplica"):
+        return "Dados insuficientes"
+    if val_norm in ("perfil confirmado", "confirmado", "qualificado", "reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada"):
+        return "Perfil confirmado"
+    if any(k in val_norm for k in ("fora do perfil", "desqualificado", "fora de perfil")):
+        return "Fora do perfil desta campanha"
+    if val_norm in ("perfil pendente", "pendente", "em análise", "em analise", "análise"):
+        return "Perfil pendente"
+
+    if val in RESULTADOS_STATUS_COMERCIAL_VALIDOS:
+        return val
+
+    return "Perfil pendente"
+
+
 def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
     """Normaliza o campo acao do CRM para uma das 5 categorias padrão."""
     if eh_nao_avaliavel:
@@ -344,7 +382,7 @@ def calcular_e_sanitizar_analise(
         - Calcula nota_final como a soma dos 6 critérios quando a ligação for avaliável.
         - Garante que os 6 critérios oficiais existam na lista avaliacao_criterio.
         - Valida que codigo_oportunidade seja um código dimensional válido.
-        - Pa1droniza campos textuais sem ocorrência para 'Não se aplica'.
+        - Padroniza campos textuais sem ocorrência para 'Não se aplica'.
     """
     # 1. Metadados de avaliacao_ia
     av_ia = resultado.setdefault("avaliacao_ia", {})
@@ -400,6 +438,7 @@ def calcular_e_sanitizar_analise(
         av_ia["ligacao_relevante"] = "n"
         av_ia["reuniao_confirmada"] = "n"
         av_ia["data_confirmada"] = "n"
+        av_ia["resultado"] = "Dados insuficientes"
         resultado.setdefault("crm", {})["acao"] = "Não se aplica"
 
     else:
@@ -418,6 +457,14 @@ def calcular_e_sanitizar_analise(
         if cod_op and cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS:
             # Fallback seguro para código existente mais genérico de fechamento
             av_sdr["codigo_oportunidade"] = "OP_DIR_03"
+
+    # Normalização de resultado (qualificação técnica do lead)
+    raw_res = str(av_ia.get("resultado") or "").strip().lower()
+    av_ia["resultado"] = normalizar_resultado_status_comercial(
+        av_ia.get("resultado"), eh_nao_avaliavel=eh_nao_avaliavel
+    )
+    if not eh_nao_avaliavel and any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
+        av_ia["reuniao_confirmada"] = "s"
 
     # Padronização de campos de avaliação SDR
     for k in ("acertos", "melhorias", "frase_alternativa"):
@@ -479,7 +526,7 @@ def analisar_ligacao(
     nome_sdr: str | None = None,
 ) -> dict[str, Any]:
     """
-    Submete a transcrição revisada ao GPT-4o-mini e devolve o dicionário
+    Submete a transcrição revisada ao Gemini e devolve o dicionário
     completo com as 7 chaves relacionais padronizadas.
     """
     inputs = {
