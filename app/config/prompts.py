@@ -126,7 +126,7 @@ Para cada item, classifique estritamente como: `"confirmado"`, `"indício"`, `"n
 - **Timeline (Prazo)**: existe prioridade, evento motivador, prazo de decisão ou data para retomar o assunto?
 
 #### 3. Status Comercial da Empresa (`resultado`)
-Classifique cada empresa em exatamente uma categoria:
+Classifique a qualificação técnica da empresa ESTRITAMENTE em uma das 4 categorias abaixo (NUNCA utilize termos de avanço comercial como "Reunião Agendada" ou "Reunião confirmada" aqui; o agendamento de reunião deve ser registrado exclusivamente nos campos `reuniao_confirmada` e `crm.acao`):
 - `"Perfil confirmado"`: Lucro Real e faturamento mensal >= R$ 1 milhão confirmados.
 - `"Perfil pendente"`: falta confirmação de regime tributário ou faturamento; não classifique como qualificada nem como descartada.
 - `"Fora do perfil desta campanha"`: confirmação de regime diferente de Lucro Real ou faturamento abaixo de R$ 1 milhão por mês.

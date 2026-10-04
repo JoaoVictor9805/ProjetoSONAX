@@ -5,6 +5,7 @@ import unittest
 from app.services.analise_final_AI import (
     calcular_e_sanitizar_analise,
     normalizar_acao_crm,
+    normalizar_resultado_status_comercial,
     _limpar_resposta_json,
 )
 
@@ -193,6 +194,56 @@ class TestAnaliseFinalAI(unittest.TestCase):
         # 5. Não se aplica
         self.assertEqual(normalizar_acao_crm("Não se aplica"), "Não se aplica")
         self.assertEqual(normalizar_acao_crm("qualquer_coisa", eh_nao_avaliavel=True), "Não se aplica")
+
+    def test_normalizacao_resultado_status_comercial(self):
+        # 1. Perfil confirmado e contorno de Reunião Agendada/Confirmada
+        self.assertEqual(normalizar_resultado_status_comercial("Perfil confirmado"), "Perfil confirmado")
+        self.assertEqual(normalizar_resultado_status_comercial("Reunião Agendada"), "Perfil confirmado")
+        self.assertEqual(normalizar_resultado_status_comercial("reuniao agendada"), "Perfil confirmado")
+        self.assertEqual(normalizar_resultado_status_comercial("Reunião confirmada"), "Perfil confirmado")
+        self.assertEqual(normalizar_resultado_status_comercial("qualificado"), "Perfil confirmado")
+
+        # 2. Perfil pendente
+        self.assertEqual(normalizar_resultado_status_comercial("Perfil pendente"), "Perfil pendente")
+        self.assertEqual(normalizar_resultado_status_comercial("pendente"), "Perfil pendente")
+        self.assertEqual(normalizar_resultado_status_comercial("em análise"), "Perfil pendente")
+
+        # 3. Fora do perfil
+        self.assertEqual(normalizar_resultado_status_comercial("Fora do perfil desta campanha"), "Fora do perfil desta campanha")
+        self.assertEqual(normalizar_resultado_status_comercial("fora do perfil"), "Fora do perfil desta campanha")
+        self.assertEqual(normalizar_resultado_status_comercial("desqualificado"), "Fora do perfil desta campanha")
+
+        # 4. Dados insuficientes e chamadas não avaliáveis
+        self.assertEqual(normalizar_resultado_status_comercial("Dados insuficientes"), "Dados insuficientes")
+        self.assertEqual(normalizar_resultado_status_comercial(None), "Dados insuficientes")
+        self.assertEqual(normalizar_resultado_status_comercial("Perfil confirmado", eh_nao_avaliavel=True), "Dados insuficientes")
+
+    def test_sanitizacao_converte_reuniao_agendada_para_perfil_confirmado(self):
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Reunião Agendada",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "s",
+                "resultado_frase": "Reunião marcada com diretor.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Boa condução.",
+                "codigo_oportunidade": "OP_DIR_03",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 20, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 20, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+            ],
+            "crm": {"resumo": "Reunião agendada."}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil confirmado")
+        self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "s")
 
 
 if __name__ == "__main__":
