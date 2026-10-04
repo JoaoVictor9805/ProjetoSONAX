@@ -210,7 +210,12 @@ Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que mel
 Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_interlocutor`. Use SEMPRE "Não se aplica" quando não ocorrer.
 
 #### 8. Próximo Passo e CRM (`crm`)
-- `acao`: avanço comercial ("Reunião confirmada", "Reunião proposta sem aceite", "Retorno com data combinado", "Envio de material solicitado", "Sem próximo passo definido", "Sem interesse explícito").
+- `acao`: Selecione ESTRITAMENTE uma das 5 opções padronizadas abaixo:
+  * `"Reunião confirmada"`: Reunião técnica com consultor/especialista tributário agendada com aceite inequívoco e data/horário definidos.
+  * `"Retorno com data combinada"`: Não agendou reunião, mas houve compromisso com dia e horário exatos combinados para o SDR retornar a ligação.
+  * `"Recontatar (Follow-up)"`: Contato positivo ou neutro, mas SEM data/horário fixos para retorno (ex.: solicitou envio de material, pediu para ligar mais tarde sem fixar horário, reunião oferecida mas pendente de aceite, lead em análise interna).
+  * `"Sem interesse"`: Recusa clara e definitiva do lead, pediu para não ligar mais ou expressou desinteresse explícito.
+  * `"Não se aplica"`: Chamadas sem diálogo substantivo (URA eletrônica, ligação muda, queda, engano ou chamada não avaliável).
 - `responsavel`: SDR, Executivo do respectivo SDR  ou responsável nomeado (ou "Não se aplica").
 - `prazo`: data e horário combinados (ou "Não se aplica").
 - `dados_extras`: dados pendentes que ainda precisam ser validados (ou "Não se aplica").

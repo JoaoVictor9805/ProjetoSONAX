@@ -4,6 +4,7 @@ import unittest
 
 from app.services.analise_final_AI import (
     calcular_e_sanitizar_analise,
+    normalizar_acao_crm,
     _limpar_resposta_json,
 )
 
@@ -95,10 +96,11 @@ class TestAnaliseFinalAI(unittest.TestCase):
             self.assertIsNone(crit["nota_criterio"])
             self.assertTrue(crit["justificativa_criterio"].startswith("Não avaliável:"))
 
-        # Flags devem ser 'n'
+        # Flags devem ser 'n' e ação do CRM 'Não se aplica'
         self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
         self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "n")
         self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "n")
+        self.assertEqual(res["crm"]["acao"], "Não se aplica")
 
     def test_resumo_crm_limitado_a_80_palavras(self):
         texto_longo = " ".join(["palavra"] * 120)
@@ -163,6 +165,34 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["interlocutor"]["objecoes"], "Não se aplica")
         self.assertEqual(res["crm"]["responsavel"], "Não se aplica")
         self.assertEqual(res["crm"]["prazo"], "Não se aplica")
+
+    def test_normalizacao_acao_crm(self):
+        # 1. Reunião confirmada e variações
+        self.assertEqual(normalizar_acao_crm("Reunião confirmada"), "Reunião confirmada")
+        self.assertEqual(normalizar_acao_crm("Reunião confirmada (apresentação técnica)"), "Reunião confirmada")
+        self.assertEqual(normalizar_acao_crm("reuniao confirmada"), "Reunião confirmada")
+
+        # 2. Retorno com data combinada e variações
+        self.assertEqual(normalizar_acao_crm("Retorno com data combinada"), "Retorno com data combinada")
+        self.assertEqual(normalizar_acao_crm("Retorno com data combinado"), "Retorno com data combinada")
+        self.assertEqual(normalizar_acao_crm("Retorno agendado"), "Retorno com data combinada")
+
+        # 3. Recontatar (Follow-up) agregando termos legados e alucinações
+        self.assertEqual(normalizar_acao_crm("Recontatar (Follow-up)"), "Recontatar (Follow-up)")
+        self.assertEqual(normalizar_acao_crm("Nova Tentativa"), "Recontatar (Follow-up)")
+        self.assertEqual(normalizar_acao_crm("Reunião proposta sem aceite"), "Recontatar (Follow-up)")
+        self.assertEqual(normalizar_acao_crm("Sem próximo passo definido"), "Recontatar (Follow-up)")
+        self.assertEqual(normalizar_acao_crm("Envio de material solicitado"), "Recontatar (Follow-up)")
+        self.assertEqual(normalizar_acao_crm(None), "Recontatar (Follow-up)")
+
+        # 4. Sem interesse
+        self.assertEqual(normalizar_acao_crm("Sem interesse"), "Sem interesse")
+        self.assertEqual(normalizar_acao_crm("Sem interesse explícito"), "Sem interesse")
+        self.assertEqual(normalizar_acao_crm("Recusa explícita"), "Sem interesse")
+
+        # 5. Não se aplica
+        self.assertEqual(normalizar_acao_crm("Não se aplica"), "Não se aplica")
+        self.assertEqual(normalizar_acao_crm("qualquer_coisa", eh_nao_avaliavel=True), "Não se aplica")
 
 
 if __name__ == "__main__":
