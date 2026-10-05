@@ -81,22 +81,24 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
 3. Não deduza Lucro Real a partir de porte ou faturamento. Não deduza faturamento a partir do número de funcionários ou do setor.
 4. Se o faturamento anual confirmado corresponder a um período de 12 meses, apresente também a média mensal calculada e identifique-a como cálculo. Se o período ou o valor forem ambíguos, marque "não confirmado".
 5. "Pode me mandar um material", "vamos conversando" e expressões semelhantes NÃO são reunião agendada. Uma reunião só está confirmada se houver aceite claro e data e horário definidos ou compromisso inequívoco de agendamento registrado na ligação.
-6. **Determinação de Ligação Relevante (`ligacao_relevante: "s"` ou `"n"`) e Regra de Recepção / Transferência (Regra 6)**:
+6. **Determinação de Ligação Relevante (`ligacao_relevante: "s"` ou `"n"`) e Regras de Recepção / Transferência**:
    - **Marque como Relevante (`ligacao_relevante: "s"`)**:
-     * APENAS quando houver diálogo comercial substantivo entre o SDR e o interlocutor/decisor da empresa contatada, permitindo conduzir a abordagem e avaliar a qualidade técnica do SDR.
+     1. **Diálogo comercial com interlocutor do setor correto / decisor**:
+        * Sempre que o SDR dialogar com alguém da área de interesse (Diretoria, Financeiro, Fiscal, Contas a Pagar, Contabilidade, etc.).
+        * **IMPORTANTE - Ligações transferidas**: Se a chamada começou na recepção/secretária e **foi transferida** para o setor correto (ex.: Contas a Pagar, Fiscal), e houve diálogo com o atendente desse setor, a ligação É RELEVANTE (`ligacao_relevante: "s"`) e DEVE ser avaliada tecnicamente com notas (0 a 100), critérios SPIN e BANT.
+     2. **Chamada retida na recepção/secretária COM PRÓXIMO PASSO CONCRETO**:
+        * Se a chamada parou na secretária/recepção (não foi transferida para o decisor), mas a secretária agendou retorno ou solicitou envio de material:
+          - Marque como **RELEVANTE** (`ligacao_relevante: "s"`), pois representou um contato produtivo de prospecção com avanço concreto no CRM.
+          - Registre no CRM com `acao: "retorno com data combinado"` (com `prazo`, ex.: "amanhã às 14h") ou `acao: "envio de material solicitado"`, e marque `resultado: "Perfil pendente"`.
+          - **PROTEÇÃO DA MÉDIA DO POWER BI (NOTAS NULL)**: Como o SDR não chegou a conversar com o decisor sobre dores e regras fiscais, ele **NÃO deve receber pontuação técnica**: retorne estritamente `nota_final: null`, `nota_criterio: null` em todos os 6 critérios, `codigo_oportunidade: null` e no `feedback_geral` inicie com `"Não avaliável: [motivo]"`. O Power BI ignora nulos no cálculo da média (`AVERAGE`), mantendo os relatórios justos.
    - **Marque como Não Relevante (`ligacao_relevante: "n"`)**:
-     * Quando a ligação NÃO permitir avaliação técnica das habilidades comerciais do SDR com o decisor:
-       1. Chamadas que pararam na **recepção/secretária/triagem** sem alcançar o decisor.
-       2. Chamadas infrutíferas: caixa postal, URA eletrônica pura sem atendimento humano, queda instantânea antes de qualquer fala, engano ou recusa imediata e definitiva sem diálogo.
-   - **Aplicação Estrita da Regra 6 (Recepção com Próximo Passo vs Sem Próximo Passo)**:
-     * Em chamadas que pararam na secretária/recepção, o SDR **NÃO deve receber notas**: retorne `nota_final: null`, `nota_criterio: null` em todos os 6 critérios, `codigo_oportunidade: null`, `ligacao_relevante: "n"` e no `feedback_geral` inicie com `"Não avaliável: [motivo]"`.
-     * **PORÉM, preserve os avanços para o CRM e o status comercial**:
-       - Se a secretária combinou um retorno ("ligue amanhã às 14h") -> registre no CRM com `acao: "retorno com data combinado"`, preencha `prazo` (ex: "amanhã às 14h") e marque `resultado: "Perfil pendente"`.
-       - Se a secretária pediu envio de apresentação ("mande por e-mail para compras@...") -> registre no CRM com `acao: "envio de material solicitado"` e marque `resultado: "Perfil pendente"`.
-       - Se a secretária apenas informou indisponibilidade sem combinar próximo passo, ou se a ligação caiu/foi URA/recusa imediata -> registre no CRM com `acao: "Não se aplica"` e marque `resultado: "Dados insuficientes"`.
+     * Apenas chamadas infrutíferas sem qualquer perspectiva comercial ou diálogo:
+       1. URA eletrônica pura sem atendimento humano, ligação muda, queda instantânea antes de qualquer fala, ou engano.
+       2. Chamadas que pararam na recepção/secretária SEM próximo passo (apenas informou indisponibilidade sem retorno, ou recusa imediata e definitiva sem diálogo).
+     * Nesses casos: retorne `ligacao_relevante: "n"`, `nota_final: null`, `nota_criterio: null` em todos os critérios, `codigo_oportunidade: null`, `crm.acao: "Não se aplica"` e `resultado: "Dados insuficientes"`.
    - **Interlocutor e Cargo**:
      * Preencha `interlocutor` com o nome da pessoa identificada na ligação (ou "Não se aplica").
-     * Cargo: Preencha a função do contato APENAS se o atendente conseguiu dialogar com um perfil decisor ou influenciador que tenha relevância técnica ou estratégica para a negociação de créditos tributários (ex.: Sócio, Proprietário, Diretor, CEO, CFO, Controller, Gerente Fiscal/Tributário, Contador). Para secretária, recepcionista ou ligação sem contato com decisor, retorne estritamente `"Não se aplica"`.
+     * Cargo: Preencha a função do contato se o atendente conseguiu dialogar com um perfil decisor, influenciador ou operacional do setor relevante (ex.: Sócio, Proprietário, Diretor, CEO, CFO, Controller, Gerente Fiscal/Tributário, Contador, Analista Financeiro, Responsável Contas a Pagar). Para secretária, recepcionista ou ligação sem contato com o setor responsável, retorne estritamente `"Não se aplica"`.
 
 7. **Avaliação Parcial de Categorias e Critério de Penalização Justa**:
    - **Quando não for possível avaliar TODAS as categorias solicitadas**, avalie as que for possível e atribua uma nota geral (`nota_final`).
@@ -106,8 +108,8 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
    - Em cada critério, dê pontuação integral quando houver execução eficaz, parcial quando houver tentativa incompleta e zero quando houver oportunidade clara que não foi aproveitada.
    - Uma pergunta adequada que o prospect se recusou a responder pode receber crédito pela condução do SDR, mas o dado da empresa continua não confirmado. Explique esse caso no relatório.
 
-8. **Chamadas Não Avaliáveis (Regra de Integridade para o Power BI)**:
-   - Toda ligação sem avaliação substantiva do SDR (URA, queda ou conversa restrita à recepção) deve receber `nota_final: null`, `nota_criterio: null` em todos os critérios e `codigo_oportunidade: null`. NUNCA atribua nota zero (0) a chamadas não avaliáveis, pois no Power BI a média (AVERAGE) ignora valores nulos mas contabiliza o zero, distorcendo os relatórios de qualidade da equipe.
+8. **Chamadas Não Avaliáveis para o SDR (Regra de Integridade para o Power BI)**:
+   - Toda ligação sem diálogo técnico com o decisor/setor responsável (seja descarte puro como URA/queda, ou retida na recepção com agendamento de retorno) deve receber `nota_final: null`, `nota_criterio: null` em todos os critérios e `codigo_oportunidade: null`. NUNCA atribua nota zero (0) a essas chamadas, pois no Power BI a média (AVERAGE) ignora valores nulos mas contabiliza o zero, distorcendo os relatórios de qualidade da equipe.
 
 9. Se a empresa declarar que está fora do perfil, avalie se o SDR identificou isso corretamente e encerrou ou redirecionou a conversa de forma adequada. Não penalize o SDR por não insistir em uma empresa sem aderência.
 10. Não invente duração, proporção de fala, interrupções, sentimentos, objeções, promessas ou resultados. Calcule métricas de tempo apenas se a transcrição trouxer dados confiáveis.

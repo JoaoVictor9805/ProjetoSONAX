@@ -134,7 +134,7 @@ class AvaliacaoIAModel(BaseModel):
         description="Qualificação técnica da empresa: 'Perfil confirmado', 'Perfil pendente', 'Fora do perfil desta campanha' ou 'Dados insuficientes'"
     )
     ligacao_relevante: Literal["s", "n"] = Field(
-        description="'s' se a chamada teve conversa substantiva relevante, 'n' caso contrário"
+        description="'s' se a chamada teve conversa substantiva relevante ou próximo passo agendado, 'n' caso contrário"
     )
     reuniao_confirmada: Literal["s", "n"] = Field(
         description="'s' se reunião foi confirmada com aceite claro e data/horário, 'n' caso contrário"
@@ -764,7 +764,6 @@ def calcular_e_sanitizar_analise(
             if not just.lower().startswith("não avaliável"):
                 crit["justificativa_criterio"] = f"Não avaliável: {just}" if just else "Não avaliável: Sem contexto para este critério."
 
-        av_ia["ligacao_relevante"] = "n"
         av_ia["reuniao_confirmada"] = "n"
         av_ia["data_confirmada"] = "n"
 
@@ -884,23 +883,28 @@ def calcular_e_sanitizar_analise(
             perfil["faturamento_regra"] = "declarado_mensal" if fat_mensal else "nao_informado"
             perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem")) if fat_mensal else "não informado"
 
-    # 9. Coerção determinística estrita de status comercial (resultado)
+    # 9. Coerção determinística estrita de status comercial (resultado) e relevância
     raw_res = str(av_ia.get("resultado") or "").strip().lower()
     if eh_nao_avaliavel:
-        # Regra 6: Chamadas não avaliáveis para o SDR (ex.: recepção) que geraram próximo passo
-        # concreto mantêm status "Perfil pendente". Caso contrário, "Dados insuficientes".
-        if crm.get("acao") in (
+        # Chamadas não avaliáveis para o SDR (ex.: recepção) que geraram próximo passo
+        # concreto são marcadas como RELEVANTES ('s') para a prospecção e mantêm status comercial "Perfil pendente",
+        # mas com notas estritamente NULL para o Power BI.
+        tem_proximo_passo = crm.get("acao") in (
             "retorno com data combinado",
             "envio de material solicitado",
             "reunião proposta sem aceite",
             "reunião confirmada",
-        ):
+        )
+        if tem_proximo_passo:
+            av_ia["ligacao_relevante"] = "s"
             av_ia["resultado"] = "Perfil pendente"
             if crm.get("acao") == "reunião confirmada":
                 av_ia["reuniao_confirmada"] = "s"
         else:
+            av_ia["ligacao_relevante"] = "n"
             av_ia["resultado"] = "Dados insuficientes"
     else:
+        av_ia["ligacao_relevante"] = "s"
         # Se IA indicou reunião confirmada em qualquer campo, liga a flag reuniao_confirmada
         if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
             av_ia["reuniao_confirmada"] = "s"
