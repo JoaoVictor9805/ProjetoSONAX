@@ -31,9 +31,13 @@ CREATE TABLE IF NOT EXISTS empresa (
     telefone VARCHAR(20),
     setor VARCHAR(100),
     regime_tributario VARCHAR(50),
-    faturamento_mensal VARCHAR(100),
+    faturamento_mensal NUMERIC(15,2),
+    faturamento_anual NUMERIC(15,2),
     status_comercial VARCHAR(100),
-    fonte_dados TEXT
+    fonte_dados TEXT,
+    setor_origem VARCHAR(50),
+    regime_origem VARCHAR(50),
+    faturamento_origem VARCHAR(50)
 );
 
 CREATE INDEX IF NOT EXISTS empresa_telefone ON empresa(telefone);
@@ -161,6 +165,45 @@ CREATE TABLE IF NOT EXISTS crm (
     resumo TEXT,
    
     FOREIGN KEY (log) REFERENCES avaliacao_ia(log)
+);
+
+
+CREATE TABLE IF NOT EXISTS analise_perfil (
+    log VARCHAR(255) PRIMARY KEY NOT NULL,
+    setor VARCHAR(100),
+    setor_origem VARCHAR(50) NOT NULL CHECK (setor_origem IN (
+        'confirmado pelo interlocutor',
+        'afirmado apenas pelo SDR',
+        'inferência plausível',
+        'não informado'
+    )),
+    regime_tributario VARCHAR(50),
+    regime_origem VARCHAR(50) NOT NULL CHECK (regime_origem IN (
+        'confirmado pelo interlocutor',
+        'afirmado apenas pelo SDR',
+        'inferência plausível',
+        'não informado'
+    )),
+    faturamento_declarado_texto TEXT,
+    faturamento_anual NUMERIC(15,2),
+    faturamento_mensal NUMERIC(15,2),
+    periodo_meses INT,
+    faturamento_origem VARCHAR(50) NOT NULL CHECK (faturamento_origem IN (
+        'confirmado pelo interlocutor',
+        'afirmado apenas pelo SDR',
+        'inferência plausível',
+        'não informado',
+        'calculado'
+    )),
+    faturamento_regra VARCHAR(50) NOT NULL CHECK (faturamento_regra IN (
+        'declarado_mensal',
+        'calculado_12_meses',
+        'nao_confirmado',
+        'nao_informado'
+    )),
+    detalhes_faturamento TEXT,
+   
+    FOREIGN KEY (log) REFERENCES avaliacao_ia(log) ON DELETE CASCADE
 );
 
 
