@@ -293,6 +293,44 @@ class TestChamadasDao(unittest.TestCase):
         self.assertFalse(any("regime_tributario =" in q for q in update_empresa_queries))
         self.assertFalse(any("status_comercial =" in q for q in update_empresa_queries))
 
+    def test_hierarquia_status_comercial_impede_regressao_perfil_confirmado_para_dados_insuficientes(self):
+        cur = MagicMock()
+        # Empresa existente no banco já com status forte "Perfil confirmado" (peso 3)
+        cur.fetchone.side_effect = [
+            ("audio.wav",),       # avaliacao_ia
+            ("audio.wav",),       # avaliacao_sdr
+            ("confirmado pelo interlocutor", "confirmado pelo interlocutor", "confirmado pelo interlocutor", "Perfil confirmado"), # select empresa existente
+        ]
+
+        # Nova chamada associada à mesma empresa é uma chamada não avaliável (queda/muda) com Dados insuficientes
+        dados_analise_fraca = {
+            "avaliacao_ia": {
+                "empresa_contatada": 10,
+                "resultado": "Dados insuficientes",  # Tentativa de regredir de peso 3 para peso 1!
+                "ligacao_relevante": "n",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "resultado_frase": "Chamada muda.",
+            },
+            "analise_perfil": {
+                "setor": "não informado",
+                "setor_origem": "não informado",
+                "regime_tributario": "Não se aplica",
+                "regime_origem": "não informado",
+                "faturamento_mensal": None,
+                "faturamento_origem": "não informado",
+            },
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Não avaliável: Queda imediata."},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Não se aplica"},
+        }
+
+        inserir_analise(cur, "audio_mudo.wav", dados_analise_fraca)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
+        # Garante categoricamente que o UPDATE empresa NÃO contém status_comercial regredindo para Dados insuficientes
+        self.assertFalse(any("status_comercial =" in q for q in update_empresa_queries))
+
     def test_sincronizacao_empresa_atualiza_status_quando_peso_maior(self):
         cur = MagicMock()
         # Empresa existente com status fraco "Dados insuficientes" (peso 1)

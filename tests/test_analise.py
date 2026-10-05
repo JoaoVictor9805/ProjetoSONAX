@@ -561,6 +561,25 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["avaliacao_sdr"]["nota_final"], 75)
         self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
 
+        # Boundary test: palavra "ura" isolada (ex: "caiu na URA") DEVE disparar URA quando notas zeradas/ausentes
+        dados_ura = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "s",
+                "resultado_frase": "Caiu na URA eletrônica.",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 0,
+                "feedback_geral": "Chamada caiu na URA eletrônica sem atendimento humano.",
+            },
+            "avaliacao_criterio": [],
+            "crm": {"acao": "Não se aplica"},
+        }
+        res_ura = calcular_e_sanitizar_analise(dados_ura)
+        self.assertIsNone(res_ura["avaliacao_sdr"]["nota_final"])
+        self.assertEqual(res_ura["avaliacao_ia"]["ligacao_relevante"], "n")
+        self.assertEqual(res_ura["avaliacao_ia"]["resultado"], "Dados insuficientes")
+
     def test_sobrescrita_incondicional_metadados_sistema(self):
         dados = {
             "avaliacao_ia": {
@@ -598,6 +617,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
     def test_teto_por_criterio_respeita_max_pontos(self):
         # Cada critério oficial possui um teto específico que não pode ser ultrapassado:
         # ABERTURA: 10, SPIN: 30, PERFIL: 25, BANT: 15, ESCUTA: 10, PROX_PASSO: 10
+        # Exemplo específico: nota 20 em abertura vira 10
         dados = {
             "avaliacao_ia": {
                 "resultado": "Perfil confirmado",
@@ -611,12 +631,12 @@ class TestAnaliseFinalAI(unittest.TestCase):
                 "codigo_oportunidade": "OP_SPIN_01",
             },
             "avaliacao_criterio": [
-                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 30, "justificativa_criterio": "Ok"},
-                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 50, "justificativa_criterio": "Ok"},
-                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 30, "justificativa_criterio": "Ok"},
-                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 25, "justificativa_criterio": "Ok"},
-                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 20, "justificativa_criterio": "Ok"},
-                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 15, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 20, "justificativa_criterio": "Ok"}, # Nota 20 vira 10
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 50, "justificativa_criterio": "Ok"},         # Nota 50 vira 30
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 30, "justificativa_criterio": "Ok"},     # Nota 30 vira 25
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 25, "justificativa_criterio": "Ok"},         # Nota 25 vira 15
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 20, "justificativa_criterio": "Ok"},     # Nota 20 vira 10
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 15, "justificativa_criterio": "Ok"}, # Nota 15 vira 10
             ],
             "crm": {"resumo": "Ok"}
         }
@@ -624,7 +644,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res = calcular_e_sanitizar_analise(dados)
 
         criterios_dict = {c["codigo_criterio"]: c["nota_criterio"] for c in res["avaliacao_criterio"]}
-        self.assertEqual(criterios_dict["CRIT_ABERTURA"], 10)   # Limitado a max 10
+        self.assertEqual(criterios_dict["CRIT_ABERTURA"], 10)   # Nota 20 limitada a max 10
         self.assertEqual(criterios_dict["CRIT_SPIN"], 30)       # Limitado a max 30
         self.assertEqual(criterios_dict["CRIT_PERFIL"], 25)     # Limitado a max 25
         self.assertEqual(criterios_dict["CRIT_BANT"], 15)       # Limitado a max 15
@@ -673,6 +693,39 @@ class TestAnaliseFinalAI(unittest.TestCase):
 
         # Soma total: 8 + 20 = 28
         self.assertEqual(res["avaliacao_sdr"]["nota_final"], 28)
+
+    def test_bant_normalizado(self):
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Boa condução."},
+            "avaliacao_criterio": [],
+            "analise_bant": {
+                "budget_classificacao": "Confirmado",      # Variação com maiúscula -> confirmado
+                "budget_evidencia": "  ",                  # String vazia/espaços -> Não se aplica
+                "authority_classificacao": "indicio",      # Sem acento -> indício
+                "authority_evidencia": None,               # None -> Não se aplica
+                "need_classificacao": "não",               # Sinônimo negativo -> negado
+                "need_evidencia": "Prospect afirmou não ter dores fiscais.",
+                "timeline_classificacao": "n/a",           # Sem valor -> não informado
+                "timeline_evidencia": "não houve",         # Informal -> Não se aplica
+            },
+            "crm": {"resumo": "Ok"},
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+        bant = res["analise_bant"]
+
+        self.assertEqual(bant["budget_classificacao"], "confirmado")
+        self.assertEqual(bant["budget_evidencia"], "Não se aplica")
+        self.assertEqual(bant["authority_classificacao"], "indício")
+        self.assertEqual(bant["authority_evidencia"], "Não se aplica")
+        self.assertEqual(bant["need_classificacao"], "negado")
+        self.assertEqual(bant["need_evidencia"], "Prospect afirmou não ter dores fiscais.")
+        self.assertEqual(bant["timeline_classificacao"], "não informado")
+        self.assertEqual(bant["timeline_evidencia"], "Não se aplica")
 
 
 if __name__ == "__main__":
