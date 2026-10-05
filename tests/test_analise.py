@@ -106,6 +106,42 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "n")
         self.assertEqual(res["crm"]["acao"], "Não se aplica")
 
+    def test_ligacao_nao_relevante_forca_notas_null_para_power_bi(self):
+        # Toda ligação não relevante (ligacao_relevante = 'n') deve ter notas estritamente NULL
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "resultado_frase": "Sem diálogo substantivo.",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 0,
+                "feedback_geral": "Chamada curta sem atendimento.",
+                "codigo_oportunidade": "OP_DIR_03",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 0, "justificativa_criterio": "Sem diálogo."},
+            ],
+            "crm": {"resumo": "Não se aplica"}
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertIsNone(res["avaliacao_sdr"]["codigo_oportunidade"])
+        self.assertTrue(res["avaliacao_sdr"]["feedback_geral"].startswith("Não avaliável:"))
+        for crit in res["avaliacao_criterio"]:
+            self.assertIsNone(crit["nota_criterio"])
+            self.assertTrue(crit["justificativa_criterio"].startswith("Não avaliável:"))
+        self.assertEqual(res["crm"]["acao"], "Não se aplica")
+
     def test_resumo_crm_limitado_a_80_palavras(self):
         texto_longo = " ".join(["palavra"] * 120)
         dados = {

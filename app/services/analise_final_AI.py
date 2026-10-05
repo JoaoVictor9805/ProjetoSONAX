@@ -705,10 +705,12 @@ def calcular_e_sanitizar_analise(
         c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
     ]
 
-    # Detecção de URA ou chamadas não avaliáveis (apenas quando não há pontuação positiva válida)
+    # Detecção de chamadas não avaliáveis / não relevantes
+    # Toda ligação não relevante (ligacao_relevante = 'n') tem notas estritamente NULL para o Power BI
     tem_pontos_positivos = any(n > 0 for n in notas_validas)
     eh_nao_avaliavel = (
-        feedback.lower().startswith("não avaliável")
+        av_ia.get("ligacao_relevante") == "n"
+        or feedback.lower().startswith("não avaliável")
         or feedback.lower().startswith("nao avaliavel")
         or (not tem_pontos_positivos and (
             "não avaliável" in feedback.lower()
