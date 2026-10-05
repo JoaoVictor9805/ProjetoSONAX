@@ -220,14 +220,29 @@ class AnaliseSpinModel(BaseModel):
     lacunas: str | None = Field(default=None, description="O que o SDR deixou de aprofundar na descoberta SPIN")
 
 
+CLASSIFICACAO_BANT = Literal["confirmado", "indício", "não informado", "negado"]
+
+
 class AnaliseBantModel(BaseModel):
-    budget_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    budget_classificacao: CLASSIFICACAO_BANT = Field(
+        default="não informado",
+        description="Classificação: 'confirmado', 'indício', 'não informado' ou 'negado'",
+    )
     budget_evidencia: str | None = Field(default=None, description="Evidência curta sobre orçamento")
-    authority_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    authority_classificacao: CLASSIFICACAO_BANT = Field(
+        default="não informado",
+        description="Classificação: 'confirmado', 'indício', 'não informado' ou 'negado'",
+    )
     authority_evidencia: str | None = Field(default=None, description="Evidência curta sobre autoridade")
-    need_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    need_classificacao: CLASSIFICACAO_BANT = Field(
+        default="não informado",
+        description="Classificação: 'confirmado', 'indício', 'não informado' ou 'negado'",
+    )
     need_evidencia: str | None = Field(default=None, description="Evidência curta sobre necessidade")
-    timeline_classificacao: str = Field(description="confirmado, indício, não informado ou negado")
+    timeline_classificacao: CLASSIFICACAO_BANT = Field(
+        default="não informado",
+        description="Classificação: 'confirmado', 'indício', 'não informado' ou 'negado'",
+    )
     timeline_evidencia: str | None = Field(default=None, description="Evidência curta sobre prazos")
 
 
@@ -669,6 +684,28 @@ def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
     return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
 
 
+def normalizar_classificacao_bant(val: Any) -> str:
+    """
+    Normaliza a classificação das dimensões BANT:
+    - 'confirmado'
+    - 'indício'
+    - 'não informado'
+    - 'negado'
+    """
+    if val is None:
+        return "não informado"
+    val_str = str(val).strip().lower().rstrip(".").strip()
+    if val_str in ("confirmado", "confirmada", "sim", "positivo", "confirma"):
+        return "confirmado"
+    if val_str in ("indício", "indicio", "indícios", "indicios", "provável", "provavel", "indicio forte", "indício forte"):
+        return "indício"
+    if val_str in ("negado", "negada", "não", "nao", "rejeitado", "sem necessidade"):
+        return "negado"
+    if val_str in ("não informado", "nao informado", "não se aplica", "nao se aplica", "n/a", "none", "null", "indefinido", ""):
+        return "não informado"
+    return "não informado"
+
+
 def calcular_e_sanitizar_analise(
     resultado: dict[str, Any],
     *,
@@ -807,6 +844,8 @@ def calcular_e_sanitizar_analise(
 
     # 5. Padronização de campos em analise_bant
     bant = resultado.setdefault("analise_bant", {})
+    for k_cls in ("budget_classificacao", "authority_classificacao", "need_classificacao", "timeline_classificacao"):
+        bant[k_cls] = normalizar_classificacao_bant(bant.get(k_cls))
     for k in ("budget_evidencia", "authority_evidencia", "need_evidencia", "timeline_evidencia"):
         bant[k] = normalizar_texto_nao_se_aplica(bant.get(k))
 
