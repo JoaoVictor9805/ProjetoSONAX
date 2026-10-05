@@ -26,7 +26,11 @@ END $$;
 -- 2. Criar tabela analise_perfil (vinculada a avaliacao_ia pelo log)
 CREATE TABLE IF NOT EXISTS analise_perfil (
     log VARCHAR(255) PRIMARY KEY NOT NULL,
-    setor VARCHAR(100),
+    setor VARCHAR(50) CHECK (setor IS NULL OR setor IN (
+        'industrial',
+        'outro confirmado',
+        'não informado'
+    )),
     setor_origem VARCHAR(50) NOT NULL CHECK (setor_origem IN (
         'confirmado pelo interlocutor',
         'afirmado apenas pelo SDR',

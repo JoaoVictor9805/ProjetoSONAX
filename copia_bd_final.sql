@@ -158,7 +158,15 @@ CREATE TABLE IF NOT EXISTS interlocutor (
 
 CREATE TABLE IF NOT EXISTS crm (
     log VARCHAR(255) PRIMARY KEY NOT null,
-    acao VARCHAR(255),
+    acao VARCHAR(100) CHECK (acao IS NULL OR acao IN (
+        'reunião confirmada',
+        'reunião proposta sem aceite',
+        'retorno com data combinado',
+        'envio de material solicitado',
+        'sem próximo passo definido',
+        'sem interesse explícito',
+        'Não se aplica'
+    )),
     responsavel VARCHAR(100),
     prazo VARCHAR(100),
     dados_extras TEXT,
@@ -170,7 +178,11 @@ CREATE TABLE IF NOT EXISTS crm (
 
 CREATE TABLE IF NOT EXISTS analise_perfil (
     log VARCHAR(255) PRIMARY KEY NOT NULL,
-    setor VARCHAR(100),
+    setor VARCHAR(50) CHECK (setor IS NULL OR setor IN (
+        'industrial',
+        'outro confirmado',
+        'não informado'
+    )),
     setor_origem VARCHAR(50) NOT NULL CHECK (setor_origem IN (
         'confirmado pelo interlocutor',
         'afirmado apenas pelo SDR',
