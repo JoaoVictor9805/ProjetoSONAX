@@ -89,6 +89,12 @@ RESULTADOS_STATUS_COMERCIAL_VALIDOS = (
     "Dados insuficientes",
 )
 
+SETORES_VALIDOS = (
+    "industrial",
+    "outro confirmado",
+    "não informado",
+)
+
 ORIGENS_DADOS_PERFIL_VALIDAS = (
     "confirmado pelo interlocutor",
     "afirmado apenas pelo SDR",
@@ -142,7 +148,14 @@ class AvaliacaoIAModel(BaseModel):
 
 
 class AnalisePerfilModel(BaseModel):
-    setor: str | None = Field(default=None, description="Setor de atuação da empresa ou 'Não informado'")
+    setor: Literal[
+        "industrial",
+        "outro confirmado",
+        "não informado",
+    ] | None = Field(
+        default="não informado",
+        description="Setor da empresa contatada: 'industrial', 'outro confirmado' ou 'não informado'",
+    )
     setor_origem: Literal[
         "confirmado pelo interlocutor",
         "afirmado apenas pelo SDR",
@@ -261,27 +274,33 @@ class InterlocutorModel(BaseModel):
     reacao_interlocutor: str | None = Field(default=None, description="Reação final do lead")
 
 
-ACAO_CRM_VALIDAS = (
-    "Reunião confirmada",
-    "Retorno com data combinada",
-    "Recontatar (Follow-up)",
-    "Sem interesse",
+ACOES_CRM_VALIDAS = (
+    "reunião confirmada",
+    "reunião proposta sem aceite",
+    "retorno com data combinado",
+    "envio de material solicitado",
+    "sem próximo passo definido",
+    "sem interesse explícito",
     "Não se aplica",
 )
+ACAO_CRM_VALIDAS = ACOES_CRM_VALIDAS
 
 
 class CrmModel(BaseModel):
     acao: Literal[
-        "Reunião confirmada",
-        "Retorno com data combinada",
-        "Recontatar (Follow-up)",
-        "Sem interesse",
+        "reunião confirmada",
+        "reunião proposta sem aceite",
+        "retorno com data combinado",
+        "envio de material solicitado",
+        "sem próximo passo definido",
+        "sem interesse explícito",
         "Não se aplica",
     ] | None = Field(
         default=None,
         description=(
-            "Avanço comercial concreto padronizado: 'Reunião confirmada', 'Retorno com data combinada', "
-            "'Recontatar (Follow-up)', 'Sem interesse' ou 'Não se aplica'"
+            "Classificação do avanço comercial: 'reunião confirmada', 'reunião proposta sem aceite', "
+            "'retorno com data combinado', 'envio de material solicitado', "
+            "'sem próximo passo definido', 'sem interesse explícito' ou 'Não se aplica'"
         ),
     )
     responsavel: str | None = Field(default=None, description="Responsável pelo próximo passo")
@@ -492,36 +511,155 @@ def normalizar_resultado_status_comercial(resultado: Any, eh_nao_avaliavel: bool
     return "Perfil pendente"
 
 
+def normalizar_setor(setor: Any, eh_nao_avaliavel: bool = False) -> str:
+    """
+    Normaliza o setor da empresa contatada estritamente para um dos 3 valores permitidos:
+    - 'industrial'
+    - 'outro confirmado'
+    - 'não informado'
+    """
+    if eh_nao_avaliavel or setor is None:
+        return "não informado"
+    val = str(setor).strip()
+    if not val:
+        return "não informado"
+
+    val_norm = val.lower().rstrip(".").strip()
+
+    termos_ausencia = {
+        "não informado", "nao informado",
+        "não se aplica", "nao se aplica",
+        "não identificado", "nao identificado",
+        "desconhecido", "indefinido",
+        "nenhum", "nenhuma",
+        "n/a", "null", "none",
+        "sem informação", "sem informacao",
+        "sem dados", "sem dado",
+    }
+    if val_norm in termos_ausencia or val_norm.startswith("não informado") or val_norm.startswith("nao informado"):
+        return "não informado"
+
+    termos_industriais = (
+        "industr", "indústr",
+        "metalúrg", "metalurg",
+        "fábric", "fabric",
+        "usinag",
+        "manufatur",
+        "químic", "quimic",
+        "siderúrg", "siderurg",
+        "caldeir",
+        "autopeç", "autopec",
+        "alimento", "alimentíc", "alimentic",
+        "têxtil", "textil",
+        "plástic", "plastic",
+        "fundiç", "fundic",
+        "embalag",
+        "montadora",
+        "automot",
+        "farmacêut", "farmaceut",
+    )
+    if any(termo in val_norm for termo in termos_industriais):
+        return "industrial"
+
+    if val_norm == "industrial":
+        return "industrial"
+
+    if val_norm in ("outro confirmado", "outro"):
+        return "outro confirmado"
+
+    return "outro confirmado"
+
+
 def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
-    """Normaliza o campo acao do CRM para uma das 5 categorias padrão."""
+    """
+    Normaliza deterministicamente a classificação do avanço comercial (CRM):
+    - 'reunião confirmada'
+    - 'reunião proposta sem aceite'
+    - 'retorno com data combinado' (nova ligação agendada para conversar sobre marcar a reunião)
+    - 'envio de material solicitado'
+    - 'sem próximo passo definido'
+    - 'sem interesse explícito'
+    - 'Não se aplica' (chamadas sem diálogo substantivo / não avaliáveis)
+    """
     if eh_nao_avaliavel:
         return "Não se aplica"
     if acao is None:
-        return "Recontatar (Follow-up)"
+        return "sem próximo passo definido"
     val = str(acao).strip()
     if not val:
-        return "Recontatar (Follow-up)"
+        return "sem próximo passo definido"
     val_norm = val.lower().rstrip(".").strip()
 
     if val_norm in ("não se aplica", "nao se aplica", "n/a", "none", "null"):
         return "Não se aplica"
-    if "reunião confirmada" in val_norm or "reuniao confirmada" in val_norm:
-        return "Reunião confirmada"
-    if "retorno" in val_norm and any(k in val_norm for k in ("data", "agendad", "combinad", "marcad")):
-        return "Retorno com data combinada"
-    if any(k in val_norm for k in ("sem interesse", "recusa", "descartad", "não tem interesse", "nao tem interesse")):
-        return "Sem interesse"
+
+    # 1. Reunião confirmada
     if any(k in val_norm for k in (
-        "recontatar", "follow-up", "follow up", "followup",
-        "nova tentativa", "proposta sem aceite", "sem próximo passo",
-        "sem proximo passo", "envio de material", "material", "pendente"
+        "reunião confirmada", "reuniao confirmada",
+        "reunião agendada", "reuniao agendada",
+        "agendou reunião", "agendou reuniao",
+        "confirmou reunião", "confirmou reuniao",
+        "reuniao marcada", "reunião marcada",
     )):
-        return "Recontatar (Follow-up)"
+        return "reunião confirmada"
 
-    if val in ACAO_CRM_VALIDAS:
-        return val
+    # 2. Reunião proposta sem aceite
+    if any(k in val_norm for k in (
+        "reunião proposta", "reuniao proposta",
+        "proposta sem aceite",
+        "proposta de reunião", "proposta de reuniao",
+        "reunião oferecida", "reuniao oferecida",
+        "aguardando aceite", "sem aceite",
+    )):
+        return "reunião proposta sem aceite"
 
-    return "Recontatar (Follow-up)"
+    # 3. Retorno com data combinado (entendido como nova ligação para conversar sobre marcar a reunião)
+    if any(k in val_norm for k in (
+        "retorno com data", "retorno agendado", "retorno marcado",
+        "retornar com data", "ligar com data", "retorno combinado",
+        "nova ligação", "nova ligacao", "ligar dia", "retornar dia",
+        "ligar na ", "retornar na ", "ligar amanhã", "ligar amanha",
+    )):
+        return "retorno com data combinado"
+    if any(r in val_norm for r in ("retorno", "retornar", "ligar", "ligação", "ligacao")) and any(k in val_norm for k in ("data", "agendad", "combinad", "marcad", "hora", "horário", "horario", "dia")):
+        return "retorno com data combinado"
+
+    # 4. Envio de material solicitado
+    if any(k in val_norm for k in (
+        "envio de material", "enviar material", "material solicitado", "material",
+        "apresentação", "apresentacao", "institucional",
+        "enviar email", "enviar e-mail", "manda por email", "manda por e-mail",
+        "mande por email", "mande por e-mail",
+        "material por email", "material por e-mail",
+    )):
+        return "envio de material solicitado"
+
+    # 5. Sem interesse explícito
+    if any(k in val_norm for k in (
+        "sem interesse", "desinteresse", "recusa",
+        "não tem interesse", "nao tem interesse",
+        "sem interesse explícito", "sem interesse explicito",
+        "pediu para não ligar", "pediu para nao ligar",
+        "descartad", "recusou contato",
+    )):
+        return "sem interesse explícito"
+
+    # 6. Sem próximo passo definido
+    if any(k in val_norm for k in (
+        "sem próximo passo", "sem proximo passo",
+        "indefinido", "em aberto",
+        "recontatar", "follow-up", "follow up", "followup",
+        "nova tentativa", "sem compromisso", "sem avanço", "sem avanco",
+        "pendente", "a definir",
+    )):
+        return "sem próximo passo definido"
+
+    # Checagem exata em ACOES_CRM_VALIDAS
+    for acao_valida in ACOES_CRM_VALIDAS:
+        if val_norm == acao_valida.lower():
+            return acao_valida
+
+    return "sem próximo passo definido"
 
 
 def calcular_e_sanitizar_analise(
@@ -662,7 +800,7 @@ def calcular_e_sanitizar_analise(
     # 8. Análise de Perfil e Cálculo Determinístico de Faturamento
     perfil = resultado.setdefault("analise_perfil", {})
     if eh_nao_avaliavel:
-        perfil["setor"] = "Não se aplica"
+        perfil["setor"] = "não informado"
         perfil["setor_origem"] = "não informado"
         perfil["regime_tributario"] = "Não se aplica"
         perfil["regime_origem"] = "não informado"
@@ -674,7 +812,7 @@ def calcular_e_sanitizar_analise(
         perfil["faturamento_regra"] = "nao_informado"
         perfil["detalhes_faturamento"] = "Não se aplica"
     else:
-        perfil["setor"] = normalizar_texto_nao_se_aplica(perfil.get("setor"))
+        perfil["setor"] = normalizar_setor(perfil.get("setor"), eh_nao_avaliavel=False)
         perfil["setor_origem"] = normalizar_origem_dado(perfil.get("setor_origem"), eh_nao_avaliavel=False)
         perfil["regime_origem"] = normalizar_origem_dado(perfil.get("regime_origem"), eh_nao_avaliavel=False)
         perfil["regime_tributario"] = normalizar_texto_nao_se_aplica(perfil.get("regime_tributario"))
@@ -719,7 +857,7 @@ def calcular_e_sanitizar_analise(
         av_ia["resultado"] = "Dados insuficientes"
     else:
         # Se IA indicou reunião confirmada em qualquer campo, liga a flag reuniao_confirmada
-        if any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
+        if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
             av_ia["reuniao_confirmada"] = "s"
 
         regime_str = str(perfil.get("regime_tributario") or "").strip().lower()

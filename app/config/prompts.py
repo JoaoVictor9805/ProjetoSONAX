@@ -133,7 +133,10 @@ Extraia a qualificação do perfil comercial identificando com rigor a confiabil
   * `"inferência plausível"`: Suposição baseada em contexto ou porte da empresa, mas sem validação explícita na chamada.
   * `"não informado"`: O assunto não foi abordado ou não houve dados mínimos.
   * *(Apenas para `faturamento_origem`)*: `"calculado"`: Quando a média mensal for calculada a partir de faturamento anual de 12 meses informado.
-- **Setor (`setor`)**: Indústria (segmento preferencial), ou nome do setor específico (ex.: Transporte, Comércio, Serviços), ou "Não informado".
+- **Setor (`setor`)**: Selecione ESTRITAMENTE um dos 3 valores abaixo:
+  * `"industrial"`: empresa pertencente ao segmento industrial (fabricação, manufatura, usinagem, metalúrgica, química, alimentos, etc. - segmento preferencial da campanha).
+  * `"outro confirmado"`: empresa pertencente a outro setor econômico confirmado na chamada (ex.: transporte, comércio, serviços, agronegócio), sem descartá-la automaticamente caso cumpra os demais requisitos de regime e faturamento.
+  * `"não informado"`: quando o setor da empresa não for mencionado, for ambíguo ou não puder ser identificado com segurança.
 - **Regime Tributário (`regime_tributario`)**: "Lucro Real", "Lucro Presumido", "Simples Nacional", outro regime específico, ou "Não informado".
 - **Faturamento**:
   * `faturamento_declarado_texto`: Citação exata do que foi dito sobre faturamento na chamada (ou "Não se aplica").
@@ -228,12 +231,14 @@ Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que mel
 Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_interlocutor`. Use SEMPRE "Não se aplica" quando não ocorrer.
 
 #### 8. Próximo Passo e CRM (`crm`)
-- `acao`: Selecione ESTRITAMENTE uma das 5 opções padronizadas abaixo:
-  * `"Reunião confirmada"`: Reunião técnica com consultor/especialista tributário agendada com aceite inequívoco e data/horário definidos.
-  * `"Retorno com data combinada"`: Não agendou reunião, mas houve compromisso com dia e horário exatos combinados para o SDR retornar a ligação.
-  * `"Recontatar (Follow-up)"`: Contato positivo ou neutro, mas SEM data/horário fixos para retorno (ex.: solicitou envio de material, pediu para ligar mais tarde sem fixar horário, reunião oferecida mas pendente de aceite, lead em análise interna).
-  * `"Sem interesse"`: Recusa clara e definitiva do lead, pediu para não ligar mais ou expressou desinteresse explícito.
-  * `"Não se aplica"`: Chamadas sem diálogo substantivo (URA eletrônica, ligação muda, queda, engano ou chamada não avaliável).
+- `acao`: Classifique o avanço comercial ESTRITAMENTE em uma das opções padronizadas abaixo:
+  * `"reunião confirmada"`: Reunião técnica com consultor/especialista tributário agendada com aceite inequívoco e compromisso de data/horário definidos.
+  * `"reunião proposta sem aceite"`: O SDR propôs formalmente a reunião, mas o prospect não confirmou/não aceitou no momento (ex.: ficou de verificar agenda, pediu tempo para avaliar internamente sem marcar data).
+  * `"retorno com data combinado"`: Não houve reunião agendada, mas foi combinada uma nova ligação em dia e horário definidos especificamente para conversar sobre o agendamento da reunião ou dar andamento.
+  * `"envio de material solicitado"`: O prospect solicitou envio de apresentação ou material explicativo antes de qualquer tomada de decisão.
+  * `"sem próximo passo definido"`: A conversa ocorreu substantivamente, mas não houve definição de compromisso, data de retorno agendada ou envio formal acordado.
+  * `"sem interesse explícito"`: Recusa clara e expressa do interlocutor em avançar ou ouvir a proposta comercial (ou pediu para não ligar mais).
+  * `"Não se aplica"`: Chamadas sem diálogo substantivo (apenas URA eletrônica, ligação muda, queda, engano ou chamada não avaliável).
 - `responsavel`: SDR, Executivo do respectivo SDR  ou responsável nomeado (ou "Não se aplica").
 - `prazo`: data e horário combinados (ou "Não se aplica").
 - `dados_extras`: dados pendentes que ainda precisam ser validados (ou "Não se aplica").
@@ -264,7 +269,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "resultado_frase": "O SDR validou o regime de Lucro Real e o faturamento, agendando uma reunião de apresentação técnica para a próxima terça-feira."
   },
   "analise_perfil": {
-    "setor": "Indústria Metalúrgica",
+    "setor": "industrial",
     "setor_origem": "confirmado pelo interlocutor",
     "regime_tributario": "Lucro Real",
     "regime_origem": "confirmado pelo interlocutor",
@@ -348,7 +353,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "reacao_interlocutor": "..."
   },
   "crm": {
-    "acao": "...",
+    "acao": "reunião confirmada",
     "responsavel": "...",
     "prazo": "...",
     "dados_extras": "...",
