@@ -357,68 +357,9 @@ def verificar_tabela_analise(
     return resultado is not None
 
 
-_SCHEMA_AVALIACAO_GARANTIDO = False
-
-
-def garantir_schema_avaliacao(cur: psycopg.Cursor) -> None:
-    """Garante que as colunas das avaliações permitam NULL e que as tabelas de dimensões estejam populadas."""
-    global _SCHEMA_AVALIACAO_GARANTIDO
-    if _SCHEMA_AVALIACAO_GARANTIDO:
-        return
-    try:
-        cur.execute(
-            """
-            ALTER TABLE avaliacao_sdr ALTER COLUMN nota_final DROP NOT NULL;
-            ALTER TABLE avaliacao_sdr ALTER COLUMN codigo_oportunidade DROP NOT NULL;
-            ALTER TABLE avaliacao_criterio ALTER COLUMN nota_criterio DROP NOT NULL;
-
-            INSERT INTO dim_criterio_avaliacao (codigo, descricao) VALUES
-            ('CRIT_ABERTURA', 'Abertura clara, motivo do contato e relevância para o interlocutor'),
-            ('CRIT_SPIN', 'Descoberta SPIN: Situação, Problema, Implicação, Necessidade de solução'),
-            ('CRIT_PERFIL', 'Investigação adequada do perfil: setor, regime tributário, faturamento'),
-            ('CRIT_BANT', 'Investigação BANT: viabilidade comercial, autoridade, necessidade, prazo'),
-            ('CRIT_ESCUTA', 'Escuta, aprofundamento e tratamento respeitoso de dúvidas ou objeções'),
-            ('CRIT_PROX_PASSO', 'Proposta de próximo passo pertinente e tentativa de obter compromisso claro')
-            ON CONFLICT (codigo) DO NOTHING;
-
-            INSERT INTO dim_oportunidade_treinamento (codigo, fase_venda, descricao) VALUES
-            ('OP_ABERT_01', '1. Abertura e Relevância', 'Apresentar-se e situar a empresa com objetividade'),
-            ('OP_ABERT_02', '1. Abertura e Relevância', 'Utilizar a oportunidade de crédito mapeada como gancho'),
-            ('OP_ABERT_03', '1. Abertura e Relevância', 'Expor o benefício da oportunidade sem sobrecarga técnica'),
-            ('OP_ABERT_04', '1. Abertura e Relevância', 'Confirmar o alinhamento com o interlocutor antes de aprofundar'),
-            ('OP_ABERT_05', '1. Abertura e Relevância', 'Direcionar o contato para o responsável fiscal, tributário ou financeiro'),
-            ('OP_ABERT_06', '1. Abertura e Relevância', 'Evitar promessas de valores ou garantia de créditos'),
-            ('OP_SPIN_01', '2. Descoberta SPIN', 'Mapear o cenário inicial com perguntas rápidas e indispensáveis'),
-            ('OP_SPIN_02', '2. Descoberta SPIN', 'Mapear atritos fiscais ou lacunas na rotina da empresa'),
-            ('OP_SPIN_03', '2. Descoberta SPIN', 'Destacar implicações simples e tangíveis (como a prescrição de créditos)'),
-            ('OP_SPIN_04', '2. Descoberta SPIN', 'Conectar a solução à dor e checar a viabilidade de avanço'),
-            ('OP_SPIN_05', '2. Descoberta SPIN', 'Diferenciar dor reconhecida pelo lead de argumentos do SDR'),
-            ('OP_PERF_01', '3. Investigação de Perfil Técnico', 'Investigar o regime tributário da empresa'),
-            ('OP_PERF_02', '3. Investigação de Perfil Técnico', 'Confirmar o faturamento mínimo'),
-            ('OP_PERF_03', '3. Investigação de Perfil Técnico', 'Mapear o segmento de atuação'),
-            ('OP_PERF_04', '3. Investigação de Perfil Técnico', 'Garantir a confirmação ativa dos dados'),
-            ('OP_BANT_01', '4. Investigação BANT', 'Budget (Viabilidade Comercial): Avaliar viabilidade de contratação'),
-            ('OP_BANT_02', '4. Investigação BANT', 'Authority (Autoridade): Avaliar papel do interlocutor'),
-            ('OP_BANT_03', '4. Investigação BANT', 'Need (Necessidade): Estimular o lead a verbalizar dor real'),
-            ('OP_BANT_04', '4. Investigação BANT', 'Timeline (Prazo): Mapear prioridade ou evento motivador'),
-            ('OP_ESC_01', '5. Escuta e Objeções', 'Posicionar o trabalho como complementar à contabilidade atual'),
-            ('OP_ESC_02', '5. Escuta e Objeções', 'Retomar e espelhar termos utilizados pelo lead'),
-            ('OP_ESC_03', '5. Escuta e Objeções', 'Tratar com empatia o receio de riscos ou fiscalização'),
-            ('OP_ESC_04', '5. Escuta e Objeções', 'Evitar interrupções e sobreposição de falas no fluxo da conversa'),
-            ('OP_ESC_05', '5. Escuta e Objeções', 'Investigar o motivo do desinteresse para direcionar a melhor saída'),
-            ('OP_PROX_01', '6. Próximo Passo e Compromisso', 'Propor opções objetivas de data e horário (técnica de dupla escolha)'),
-            ('OP_PROX_02', '6. Próximo Passo e Compromisso', 'Alinhar formalmente a modalidade escolhida (online ou presencial)'),
-            ('OP_PROX_03', '6. Próximo Passo e Compromisso', 'Contornar o pedido passivo de envio de material'),
-            ('OP_PROX_04', '6. Próximo Passo e Compromisso', 'Definir responsável e data concreta para retornos agendados'),
-            ('OP_DIR_01', '7. Direcionamento Final e Resolução', 'Direcionamento assertivo com base no perfil'),
-            ('OP_DIR_02', '7. Direcionamento Final e Resolução', 'Condução para uma conversa substantiva'),
-            ('OP_DIR_03', '7. Direcionamento Final e Resolução', 'Consolidação de um status claro')
-            ON CONFLICT (codigo) DO NOTHING;
-            """
-        )
-        _SCHEMA_AVALIACAO_GARANTIDO = True
-    except Exception:
-        pass
+def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:
+    """Deprecated: DDL e sementes dimensionais residem estritamente nas migrações SQL."""
+    pass
 
 
 def inserir_analise(
@@ -430,7 +371,6 @@ def inserir_analise(
     Persiste a análise comercial completa nas 7 tabelas normalizadas
     dentro da transação ativa do cursor.
     """
-    garantir_schema_avaliacao(cur)
     av_ia = analise.get("avaliacao_ia", {})
     av_sdr = analise.get("avaliacao_sdr", {})
     av_criterios = analise.get("avaliacao_criterio", [])

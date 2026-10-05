@@ -568,6 +568,85 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res2 = calcular_e_sanitizar_analise(dados2, empresa_contatada=None)
         self.assertIsNone(res2["avaliacao_ia"]["empresa_contatada"])
 
+    def test_teto_por_criterio_respeita_max_pontos(self):
+        # Cada critério oficial possui um teto específico que não pode ser ultrapassado:
+        # ABERTURA: 10, SPIN: 30, PERFIL: 25, BANT: 15, ESCUTA: 10, PROX_PASSO: 10
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+                "resultado_frase": "Reunião confirmada.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Atendimento com pontuações infladas pelo modelo.",
+                "codigo_oportunidade": "OP_SPIN_01",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 30, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 50, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 30, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 25, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 20, "justificativa_criterio": "Ok"},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 15, "justificativa_criterio": "Ok"},
+            ],
+            "crm": {"resumo": "Ok"}
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        criterios_dict = {c["codigo_criterio"]: c["nota_criterio"] for c in res["avaliacao_criterio"]}
+        self.assertEqual(criterios_dict["CRIT_ABERTURA"], 10)   # Limitado a max 10
+        self.assertEqual(criterios_dict["CRIT_SPIN"], 30)       # Limitado a max 30
+        self.assertEqual(criterios_dict["CRIT_PERFIL"], 25)     # Limitado a max 25
+        self.assertEqual(criterios_dict["CRIT_BANT"], 15)       # Limitado a max 15
+        self.assertEqual(criterios_dict["CRIT_ESCUTA"], 10)     # Limitado a max 10
+        self.assertEqual(criterios_dict["CRIT_PROX_PASSO"], 10) # Limitado a max 10
+
+        # Soma total não pode passar de 100
+        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 100)
+
+    def test_deduplicacao_de_criterios_duplicados(self):
+        # Se a IA devolver códigos repetidos, deve manter apenas o primeiro e preencher os ausentes
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+                "resultado_frase": "Reunião confirmada.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Resposta com critérios duplicados.",
+                "codigo_oportunidade": "OP_ABERT_01",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura 1", "nota_criterio": 8, "justificativa_criterio": "Primeira"},
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura 2", "nota_criterio": 10, "justificativa_criterio": "Duplicada"},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 20, "justificativa_criterio": "Ok"},
+            ],
+            "crm": {"resumo": "Ok"}
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        # Deve conter exatamente os 6 critérios oficiais únicos
+        self.assertEqual(len(res["avaliacao_criterio"]), 6)
+        codigos = [c["codigo_criterio"] for c in res["avaliacao_criterio"]]
+        self.assertEqual(len(set(codigos)), 6)
+        self.assertEqual(codigos, [
+            "CRIT_ABERTURA", "CRIT_SPIN", "CRIT_PERFIL", "CRIT_BANT", "CRIT_ESCUTA", "CRIT_PROX_PASSO"
+        ])
+
+        criterios_dict = {c["codigo_criterio"]: c["nota_criterio"] for c in res["avaliacao_criterio"]}
+        self.assertEqual(criterios_dict["CRIT_ABERTURA"], 8)  # Manteve o primeiro, descartou a duplicata
+        self.assertEqual(criterios_dict["CRIT_PERFIL"], 20)
+        self.assertIsNone(criterios_dict["CRIT_SPIN"])        # Criado como None pois estava ausente
+
+        # Soma total: 8 + 20 = 28
+        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 28)
+
 
 if __name__ == "__main__":
     unittest.main()
