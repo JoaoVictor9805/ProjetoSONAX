@@ -261,7 +261,14 @@ class AvaliacaoCriterioItemModel(BaseModel):
     justificativa_criterio: str = Field(
         description="Justificativa sucinta da pontuação ou 'Não avaliável: [motivo]'"
     )
-    codigo_criterio: str = Field(
+    codigo_criterio: Literal[
+        "CRIT_ABERTURA",
+        "CRIT_SPIN",
+        "CRIT_PERFIL",
+        "CRIT_BANT",
+        "CRIT_ESCUTA",
+        "CRIT_PROX_PASSO",
+    ] = Field(
         description="Código pré-definido: CRIT_ABERTURA, CRIT_SPIN, CRIT_PERFIL, CRIT_BANT, CRIT_ESCUTA ou CRIT_PROX_PASSO"
     )
 
@@ -697,10 +704,34 @@ def calcular_e_sanitizar_analise(
 
     # 2. Avaliação SDR e Critérios
     av_sdr = resultado.setdefault("avaliacao_sdr", {})
-    criterios = resultado.setdefault("avaliacao_criterio", [])
+    criterios_raw = resultado.setdefault("avaliacao_criterio", [])
     feedback = (av_sdr.get("feedback_geral") or "").strip()
 
-    # Notas numéricas presentes nos critérios
+    # Deduplicação e mapeamento dos critérios recebidos pelos 6 códigos oficiais
+    criterios_por_codigo: dict[str, dict[str, Any]] = {}
+    for c in criterios_raw:
+        cod = c.get("codigo_criterio")
+        if cod in CRITERIOS_OFICIAIS and cod not in criterios_por_codigo:
+            criterios_por_codigo[cod] = c
+
+    # Reconstituição exata dos 6 critérios oficiais na ordem canônica definida
+    criterios: list[dict[str, Any]] = []
+    for cod_crit, meta in CRITERIOS_OFICIAIS.items():
+        if cod_crit in criterios_por_codigo:
+            crit_item = criterios_por_codigo[cod_crit]
+            crit_item["codigo_criterio"] = cod_crit
+            crit_item["criterio"] = meta["descricao"]
+        else:
+            crit_item = {
+                "codigo_criterio": cod_crit,
+                "criterio": meta["descricao"],
+                "nota_criterio": None,
+                "justificativa_criterio": "Não avaliável: Critério ausente na resposta da IA.",
+            }
+        criterios.append(crit_item)
+    resultado["avaliacao_criterio"] = criterios
+
+    # Notas numéricas presentes nos critérios após deduplicação
     notas_validas = [
         c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
     ]
@@ -738,12 +769,25 @@ def calcular_e_sanitizar_analise(
         av_ia["data_confirmada"] = "n"
 
     else:
-        # Ligações avaliáveis: soma determinística dos 6 critérios
-        notas_validas = [
-            c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
-        ]
-        if notas_validas:
-            soma = sum(notas_validas)
+        # Ligações avaliáveis: aplicação estrita do teto individual por critério (max_pontos) e soma determinística
+        notas_clamped = []
+        for crit in criterios:
+            cod_crit = crit["codigo_criterio"]
+            max_pontos = CRITERIOS_OFICIAIS[cod_crit]["max_pontos"]
+            raw_nota = crit.get("nota_criterio")
+            if raw_nota is not None:
+                try:
+                    nota_int = int(round(float(raw_nota)))
+                    clamped_nota = max(0, min(max_pontos, nota_int))
+                    crit["nota_criterio"] = clamped_nota
+                    notas_clamped.append(clamped_nota)
+                except (ValueError, TypeError):
+                    crit["nota_criterio"] = None
+            else:
+                crit["nota_criterio"] = None
+
+        if notas_clamped:
+            soma = sum(notas_clamped)
             av_sdr["nota_final"] = max(0, min(100, soma))
         else:
             av_sdr["nota_final"] = None
@@ -756,17 +800,6 @@ def calcular_e_sanitizar_analise(
     # Padronização de campos de avaliação SDR
     for k in ("acertos", "melhorias", "frase_alternativa"):
         av_sdr[k] = normalizar_texto_nao_se_aplica(av_sdr.get(k))
-
-    # 3. Garantia dos 6 critérios pré-definidos
-    codigos_presentes = {c.get("codigo_criterio") for c in criterios if c.get("codigo_criterio")}
-    for cod_crit, meta in CRITERIOS_OFICIAIS.items():
-        if cod_crit not in codigos_presentes:
-            criterios.append({
-                "criterio": meta["descricao"],
-                "nota_criterio": None,
-                "justificativa_criterio": "Não avaliável: Critério ausente na resposta da IA.",
-                "codigo_criterio": cod_crit,
-            })
 
     # 4. Padronização de campos em analise_spin
     spin = resultado.setdefault("analise_spin", {})

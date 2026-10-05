@@ -331,6 +331,23 @@ class TestChamadasDao(unittest.TestCase):
         self.assertTrue(any("status_comercial =" in q for q in update_empresa_queries))
         self.assertTrue(any("regime_tributario =" in q for q in update_empresa_queries))
 
+    def test_inserir_analise_nao_executa_ddl_runtime(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = ("audio.wav",)
+
+        dados_analise = {
+            "avaliacao_ia": {"resultado": "Perfil pendente"},
+            "avaliacao_sdr": {"nota_final": 50, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+
+        inserir_analise(cur, "audio.wav", dados_analise)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        # Garante que nenhuma instrução DDL é executada em tempo de execução
+        self.assertFalse(any("ALTER TABLE" in q for q in queries))
+        self.assertFalse(any("CREATE TABLE" in q for q in queries))
+
 
 if __name__ == "__main__":
     unittest.main()
