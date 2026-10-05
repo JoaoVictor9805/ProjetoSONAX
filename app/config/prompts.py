@@ -261,7 +261,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "modelo_ia": "gpt-4o-mini",
     "interlocutor": "Carlos Silva",
     "cargo": "Diretor Financeiro",
-    "empresa_contatada": 1054,
+    "empresa_contatada": null,
     "resultado": "Perfil confirmado",
     "ligacao_relevante": "s",
     "reuniao_confirmada": "s",

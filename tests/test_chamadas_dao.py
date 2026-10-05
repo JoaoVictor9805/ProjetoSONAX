@@ -257,11 +257,11 @@ class TestChamadasDao(unittest.TestCase):
 
     def test_sincronizacao_empresa_respeita_hierarquia_confianca(self):
         cur = MagicMock()
-        # Empresa existente com regime confirmado pelo interlocutor (peso 3)
+        # Empresa existente com regime confirmado (peso 3) e status comercial confirmado (peso 3)
         cur.fetchone.side_effect = [
             ("audio.wav",),       # avaliacao_ia
             ("audio.wav",),       # avaliacao_sdr
-            ("Indústria", "confirmado pelo interlocutor", "Lucro Real", "confirmado pelo interlocutor", 1000000.0), # select empresa
+            ("confirmado pelo interlocutor", "confirmado pelo interlocutor", "confirmado pelo interlocutor", "Perfil confirmado"), # select empresa
         ]
 
         dados_analise_fraca = {
@@ -289,9 +289,47 @@ class TestChamadasDao(unittest.TestCase):
         inserir_analise(cur, "audio2.wav", dados_analise_fraca)
         queries = [call[0][0] for call in cur.execute.call_args_list]
         update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
-        self.assertTrue(len(update_empresa_queries) > 0)
-        # Não deve atualizar regime_tributario porque o peso atual era 3 (confirmado) e a nova ligação tem peso 2 (afirmado apenas pelo SDR)
+        # Não deve atualizar regime_tributario nem regredir status_comercial
         self.assertFalse(any("regime_tributario =" in q for q in update_empresa_queries))
+        self.assertFalse(any("status_comercial =" in q for q in update_empresa_queries))
+
+    def test_sincronizacao_empresa_atualiza_status_quando_peso_maior(self):
+        cur = MagicMock()
+        # Empresa existente com status fraco "Dados insuficientes" (peso 1)
+        cur.fetchone.side_effect = [
+            ("audio.wav",),       # avaliacao_ia
+            ("audio.wav",),       # avaliacao_sdr
+            ("não informado", "não informado", "não informado", "Dados insuficientes"),
+        ]
+
+        dados_analise = {
+            "avaliacao_ia": {
+                "empresa_contatada": 10,
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+                "resultado_frase": "Validado com decisor.",
+            },
+            "analise_perfil": {
+                "setor": "industrial",
+                "setor_origem": "confirmado pelo interlocutor",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 1500000.0,
+                "faturamento_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 90, "feedback_geral": "Ótimo"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+
+        inserir_analise(cur, "audio3.wav", dados_analise)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
+        self.assertTrue(len(update_empresa_queries) > 0)
+        self.assertTrue(any("status_comercial =" in q for q in update_empresa_queries))
+        self.assertTrue(any("regime_tributario =" in q for q in update_empresa_queries))
 
 
 if __name__ == "__main__":

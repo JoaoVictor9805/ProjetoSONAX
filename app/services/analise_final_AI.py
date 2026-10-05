@@ -120,8 +120,8 @@ REGRAS_FATURAMENTO_VALIDAS = (
 
 class AvaliacaoIAModel(BaseModel):
     protocolo: int | None = Field(default=None, description="Número de protocolo da chamada")
-    data_avaliacao: str = Field(description="Data da avaliação no formato YYYY-MM-DD")
-    modelo_ia: str = Field(default="gpt-4o-mini", description="Identificador do modelo de IA utilizado")
+    data_avaliacao: str | None = Field(default=None, description="Data da avaliação no formato YYYY-MM-DD")
+    modelo_ia: str | None = Field(default=None, description="Identificador do modelo de IA utilizado")
     interlocutor: str | None = Field(default=None, description="Nome do interlocutor contatado na empresa")
     cargo: str | None = Field(default=None, description="Cargo ou área do interlocutor")
     empresa_contatada: int | None = Field(default=None, description="ID numérico da empresa contatada")
@@ -579,15 +579,13 @@ def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
     - 'envio de material solicitado'
     - 'sem próximo passo definido'
     - 'sem interesse explícito'
-    - 'Não se aplica' (chamadas sem diálogo substantivo / não avaliáveis)
+    - 'Não se aplica' (chamadas sem diálogo substantivo / não avaliáveis sem próximo passo)
     """
-    if eh_nao_avaliavel:
-        return "Não se aplica"
     if acao is None:
-        return "sem próximo passo definido"
+        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
     val = str(acao).strip()
     if not val:
-        return "sem próximo passo definido"
+        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
     val_norm = val.lower().rstrip(".").strip()
 
     if val_norm in ("não se aplica", "nao se aplica", "n/a", "none", "null"):
@@ -652,14 +650,16 @@ def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
         "nova tentativa", "sem compromisso", "sem avanço", "sem avanco",
         "pendente", "a definir",
     )):
-        return "sem próximo passo definido"
+        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
 
     # Checagem exata em ACOES_CRM_VALIDAS
     for acao_valida in ACOES_CRM_VALIDAS:
         if val_norm == acao_valida.lower():
+            if eh_nao_avaliavel and acao_valida == "sem próximo passo definido":
+                return "Não se aplica"
             return acao_valida
 
-    return "sem próximo passo definido"
+    return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
 
 
 def calcular_e_sanitizar_analise(
@@ -682,14 +682,14 @@ def calcular_e_sanitizar_analise(
     """
     # 1. Metadados de avaliacao_ia
     av_ia = resultado.setdefault("avaliacao_ia", {})
-    if protocolo is not None and not av_ia.get("protocolo"):
+    if protocolo is not None:
         av_ia["protocolo"] = protocolo
-    if empresa_contatada is not None and not av_ia.get("empresa_contatada"):
-        av_ia["empresa_contatada"] = empresa_contatada
-    if not av_ia.get("data_avaliacao"):
-        av_ia["data_avaliacao"] = str(date.today())
-    if not av_ia.get("modelo_ia"):
-        av_ia["modelo_ia"] = MODELO_ANALISE
+    elif av_ia.get("protocolo") == 123456789:
+        av_ia["protocolo"] = None
+
+    av_ia["empresa_contatada"] = empresa_contatada
+    av_ia["data_avaliacao"] = str(date.today())
+    av_ia["modelo_ia"] = MODELO_ANALISE
 
     # Normalização de interlocutor e cargo quando ausentes/vazios
     av_ia["interlocutor"] = normalizar_texto_nao_se_aplica(av_ia.get("interlocutor"))
@@ -715,7 +715,7 @@ def calcular_e_sanitizar_analise(
         or (not tem_pontos_positivos and (
             "não avaliável" in feedback.lower()
             or "nao avaliavel" in feedback.lower()
-            or "ura" in feedback.lower()
+            or bool(re.search(r"\bura\b", feedback.lower()))
             or "inválida para a avali" in feedback.lower()
         ))
         or (not notas_validas and av_sdr.get("nota_final") is None)
@@ -736,8 +736,6 @@ def calcular_e_sanitizar_analise(
         av_ia["ligacao_relevante"] = "n"
         av_ia["reuniao_confirmada"] = "n"
         av_ia["data_confirmada"] = "n"
-        av_ia["resultado"] = "Dados insuficientes"
-        resultado.setdefault("crm", {})["acao"] = "Não se aplica"
 
     else:
         # Ligações avaliáveis: soma determinística dos 6 critérios
@@ -856,7 +854,19 @@ def calcular_e_sanitizar_analise(
     # 9. Coerção determinística estrita de status comercial (resultado)
     raw_res = str(av_ia.get("resultado") or "").strip().lower()
     if eh_nao_avaliavel:
-        av_ia["resultado"] = "Dados insuficientes"
+        # Regra 6: Chamadas não avaliáveis para o SDR (ex.: recepção) que geraram próximo passo
+        # concreto mantêm status "Perfil pendente". Caso contrário, "Dados insuficientes".
+        if crm.get("acao") in (
+            "retorno com data combinado",
+            "envio de material solicitado",
+            "reunião proposta sem aceite",
+            "reunião confirmada",
+        ):
+            av_ia["resultado"] = "Perfil pendente"
+            if crm.get("acao") == "reunião confirmada":
+                av_ia["reuniao_confirmada"] = "s"
+        else:
+            av_ia["resultado"] = "Dados insuficientes"
     else:
         # Se IA indicou reunião confirmada em qualquer campo, liga a flag reuniao_confirmada
         if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
