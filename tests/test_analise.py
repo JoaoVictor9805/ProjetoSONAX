@@ -479,7 +479,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["crm"]["acao"], "retorno com data combinado")
         self.assertEqual(res["crm"]["prazo"], "amanhã às 14:00")
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
-        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
 
     def test_recepcao_nao_avaliavel_com_envio_material_preserva_crm_e_perfil_pendente(self):
         dados = {
@@ -505,6 +505,33 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
         self.assertEqual(res["crm"]["acao"], "envio de material solicitado")
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
+
+    def test_recepcao_sem_proximo_passo_marca_nao_relevante(self):
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+                "resultado_frase": "Secretária informou que o responsável não estava e não aceitou recado.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Não avaliável: Atendimento encerrou na recepção sem retorno.",
+                "nota_final": None,
+            },
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "Não se aplica",
+                "prazo": "Não se aplica",
+                "resumo": "Não se aplica",
+            },
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertEqual(res["crm"]["acao"], "Não se aplica")
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Dados insuficientes")
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
 
     def test_feedback_com_palavras_contendo_ura_nao_dispara_falso_positivo(self):
         # A palavra "abertura" ou "postura" não deve disparar detecção de URA se a ligação for avaliável
