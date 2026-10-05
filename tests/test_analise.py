@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Testes unitários para o módulo de análise comercial via IA (SPIN, BANT, SDR)."""
+from datetime import date
 import unittest
 
 from app.services.analise_final_AI import (
@@ -10,6 +11,7 @@ from app.services.analise_final_AI import (
     _limpar_resposta_json,
     SETORES_VALIDOS,
     ACOES_CRM_VALIDAS,
+    MODELO_ANALISE,
 )
 
 
@@ -439,6 +441,132 @@ class TestAnaliseFinalAI(unittest.TestCase):
         }
         res = calcular_e_sanitizar_analise(dados)
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Fora do perfil desta campanha")
+
+    def test_recepcao_nao_avaliavel_com_retorno_agendado_preserva_crm_e_perfil_pendente(self):
+        # Regra 6 do PDF: chamada com secretária/recepcionista
+        # SDR não é avaliado (notas NULL), mas o próximo passo do CRM deve ser preservado e resultado = Perfil pendente
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "s",
+                "resultado_frase": "Recepcionista pediu para retornar amanhã às 14h com o decisor.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Não avaliável: Atendido por recepcionista, decisor ausente.",
+                "nota_final": None,
+                "codigo_oportunidade": None,
+            },
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "retorno com data combinado",
+                "prazo": "amanhã às 14:00",
+                "responsavel": "SDR",
+                "resumo": "Recepcionista informou que o diretor só atende amanhã às 14h.",
+            },
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        # SDR continua não avaliável (proteção Power BI)
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertIsNone(res["avaliacao_sdr"]["codigo_oportunidade"])
+        for crit in res["avaliacao_criterio"]:
+            self.assertIsNone(crit["nota_criterio"])
+
+        # CRM e status comercial devem preservar o avanço
+        self.assertEqual(res["crm"]["acao"], "retorno com data combinado")
+        self.assertEqual(res["crm"]["prazo"], "amanhã às 14:00")
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
+
+    def test_recepcao_nao_avaliavel_com_envio_material_preserva_crm_e_perfil_pendente(self):
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+                "resultado_frase": "Secretária solicitou apresentação comercial por e-mail.",
+            },
+            "avaliacao_sdr": {
+                "feedback_geral": "Não avaliável: Conversa apenas com secretária.",
+                "nota_final": None,
+            },
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "envio de material solicitado",
+                "prazo": "Não se aplica",
+                "resumo": "Encaminhar portfólio para diretoria.",
+            },
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertEqual(res["crm"]["acao"], "envio de material solicitado")
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+
+    def test_feedback_com_palavras_contendo_ura_nao_dispara_falso_positivo(self):
+        # A palavra "abertura" ou "postura" não deve disparar detecção de URA se a ligação for avaliável
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "resultado_frase": "Boa postura do atendente.",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 75,
+                "feedback_geral": "Excelente postura profissional e abertura clara na abordagem.",
+                "codigo_oportunidade": "OP_ABERT_01",
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 10, "justificativa_criterio": "Boa postura."},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "nota_criterio": 20, "justificativa_criterio": "Estrutura adequada."},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "nota_criterio": 20, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "nota_criterio": 10, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "nota_criterio": 8, "justificativa_criterio": "Ok."},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "nota_criterio": 7, "justificativa_criterio": "Ok."},
+            ],
+            "crm": {"resumo": "Ok"}
+        }
+
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 75)
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
+
+    def test_sobrescrita_incondicional_metadados_sistema(self):
+        dados = {
+            "avaliacao_ia": {
+                "protocolo": 123456789,      # Do exemplo de prompt
+                "empresa_contatada": 1054,    # Do exemplo de prompt
+                "data_avaliacao": "2020-01-01",
+                "modelo_ia": "modelo_fantasia",
+                "resultado": "Perfil pendente",
+            },
+            "avaliacao_sdr": {"nota_final": 50, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+
+        res = calcular_e_sanitizar_analise(dados, protocolo=98765, empresa_contatada=55)
+
+        self.assertEqual(res["avaliacao_ia"]["protocolo"], 98765)
+        self.assertEqual(res["avaliacao_ia"]["empresa_contatada"], 55)
+        self.assertEqual(res["avaliacao_ia"]["data_avaliacao"], str(date.today()))
+        self.assertEqual(res["avaliacao_ia"]["modelo_ia"], MODELO_ANALISE)
+
+        # Se empresa_contatada não for informada pelo chamador, NUNCA mantém o 1054 alucinado
+        dados2 = {
+            "avaliacao_ia": {
+                "empresa_contatada": 1054,
+                "resultado": "Perfil pendente",
+            },
+            "avaliacao_sdr": {"nota_final": 50, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+        res2 = calcular_e_sanitizar_analise(dados2, empresa_contatada=None)
+        self.assertIsNone(res2["avaliacao_ia"]["empresa_contatada"])
 
 
 if __name__ == "__main__":

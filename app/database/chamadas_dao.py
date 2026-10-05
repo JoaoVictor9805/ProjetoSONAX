@@ -724,10 +724,17 @@ def inserir_analise(
             "não informado": 0,
         }
 
-        # Busca dados e origens atuais da empresa
+        pesos_status = {
+            "Perfil confirmado": 3,
+            "Fora do perfil desta campanha": 3,
+            "Perfil pendente": 2,
+            "Dados insuficientes": 1,
+        }
+
+        # Busca dados, origens e status atuais da empresa
         cur.execute(
             """
-            SELECT setor_origem, regime_origem, faturamento_origem
+            SELECT setor_origem, regime_origem, faturamento_origem, status_comercial
             FROM empresa
             WHERE id_empresa = %s
             LIMIT 1;
@@ -738,6 +745,7 @@ def inserir_analise(
         orig_setor_atual = row_emp[0] if row_emp and len(row_emp) > 0 else None
         orig_regime_atual = row_emp[1] if row_emp and len(row_emp) > 1 else None
         orig_fat_atual = row_emp[2] if row_emp and len(row_emp) > 2 else None
+        status_comercial_atual = row_emp[3] if row_emp and len(row_emp) > 3 else None
 
         nova_orig_setor = str(perfil.get("setor_origem") or "não informado")
         nova_orig_regime = str(perfil.get("regime_origem") or "não informado")
@@ -762,9 +770,16 @@ def inserir_analise(
             and pesos_origem.get(nova_orig_fat, 0) > 0
         )
 
+        peso_novo_status = pesos_status.get(str(resultado_comercial), 0)
+        peso_atual_status = pesos_status.get(str(status_comercial_atual), 0)
+        deve_atualizar_status = (
+            resultado_comercial is not None
+            and (status_comercial_atual is None or peso_novo_status >= peso_atual_status)
+        )
+
         updates = []
         params = []
-        if resultado_comercial:
+        if deve_atualizar_status:
             updates.append("status_comercial = %s")
             params.append(str(resultado_comercial)[:100])
         if deve_atualizar_setor:
