@@ -699,7 +699,7 @@ def inserir_analise(
         """,
         (
             log,
-            (perfil.get("setor") or None)[:100] if perfil.get("setor") and perfil.get("setor") != "Não se aplica" else None,
+            (perfil.get("setor") or "não informado")[:50],
             str(perfil.get("setor_origem") or "não informado")[:50],
             (perfil.get("regime_tributario") or None)[:50] if perfil.get("regime_tributario") and perfil.get("regime_tributario") != "Não se aplica" else None,
             str(perfil.get("regime_origem") or "não informado")[:50],
@@ -743,7 +743,7 @@ def inserir_analise(
         nova_orig_regime = str(perfil.get("regime_origem") or "não informado")
         nova_orig_fat = str(perfil.get("faturamento_origem") or "não informado")
 
-        setor_val = perfil.get("setor") if perfil.get("setor") and perfil.get("setor") != "Não se aplica" else None
+        setor_val = perfil.get("setor") if perfil.get("setor") and perfil.get("setor") not in ("Não se aplica", "não informado") else None
         regime_val = perfil.get("regime_tributario") if perfil.get("regime_tributario") and perfil.get("regime_tributario") != "Não se aplica" else None
 
         deve_atualizar_setor = (
