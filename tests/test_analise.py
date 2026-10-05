@@ -227,6 +227,14 @@ class TestAnaliseFinalAI(unittest.TestCase):
                 "data_confirmada": "s",
                 "resultado_frase": "Reunião marcada com diretor.",
             },
+            "analise_perfil": {
+                "setor": "Indústria",
+                "setor_origem": "confirmado pelo interlocutor",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 1500000.0,
+                "faturamento_origem": "confirmado pelo interlocutor",
+            },
             "avaliacao_sdr": {
                 "feedback_geral": "Boa condução.",
                 "codigo_oportunidade": "OP_DIR_03",
@@ -244,6 +252,117 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res = calcular_e_sanitizar_analise(dados)
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil confirmado")
         self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "s")
+
+    def test_calculo_faturamento_mensal_12_meses(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente"},
+            "analise_perfil": {
+                "faturamento_declarado_texto": "24 milhões de faturamento ano passado",
+                "faturamento_anual": 24000000.0,
+                "periodo_meses": 12,
+                "faturamento_origem": "confirmado pelo interlocutor",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        perfil = res["analise_perfil"]
+        self.assertEqual(perfil["faturamento_mensal"], 2000000.0)
+        self.assertEqual(perfil["faturamento_origem"], "calculado")
+        self.assertEqual(perfil["faturamento_regra"], "calculado_12_meses")
+        self.assertIn("calculada deterministicamente", perfil["detalhes_faturamento"])
+        # Como Lucro Real foi confirmado e 2M >= 1M calculado, qualifica como Perfil confirmado!
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil confirmado")
+
+    def test_faturamento_periodo_ambiguo_marca_nao_confirmado(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil confirmado"},
+            "analise_perfil": {
+                "faturamento_declarado_texto": "Faturamos 10 milhões em 6 meses",
+                "faturamento_anual": 10000000.0,
+                "periodo_meses": 6,  # Não são 12 meses
+                "faturamento_origem": "confirmado pelo interlocutor",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        perfil = res["analise_perfil"]
+        self.assertIsNone(perfil["faturamento_mensal"])
+        self.assertEqual(perfil["faturamento_regra"], "nao_confirmado")
+        self.assertEqual(perfil["faturamento_origem"], "não informado")
+        # Sem faturamento mensal confirmado de 12 meses, não pode ser Perfil confirmado
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+
+    def test_bloqueio_perfil_confirmado_se_apenas_afirmado_sdr(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil confirmado"},
+            "analise_perfil": {
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "afirmado apenas pelo SDR",  # SDR falou sozinho!
+                "faturamento_mensal": 2000000.0,
+                "faturamento_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+
+    def test_bloqueio_perfil_confirmado_se_faturamento_inferido(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil confirmado"},
+            "analise_perfil": {
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 3000000.0,
+                "faturamento_origem": "inferência plausível",  # Mera inferência!
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+
+    def test_fora_do_perfil_se_simples_nacional_confirmado(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente"},
+            "analise_perfil": {
+                "regime_tributario": "Simples Nacional",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 200000.0,
+                "faturamento_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Fora do perfil desta campanha")
+
+    def test_fora_do_perfil_se_faturamento_confirmado_abaixo_minimo(self):
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente"},
+            "analise_perfil": {
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 450000.0,  # Abaixo de 1M
+                "faturamento_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"}
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Fora do perfil desta campanha")
 
 
 if __name__ == "__main__":

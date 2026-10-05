@@ -125,7 +125,25 @@ Para cada item, classifique estritamente como: `"confirmado"`, `"indício"`, `"n
 - **Need (Necessidade)**: existe demanda, interesse ou problema reconhecido pelo interlocutor? Diferencie necessidade expressa de argumento do SDR.
 - **Timeline (Prazo)**: existe prioridade, evento motivador, prazo de decisão ou data para retomar o assunto?
 
-#### 3. Status Comercial da Empresa (`resultado`)
+#### 3. Análise de Perfil da Empresa (`analise_perfil`)
+Extraia a qualificação do perfil comercial identificando com rigor a confiabilidade da fonte de cada dado:
+- **Origem dos dados (`setor_origem`, `regime_origem`, `faturamento_origem`)**: Selecione ESTRITAMENTE uma das categorias:
+  * `"confirmado pelo interlocutor"`: Dado afirmado, confirmado ou validado expressamente pelo contato da empresa na ligação.
+  * `"afirmado apenas pelo SDR"`: Informação dita exclusivamente pelo SDR sem confirmação nem validação pelo prospect (ex: "Vocês são Lucro Real, certo?" e o cliente não respondeu ou desconversou).
+  * `"inferência plausível"`: Suposição baseada em contexto ou porte da empresa, mas sem validação explícita na chamada.
+  * `"não informado"`: O assunto não foi abordado ou não houve dados mínimos.
+  * *(Apenas para `faturamento_origem`)*: `"calculado"`: Quando a média mensal for calculada a partir de faturamento anual de 12 meses informado.
+- **Setor (`setor`)**: Indústria (segmento preferencial), ou nome do setor específico (ex.: Transporte, Comércio, Serviços), ou "Não informado".
+- **Regime Tributário (`regime_tributario`)**: "Lucro Real", "Lucro Presumido", "Simples Nacional", outro regime específico, ou "Não informado".
+- **Faturamento**:
+  * `faturamento_declarado_texto`: Citação exata do que foi dito sobre faturamento na chamada (ou "Não se aplica").
+  * `faturamento_anual`: Valor numérico float em reais correspondente ao faturamento anual, ou `null` se não informado.
+  * `periodo_meses`: Número de meses ao qual o faturamento anual se refere (ex.: 12 para 1 ano completo), ou `null`.
+  * `faturamento_mensal`: Valor numérico float mensal em reais se citado diretamente ou calculado, ou `null`.
+  * `faturamento_regra`: `"declarado_mensal"`, `"calculado_12_meses"`, `"nao_confirmado"` ou `"nao_informado"`.
+  * `detalhes_faturamento`: Breve justificativa de cálculo ou ambiguidade (ou "Não se aplica").
+
+#### 4. Status Comercial da Empresa (`resultado`)
 Classifique a qualificação técnica da empresa ESTRITAMENTE em uma das 4 categorias abaixo (NUNCA utilize termos de avanço comercial como "Reunião Agendada" ou "Reunião confirmada" aqui; o agendamento de reunião deve ser registrado exclusivamente nos campos `reuniao_confirmada` e `crm.acao`):
 - `"Perfil confirmado"`: Lucro Real e faturamento mensal >= R$ 1 milhão confirmados.
 - `"Perfil pendente"`: falta confirmação de regime tributário ou faturamento; não classifique como qualificada nem como descartada.
@@ -228,7 +246,7 @@ Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_i
 - Para campos que NÃO permitem texto (numéricos ou Foreign Keys como `nota_final`, `nota_criterio`, `codigo_oportunidade`, `empresa_contatada`) quando não avaliáveis ou não aplicáveis, retorne estritamente `null`.
 
 ### Formato de Saída Obrigatório (JSON Estrito)
-Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 7 chaves principais abaixo, sem texto antes ou depois:
+Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 chaves principais abaixo, sem texto antes ou depois:
 
 ```json
 {
@@ -244,6 +262,19 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 7 
     "reuniao_confirmada": "s",
     "data_confirmada": "s",
     "resultado_frase": "O SDR validou o regime de Lucro Real e o faturamento, agendando uma reunião de apresentação técnica para a próxima terça-feira."
+  },
+  "analise_perfil": {
+    "setor": "Indústria Metalúrgica",
+    "setor_origem": "confirmado pelo interlocutor",
+    "regime_tributario": "Lucro Real",
+    "regime_origem": "confirmado pelo interlocutor",
+    "faturamento_declarado_texto": "Faturamos cerca de 24 milhões ano passado",
+    "faturamento_anual": 24000000.0,
+    "faturamento_mensal": 2000000.0,
+    "periodo_meses": 12,
+    "faturamento_origem": "calculado",
+    "faturamento_regra": "calculado_12_meses",
+    "detalhes_faturamento": "Média mensal de R$ 2.000.000,00 calculada a partir de faturamento anual de 12 meses (R$ 24.000.000,00)."
   },
   "analise_spin": {
     "situacao": "...",

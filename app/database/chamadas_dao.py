@@ -670,16 +670,118 @@ def inserir_analise(
         ),
     )
 
-    # 8. Enriquecer status_comercial na tabela empresa caso exista
+    # 8. Inserir / Atualizar analise_perfil
+    perfil = analise.get("analise_perfil", {})
+    fat_anual = perfil.get("faturamento_anual")
+    fat_mensal = perfil.get("faturamento_mensal")
+    periodo = perfil.get("periodo_meses")
+
+    cur.execute(
+        """
+        INSERT INTO analise_perfil (
+            log, setor, setor_origem, regime_tributario, regime_origem,
+            faturamento_declarado_texto, faturamento_anual, faturamento_mensal,
+            periodo_meses, faturamento_origem, faturamento_regra, detalhes_faturamento
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (log) DO UPDATE SET
+            setor = EXCLUDED.setor,
+            setor_origem = EXCLUDED.setor_origem,
+            regime_tributario = EXCLUDED.regime_tributario,
+            regime_origem = EXCLUDED.regime_origem,
+            faturamento_declarado_texto = EXCLUDED.faturamento_declarado_texto,
+            faturamento_anual = EXCLUDED.faturamento_anual,
+            faturamento_mensal = EXCLUDED.faturamento_mensal,
+            periodo_meses = EXCLUDED.periodo_meses,
+            faturamento_origem = EXCLUDED.faturamento_origem,
+            faturamento_regra = EXCLUDED.faturamento_regra,
+            detalhes_faturamento = EXCLUDED.detalhes_faturamento;
+        """,
+        (
+            log,
+            (perfil.get("setor") or None)[:100] if perfil.get("setor") and perfil.get("setor") != "Não se aplica" else None,
+            str(perfil.get("setor_origem") or "não informado")[:50],
+            (perfil.get("regime_tributario") or None)[:50] if perfil.get("regime_tributario") and perfil.get("regime_tributario") != "Não se aplica" else None,
+            str(perfil.get("regime_origem") or "não informado")[:50],
+            perfil.get("faturamento_declarado_texto"),
+            fat_anual,
+            fat_mensal,
+            periodo,
+            str(perfil.get("faturamento_origem") or "não informado")[:50],
+            str(perfil.get("faturamento_regra") or "nao_informado")[:50],
+            perfil.get("detalhes_faturamento"),
+        ),
+    )
+
+    # 9. Sincronização inteligente com a tabela empresa respeitando hierarquia de confiança
     resultado_comercial = av_ia.get("resultado")
-    if empresa_id and resultado_comercial:
+    if empresa_id:
+        pesos_origem = {
+            "confirmado pelo interlocutor": 3,
+            "calculado": 3,
+            "afirmado apenas pelo SDR": 2,
+            "inferência plausível": 1,
+            "não informado": 0,
+        }
+
+        # Busca dados e origens atuais da empresa
         cur.execute(
             """
-            UPDATE empresa
-            SET status_comercial = %s
-            WHERE id_empresa = %s;
+            SELECT setor_origem, regime_origem, faturamento_origem
+            FROM empresa
+            WHERE id_empresa = %s
+            LIMIT 1;
             """,
-            (str(resultado_comercial)[:100], empresa_id),
+            (empresa_id,),
         )
+        row_emp = cur.fetchone()
+        orig_setor_atual = row_emp[0] if row_emp and len(row_emp) > 0 else None
+        orig_regime_atual = row_emp[1] if row_emp and len(row_emp) > 1 else None
+        orig_fat_atual = row_emp[2] if row_emp and len(row_emp) > 2 else None
+
+        nova_orig_setor = str(perfil.get("setor_origem") or "não informado")
+        nova_orig_regime = str(perfil.get("regime_origem") or "não informado")
+        nova_orig_fat = str(perfil.get("faturamento_origem") or "não informado")
+
+        setor_val = perfil.get("setor") if perfil.get("setor") and perfil.get("setor") != "Não se aplica" else None
+        regime_val = perfil.get("regime_tributario") if perfil.get("regime_tributario") and perfil.get("regime_tributario") != "Não se aplica" else None
+
+        deve_atualizar_setor = (
+            setor_val is not None
+            and pesos_origem.get(nova_orig_setor, 0) >= pesos_origem.get(orig_setor_atual, 0)
+            and pesos_origem.get(nova_orig_setor, 0) > 0
+        )
+        deve_atualizar_regime = (
+            regime_val is not None
+            and pesos_origem.get(nova_orig_regime, 0) >= pesos_origem.get(orig_regime_atual, 0)
+            and pesos_origem.get(nova_orig_regime, 0) > 0
+        )
+        deve_atualizar_fat = (
+            (fat_mensal is not None or fat_anual is not None)
+            and pesos_origem.get(nova_orig_fat, 0) >= pesos_origem.get(orig_fat_atual, 0)
+            and pesos_origem.get(nova_orig_fat, 0) > 0
+        )
+
+        updates = []
+        params = []
+        if resultado_comercial:
+            updates.append("status_comercial = %s")
+            params.append(str(resultado_comercial)[:100])
+        if deve_atualizar_setor:
+            updates.append("setor = %s, setor_origem = %s")
+            params.extend([str(setor_val)[:100], nova_orig_setor[:50]])
+        if deve_atualizar_regime:
+            updates.append("regime_tributario = %s, regime_origem = %s")
+            params.extend([str(regime_val)[:50], nova_orig_regime[:50]])
+        if deve_atualizar_fat:
+            updates.append("faturamento_mensal = %s, faturamento_anual = %s, faturamento_origem = %s")
+            params.extend([fat_mensal, fat_anual, nova_orig_fat[:50]])
+
+        if updates:
+            params.append(empresa_id)
+            cur.execute(
+                f"UPDATE empresa SET {', '.join(updates)} WHERE id_empresa = %s;",
+                tuple(params),
+            )
 
     return log

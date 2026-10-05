@@ -8,9 +8,13 @@ Responsabilidades:
     2. Avaliação de qualidade do SDR com 6 critérios pré-definidos (dim_criterio_avaliacao).
     3. Seleção de exatamente 1 código de oportunidade (dim_oportunidade_treinamento).
     4. Diagnóstico do interlocutor (dores, dúvidas, objeções) e próximo passo para CRM.
-    5. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
+    5. Análise de Perfil da Empresa (setor, regime, faturamento) com distinção
+       rigorosa de confiabilidade da fonte (confirmado, afirmado pelo SDR, inferência, não informado).
+    6. Cálculo determinístico da média mensal de faturamento a partir de anual de 12 meses.
+    7. Validação determinística estrita da qualificação técnica da empresa (resultado).
+    8. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
        para integridade em agregações no Power BI.
-    6. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
+    9. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -75,7 +79,7 @@ CODIGOS_OPORTUNIDADE_VALIDOS = {
 
 
 # ==========================================================
-# MODELOS PYDANTIC (ESTRUTURA RELACIONAL 7 TABELAS)
+# MODELOS PYDANTIC (ESTRUTURA RELACIONAL 8 TABELAS)
 # ==========================================================
 
 RESULTADOS_STATUS_COMERCIAL_VALIDOS = (
@@ -83,6 +87,28 @@ RESULTADOS_STATUS_COMERCIAL_VALIDOS = (
     "Perfil pendente",
     "Fora do perfil desta campanha",
     "Dados insuficientes",
+)
+
+ORIGENS_DADOS_PERFIL_VALIDAS = (
+    "confirmado pelo interlocutor",
+    "afirmado apenas pelo SDR",
+    "inferência plausível",
+    "não informado",
+)
+
+ORIGENS_FATURAMENTO_VALIDAS = (
+    "confirmado pelo interlocutor",
+    "afirmado apenas pelo SDR",
+    "inferência plausível",
+    "não informado",
+    "calculado",
+)
+
+REGRAS_FATURAMENTO_VALIDAS = (
+    "declarado_mensal",
+    "calculado_12_meses",
+    "nao_confirmado",
+    "nao_informado",
 )
 
 
@@ -112,6 +138,63 @@ class AvaliacaoIAModel(BaseModel):
     )
     resultado_frase: str = Field(
         description="Resultado em uma frase: o que aconteceu e qual compromisso foi obtido"
+    )
+
+
+class AnalisePerfilModel(BaseModel):
+    setor: str | None = Field(default=None, description="Setor de atuação da empresa ou 'Não informado'")
+    setor_origem: Literal[
+        "confirmado pelo interlocutor",
+        "afirmado apenas pelo SDR",
+        "inferência plausível",
+        "não informado",
+    ] = Field(
+        default="não informado",
+        description="Origem/confiabilidade da informação de setor",
+    )
+    regime_tributario: str | None = Field(default=None, description="Regime tributário identificado ou 'Não informado'")
+    regime_origem: Literal[
+        "confirmado pelo interlocutor",
+        "afirmado apenas pelo SDR",
+        "inferência plausível",
+        "não informado",
+    ] = Field(
+        default="não informado",
+        description="Origem/confiabilidade da informação de regime tributário",
+    )
+    faturamento_declarado_texto: str | None = Field(
+        default=None, description="Citação ou menção bruta de faturamento na chamada"
+    )
+    faturamento_anual: float | None = Field(
+        default=None, description="Valor anual numérico em reais se informado, ou null"
+    )
+    faturamento_mensal: float | None = Field(
+        default=None, description="Valor mensal numérico em reais se citado diretamente ou calculado, ou null"
+    )
+    periodo_meses: int | None = Field(
+        default=None, description="Número de meses a que se refere o faturamento anual (ex: 12), ou null"
+    )
+    faturamento_origem: Literal[
+        "confirmado pelo interlocutor",
+        "afirmado apenas pelo SDR",
+        "inferência plausível",
+        "não informado",
+        "calculado",
+    ] = Field(
+        default="não informado",
+        description="Origem da informação de faturamento",
+    )
+    faturamento_regra: Literal[
+        "declarado_mensal",
+        "calculado_12_meses",
+        "nao_confirmado",
+        "nao_informado",
+    ] = Field(
+        default="nao_informado",
+        description="Regra de determinação do faturamento",
+    )
+    detalhes_faturamento: str | None = Field(
+        default=None, description="Justificativa de cálculo ou ambiguidade"
     )
 
 
@@ -209,6 +292,7 @@ class CrmModel(BaseModel):
 
 class AnaliseCompletaModel(BaseModel):
     avaliacao_ia: AvaliacaoIAModel
+    analise_perfil: AnalisePerfilModel
     analise_spin: AnaliseSpinModel
     analise_bant: AnaliseBantModel
     avaliacao_sdr: AvaliacaoSDRModel
@@ -218,8 +302,10 @@ class AnaliseCompletaModel(BaseModel):
 
 
 # ==========================================================
-# CLIENTE E CHAIN LANGCHAIN
+# CLIENTE E CHAIN LANGCHAIN (GPT-4o-mini via OpenRouter)
 # ==========================================================
+
+MODELO_ANALISE = "gpt-4o-mini"
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -232,7 +318,6 @@ client = ChatOpenAI(
 
 structured_client = client.with_structured_output(
     AnaliseCompletaModel,
-    method="json_schema",
 )
 
 prompt = ChatPromptTemplate.from_messages(
@@ -273,6 +358,48 @@ def _limpar_resposta_json(texto: str) -> dict[str, Any] | None:
         return None
 
 
+def _converter_para_float(valor: Any) -> float | None:
+    """Converte números de formatos variados (string, int, float, moeda) com segurança."""
+    if valor is None:
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    val_str = str(valor).strip()
+    if not val_str or val_str.lower() in ("none", "null", "não se aplica", "nao se aplica", ""):
+        return None
+    val_str = re.sub(r"[^\d,\.]", "", val_str)
+    if not val_str:
+        return None
+    if "," in val_str and "." in val_str:
+        if val_str.rfind(",") > val_str.rfind("."):
+            val_str = val_str.replace(".", "").replace(",", ".")
+        else:
+            val_str = val_str.replace(",", "")
+    elif "," in val_str:
+        val_str = val_str.replace(",", ".")
+    try:
+        return float(val_str)
+    except Exception:
+        return None
+
+
+def _converter_para_int(valor: Any) -> int | None:
+    """Converte inteiros de formatos variados com segurança."""
+    if valor is None:
+        return None
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, float):
+        return int(valor)
+    digits = re.sub(r"\D", "", str(valor))
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except Exception:
+        return None
+
+
 def normalizar_texto_nao_se_aplica(valor: Any) -> str:
     """Normaliza campos de texto que representam ausência ou vazio para 'Não se aplica'."""
     if valor is None:
@@ -307,6 +434,36 @@ def normalizar_texto_nao_se_aplica(valor: Any) -> str:
         return "Não se aplica"
 
     return val_str
+
+
+def normalizar_origem_dado(origem: Any, eh_nao_avaliavel: bool = False) -> str:
+    """Normaliza a origem do dado de perfil para uma das 4 categorias padrão."""
+    if eh_nao_avaliavel or origem is None:
+        return "não informado"
+    val = str(origem).strip().lower()
+    if any(k in val for k in ("confirmado pelo interlocutor", "confirmado pelo lead", "confirmado pelo cliente", "confirmado")):
+        return "confirmado pelo interlocutor"
+    if any(k in val for k in ("afirmado apenas pelo sdr", "afirmado pelo sdr", "sdr")):
+        return "afirmado apenas pelo SDR"
+    if any(k in val for k in ("inferência", "inferencia", "suposição", "suposicao", "indício", "indicio")):
+        return "inferência plausível"
+    return "não informado"
+
+
+def normalizar_origem_faturamento(origem: Any, eh_nao_avaliavel: bool = False) -> str:
+    """Normaliza a origem de faturamento incluindo 'calculado'."""
+    if eh_nao_avaliavel or origem is None:
+        return "não informado"
+    val = str(origem).strip().lower()
+    if "calculad" in val:
+        return "calculado"
+    if any(k in val for k in ("confirmado pelo interlocutor", "confirmado pelo lead", "confirmado pelo cliente", "confirmado")):
+        return "confirmado pelo interlocutor"
+    if any(k in val for k in ("afirmado apenas pelo sdr", "afirmado pelo sdr", "sdr")):
+        return "afirmado apenas pelo SDR"
+    if any(k in val for k in ("inferência", "inferencia", "suposição", "suposicao")):
+        return "inferência plausível"
+    return "não informado"
 
 
 def normalizar_resultado_status_comercial(resultado: Any, eh_nao_avaliavel: bool = False) -> str:
@@ -381,6 +538,8 @@ def calcular_e_sanitizar_analise(
         - Calcula nota_final como a soma dos 6 critérios quando a ligação for avaliável.
         - Garante que os 6 critérios oficiais existam na lista avaliacao_criterio.
         - Valida que codigo_oportunidade seja um código dimensional válido.
+        - Calcula faturamento_mensal = faturamento_anual / 12 quando período de 12 meses.
+        - Aplica validação determinística estrita da qualificação comercial (status_comercial).
         - Padroniza campos textuais sem ocorrência para 'Não se aplica'.
     """
     # 1. Metadados de avaliacao_ia
@@ -392,7 +551,7 @@ def calcular_e_sanitizar_analise(
     if not av_ia.get("data_avaliacao"):
         av_ia["data_avaliacao"] = str(date.today())
     if not av_ia.get("modelo_ia"):
-        av_ia["modelo_ia"] = "gpt-4o-mini"
+        av_ia["modelo_ia"] = MODELO_ANALISE
 
     # Normalização de interlocutor e cargo quando ausentes/vazios
     av_ia["interlocutor"] = normalizar_texto_nao_se_aplica(av_ia.get("interlocutor"))
@@ -454,16 +613,7 @@ def calcular_e_sanitizar_analise(
         # Validação do código de oportunidade contra a dimensão
         cod_op = av_sdr.get("codigo_oportunidade")
         if cod_op and cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS:
-            # Fallback seguro para código existente mais genérico de fechamento
             av_sdr["codigo_oportunidade"] = "OP_DIR_03"
-
-    # Normalização de resultado (qualificação técnica do lead)
-    raw_res = str(av_ia.get("resultado") or "").strip().lower()
-    av_ia["resultado"] = normalizar_resultado_status_comercial(
-        av_ia.get("resultado"), eh_nao_avaliavel=eh_nao_avaliavel
-    )
-    if not eh_nao_avaliavel and any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
-        av_ia["reuniao_confirmada"] = "s"
 
     # Padronização de campos de avaliação SDR
     for k in ("acertos", "melhorias", "frase_alternativa"):
@@ -509,6 +659,90 @@ def calcular_e_sanitizar_analise(
     else:
         crm["resumo"] = "Não se aplica"
 
+    # 8. Análise de Perfil e Cálculo Determinístico de Faturamento
+    perfil = resultado.setdefault("analise_perfil", {})
+    if eh_nao_avaliavel:
+        perfil["setor"] = "Não se aplica"
+        perfil["setor_origem"] = "não informado"
+        perfil["regime_tributario"] = "Não se aplica"
+        perfil["regime_origem"] = "não informado"
+        perfil["faturamento_declarado_texto"] = "Não se aplica"
+        perfil["faturamento_anual"] = None
+        perfil["faturamento_mensal"] = None
+        perfil["periodo_meses"] = None
+        perfil["faturamento_origem"] = "não informado"
+        perfil["faturamento_regra"] = "nao_informado"
+        perfil["detalhes_faturamento"] = "Não se aplica"
+    else:
+        perfil["setor"] = normalizar_texto_nao_se_aplica(perfil.get("setor"))
+        perfil["setor_origem"] = normalizar_origem_dado(perfil.get("setor_origem"), eh_nao_avaliavel=False)
+        perfil["regime_origem"] = normalizar_origem_dado(perfil.get("regime_origem"), eh_nao_avaliavel=False)
+        perfil["regime_tributario"] = normalizar_texto_nao_se_aplica(perfil.get("regime_tributario"))
+        perfil["faturamento_declarado_texto"] = normalizar_texto_nao_se_aplica(perfil.get("faturamento_declarado_texto"))
+        perfil["detalhes_faturamento"] = normalizar_texto_nao_se_aplica(perfil.get("detalhes_faturamento"))
+
+        fat_anual = _converter_para_float(perfil.get("faturamento_anual"))
+        fat_mensal = _converter_para_float(perfil.get("faturamento_mensal"))
+        periodo = _converter_para_int(perfil.get("periodo_meses"))
+
+        perfil["faturamento_anual"] = fat_anual
+        perfil["periodo_meses"] = periodo
+
+        # Regra 4: Cálculo determinístico da média mensal a partir de anual de 12 meses
+        if fat_anual is not None and fat_anual > 0 and periodo == 12:
+            calc_mensal = round(fat_anual / 12.0, 2)
+            perfil["faturamento_mensal"] = calc_mensal
+            perfil["faturamento_regra"] = "calculado_12_meses"
+            perfil["faturamento_origem"] = "calculado"
+            if perfil["detalhes_faturamento"] in ("Não se aplica", "", None):
+                perfil["detalhes_faturamento"] = (
+                    f"Média mensal de R$ {calc_mensal:,.2f} calculada deterministicamente a partir de "
+                    f"faturamento anual de 12 meses (R$ {fat_anual:,.2f})."
+                )
+        elif fat_mensal is not None and fat_mensal > 0 and (periodo is None or periodo == 1):
+            perfil["faturamento_mensal"] = fat_mensal
+            perfil["faturamento_regra"] = "declarado_mensal"
+            perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem"))
+        elif periodo is not None and periodo != 12 and fat_anual is not None:
+            # Período ambíguo ou diferente de 12 meses
+            perfil["faturamento_mensal"] = None
+            perfil["faturamento_regra"] = "nao_confirmado"
+            perfil["faturamento_origem"] = "não informado"
+        else:
+            perfil["faturamento_mensal"] = fat_mensal
+            perfil["faturamento_regra"] = "declarado_mensal" if fat_mensal else "nao_informado"
+            perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem")) if fat_mensal else "não informado"
+
+    # 9. Coerção determinística estrita de status comercial (resultado)
+    raw_res = str(av_ia.get("resultado") or "").strip().lower()
+    if eh_nao_avaliavel:
+        av_ia["resultado"] = "Dados insuficientes"
+    else:
+        # Se IA indicou reunião confirmada em qualquer campo, liga a flag reuniao_confirmada
+        if any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
+            av_ia["reuniao_confirmada"] = "s"
+
+        regime_str = str(perfil.get("regime_tributario") or "").strip().lower()
+        regime_conf = perfil.get("regime_origem") == "confirmado pelo interlocutor"
+        eh_lucro_real = "lucro real" in regime_str
+
+        fat_mensal_val = perfil.get("faturamento_mensal")
+        fat_orig = perfil.get("faturamento_origem")
+        fat_conf = fat_orig in ("confirmado pelo interlocutor", "calculado")
+        fat_minimo_ok = fat_mensal_val is not None and fat_mensal_val >= 1000000.0
+
+        # Regra de descarte explícito
+        outro_regime_conf = regime_conf and not eh_lucro_real and any(r in regime_str for r in ("simples", "presumido", "mei"))
+        fat_abaixo_conf = fat_conf and fat_mensal_val is not None and fat_mensal_val < 1000000.0
+
+        if outro_regime_conf or fat_abaixo_conf:
+            av_ia["resultado"] = "Fora do perfil desta campanha"
+        elif eh_lucro_real and regime_conf and fat_minimo_ok and fat_conf:
+            av_ia["resultado"] = "Perfil confirmado"
+        else:
+            # Qualquer ausência de confirmação não desqualifica, mantém pendente
+            av_ia["resultado"] = "Perfil pendente"
+
     return resultado
 
 
@@ -526,7 +760,7 @@ def analisar_ligacao(
 ) -> dict[str, Any]:
     """
     Submete a transcrição revisada ao GPT-4o-mini e devolve o dicionário
-    completo com as 7 chaves relacionais padronizadas.
+    completo com as 8 chaves relacionais padronizadas.
     """
     inputs = {
         "ligacao": ligacao,
@@ -555,4 +789,4 @@ def analisar_ligacao(
         empresa_contatada=empresa_contatada,
     )
 
-    return resultado
+    return resultado

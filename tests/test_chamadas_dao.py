@@ -221,6 +221,17 @@ class TestChamadasDao(unittest.TestCase):
                 "resposta_sdr": "Explicou modelo complementar.",
                 "reacao_interlocutor": "Aceitou explicação.",
             },
+            "analise_perfil": {
+                "setor": "Indústria",
+                "setor_origem": "confirmado pelo interlocutor",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+                "faturamento_mensal": 2000000.0,
+                "faturamento_anual": 24000000.0,
+                "faturamento_origem": "calculado",
+                "faturamento_regra": "calculado_12_meses",
+                "detalhes_faturamento": "Calculado a partir de 12 meses.",
+            },
             "crm": {
                 "acao": "Reunião confirmada (apresentação técnica)",
                 "responsavel": "SDR Carlos",
@@ -235,6 +246,7 @@ class TestChamadasDao(unittest.TestCase):
 
         queries = [call[0][0] for call in cur.execute.call_args_list]
         self.assertTrue(any("INSERT INTO avaliacao_ia" in q for q in queries))
+        self.assertTrue(any("INSERT INTO analise_perfil" in q for q in queries))
         self.assertTrue(any("INSERT INTO avaliacao_sdr" in q for q in queries))
         self.assertTrue(any("INSERT INTO avaliacao_criterio" in q for q in queries))
         self.assertTrue(any("INSERT INTO analise_spin" in q for q in queries))
@@ -242,6 +254,44 @@ class TestChamadasDao(unittest.TestCase):
         self.assertTrue(any("INSERT INTO interlocutor" in q for q in queries))
         self.assertTrue(any("INSERT INTO crm" in q for q in queries))
         self.assertTrue(any("UPDATE empresa" in q for q in queries))
+
+    def test_sincronizacao_empresa_respeita_hierarquia_confianca(self):
+        cur = MagicMock()
+        # Empresa existente com regime confirmado pelo interlocutor (peso 3)
+        cur.fetchone.side_effect = [
+            ("audio.wav",),       # avaliacao_ia
+            ("audio.wav",),       # avaliacao_sdr
+            ("Indústria", "confirmado pelo interlocutor", "Lucro Real", "confirmado pelo interlocutor", 1000000.0), # select empresa
+        ]
+
+        dados_analise_fraca = {
+            "avaliacao_ia": {
+                "empresa_contatada": 10,
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "resultado_frase": "Recepção atendeu.",
+            },
+            "analise_perfil": {
+                "setor": "Não se aplica",
+                "setor_origem": "não informado",  # peso 0
+                "regime_tributario": "Simples Nacional",
+                "regime_origem": "afirmado apenas pelo SDR",  # peso 2 < peso 3 existente!
+                "faturamento_mensal": None,
+                "faturamento_origem": "não informado",
+            },
+            "avaliacao_sdr": {"nota_final": 50, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+
+        inserir_analise(cur, "audio2.wav", dados_analise_fraca)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
+        self.assertTrue(len(update_empresa_queries) > 0)
+        # Não deve atualizar regime_tributario porque o peso atual era 3 (confirmado) e a nova ligação tem peso 2 (afirmado apenas pelo SDR)
+        self.assertFalse(any("regime_tributario =" in q for q in update_empresa_queries))
 
 
 if __name__ == "__main__":
