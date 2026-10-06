@@ -176,9 +176,13 @@ class TestChamadasDao(unittest.TestCase):
             },
             "analise_spin": {
                 "situacao": "Empresa na indústria.",
+                "situacao_investigada": "s",
                 "problema": "Obrigações acessórias complexas.",
+                "problema_investigado": "s",
                 "implicacao": "Risco de multas.",
+                "implicacao_investigada": "s",
                 "necessidade_solucao": "Consultoria especializada.",
+                "necessidade_investigada": "s",
                 "evidencias": "\"A nossa principal dor é o SPED\"",
                 "lacunas": "Não aprofundou multas.",
             },
@@ -198,7 +202,7 @@ class TestChamadasDao(unittest.TestCase):
                 "acertos": "1. Escuta ativa. 2. Investigação de perfil.",
                 "melhorias": "1. Implicações. 2. Envolvimento de decisores.",
                 "frase_alternativa": "Que impacto financeiro esses erros trouxeram?",
-                "codigo_oportunidade": "OP_SPIN_03",
+                "codigos_oportunidade": ["OP_SPIN_03", "OP_PERF_01"],
             },
             "avaliacao_criterio": [
                 {
@@ -250,6 +254,16 @@ class TestChamadasDao(unittest.TestCase):
         self.assertTrue(any("INSERT INTO avaliacao_sdr" in q for q in queries))
         self.assertTrue(any("INSERT INTO avaliacao_criterio" in q for q in queries))
         self.assertTrue(any("INSERT INTO analise_spin" in q for q in queries))
+        spin_call = next(call for call in cur.execute.call_args_list if "INSERT INTO analise_spin" in call[0][0])
+        self.assertIn("situacao_investigada", spin_call[0][0])
+        self.assertIn("problema_investigado", spin_call[0][0])
+        self.assertIn("implicacao_investigada", spin_call[0][0])
+        self.assertIn("necessidade_investigada", spin_call[0][0])
+        self.assertEqual(spin_call[0][1][2], "s")  # situacao_investigada
+        self.assertEqual(spin_call[0][1][4], "s")  # problema_investigado
+        self.assertEqual(spin_call[0][1][6], "s")  # implicacao_investigada
+        self.assertEqual(spin_call[0][1][8], "s")  # necessidade_investigada
+        self.assertTrue(any("INSERT INTO avaliacao_oportunidade_treinamento" in q for q in queries))
         self.assertTrue(any("INSERT INTO analise_bant" in q for q in queries))
         self.assertTrue(any("INSERT INTO interlocutor" in q for q in queries))
         self.assertTrue(any("INSERT INTO crm" in q for q in queries))
@@ -420,6 +434,34 @@ class TestChamadasDao(unittest.TestCase):
         )
         res3 = derivar_status_consolidado_empresa(cur3, 102)
         self.assertEqual(res3, "Perfil pendente")
+
+    def test_dao_forca_null_em_notas_para_chamada_nao_avaliavel(self):
+        """Valida que o DAO força NULL em nota_final e nota_criterio quando a chamada é não avaliável."""
+        cur = MagicMock()
+        dados_nao_avaliavel = {
+            "avaliacao_ia": {
+                "ligacao_relevante": "n",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 90,  # Payload veio com nota indevida
+                "feedback_geral": "Não avaliável: Ligação muda / queda",
+                "codigos_oportunidade": ["OP_SPIN_03"],
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "nota_criterio": 10},
+            ],
+            "analise_spin": {},
+            "analise_bant": {},
+            "interlocutor": {},
+            "crm": {},
+        }
+        inserir_analise(cur, "queda.wav", dados_nao_avaliavel)
+        sdr_call = next(call for call in cur.execute.call_args_list if "INSERT INTO avaliacao_sdr" in call[0][0])
+        # nota_final deve ter sido forçada para None
+        self.assertIsNone(sdr_call[0][1][1])
+        crit_call = next(call for call in cur.execute.call_args_list if "INSERT INTO avaliacao_criterio" in call[0][0])
+        # nota_criterio deve ter sido forçada para None
+        self.assertIsNone(crit_call[0][1][2])
 
 
 if __name__ == "__main__":

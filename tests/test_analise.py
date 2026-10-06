@@ -5,10 +5,16 @@ import unittest
 
 from app.services.analise_final_AI import (
     calcular_e_sanitizar_analise,
+    derivar_data_confirmada,
+    derivar_conversa_decisor,
+    derivar_spin_investigado,
     normalizar_acao_crm,
     normalizar_setor,
     normalizar_resultado_status_comercial,
     _limpar_resposta_json,
+    AnaliseCompletaModel,
+    AnaliseSpinModel,
+    AvaliacaoSDRModel,
     SETORES_VALIDOS,
     ACOES_CRM_VALIDAS,
     MODELO_ANALISE,
@@ -818,37 +824,325 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res2 = calcular_e_sanitizar_analise(dados2)
         self.assertIsNone(res2["avaliacao_sdr"]["codigo_oportunidade"])
 
-    def test_data_confirmada_derivada_do_prazo(self):
-        """data_confirmada deve ser 's' quando o prazo for uma data/hora concreta."""
-        # Caso 1: Recepção com retorno agendado com data
-        dados_recepcao = {
+    def test_derivar_data_confirmada_helper_casos_exaustivos(self):
+        """Valida os 10 casos do helper derivar_data_confirmada."""
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", "amanhã às 14h"), "s")
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", "a definir"), "n")
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", "sem data"), "n")
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", "não definido"), "n")
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", "indefinido"), "n")
+        self.assertEqual(derivar_data_confirmada("reunião confirmada", None), "n")
+        self.assertEqual(derivar_data_confirmada("retorno com data combinado", "sexta-feira às 10h"), "s")
+        self.assertEqual(derivar_data_confirmada("retorno com data combinado", ""), "n")
+        self.assertEqual(derivar_data_confirmada("retorno com data combinado", "não informado"), "n")
+        self.assertEqual(derivar_data_confirmada("envio de material solicitado", "até amanhã"), "n")
+        self.assertEqual(derivar_data_confirmada("sem próximo passo definido", "dia 15"), "n")
+
+    def test_alucinacao_data_confirmada_s_sem_prazo_forca_n(self):
+        """Se o LLM disser data_confirmada='s' mas o prazo for vazio/a definir, sanitizador força 'n'."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "data_confirmada": "s",  # Alucinação da IA!
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "reunião confirmada",
+                "prazo": "a definir",  # Prazo vazio/indefinido
+                "resumo": "Ok",
+            },
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "n")
+
+    def test_envio_material_com_prazo_em_recepcao_gera_data_confirmada_n(self):
+        """Envio de material na recepção com prazo não é compromisso de agenda -> data_confirmada='n'."""
+        dados = {
             "avaliacao_ia": {"resultado": "Dados insuficientes", "ligacao_relevante": "n"},
             "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Não avaliável: Recepção"},
             "avaliacao_criterio": [],
             "crm": {
-                "acao": "retorno com data combinado",
-                "prazo": "Amanhã às 14h",
-                "resumo": "Falar com financeiro.",
+                "acao": "envio de material solicitado",
+                "prazo": "até sexta",
+                "resumo": "Enviar apresentação.",
             },
         }
-        res_rec = calcular_e_sanitizar_analise(dados_recepcao)
-        self.assertEqual(res_rec["avaliacao_ia"]["ligacao_relevante"], "s")
-        self.assertEqual(res_rec["avaliacao_ia"]["data_confirmada"], "s")
-        self.assertEqual(res_rec["avaliacao_ia"]["reuniao_confirmada"], "n")
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+        self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "n")
+        self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "n")
 
-        # Caso 2: Chamada sem prazo definido
-        dados_sem_prazo = {
-            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
-            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+    def test_pydantic_analise_completa_valida_unicidade_6_criterios(self):
+        """Garante que AnaliseCompletaModel rejeita repetição de códigos de critérios."""
+        from pydantic import ValidationError
+
+        payload_duplicado = {
+            "avaliacao_ia": {
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "resultado_frase": "Teste",
+            },
+            "analise_perfil": {},
+            "analise_spin": {},
+            "analise_bant": {},
+            "avaliacao_sdr": {"feedback_geral": "Teste"},
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN 1", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN 2 duplicado!", "justificativa_criterio": "ok"},  # Duplicado!
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "justificativa_criterio": "ok"},
+                # Faltou CRIT_PERFIL!
+            ],
+            "interlocutor": {},
+            "crm": {},
+        }
+
+        with self.assertRaises(ValidationError) as ctx:
+            AnaliseCompletaModel.model_validate(payload_duplicado)
+        self.assertIn("CRIT_PERFIL", str(ctx.exception))
+
+    def test_pydantic_analise_completa_aceita_6_criterios_unicos(self):
+        """Garante que AnaliseCompletaModel aceita os 6 critérios oficiais únicos."""
+        payload_valido = {
+            "avaliacao_ia": {
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "resultado_frase": "Teste",
+            },
+            "analise_perfil": {},
+            "analise_spin": {},
+            "analise_bant": {},
+            "avaliacao_sdr": {"feedback_geral": "Teste"},
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "criterio": "Abertura", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_SPIN", "criterio": "SPIN", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_PERFIL", "criterio": "Perfil", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_BANT", "criterio": "BANT", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_ESCUTA", "criterio": "Escuta", "justificativa_criterio": "ok"},
+                {"codigo_criterio": "CRIT_PROX_PASSO", "criterio": "Próximo Passo", "justificativa_criterio": "ok"},
+            ],
+            "interlocutor": {},
+            "crm": {},
+        }
+        modelo = AnaliseCompletaModel.model_validate(payload_valido)
+        self.assertEqual(len(modelo.avaliacao_criterio), 6)
+
+    def test_derivar_conversa_decisor_decisores_e_influenciadores(self):
+        """Valida que Diretor, Sócio, Controller, Gerente Fiscal e Contador viram conversa_decisor='s'."""
+        self.assertEqual(derivar_conversa_decisor("Diretor Financeiro"), "s")
+        self.assertEqual(derivar_conversa_decisor("Sócio Proprietário"), "s")
+        self.assertEqual(derivar_conversa_decisor("CEO"), "s")
+        self.assertEqual(derivar_conversa_decisor("Controller"), "s")
+        self.assertEqual(derivar_conversa_decisor("Gerente Fiscal e Tributário"), "s")
+        self.assertEqual(derivar_conversa_decisor("Contador"), "s")
+        self.assertEqual(derivar_conversa_decisor("Coordenadora Financeira"), "s")
+
+    def test_derivar_conversa_decisor_gatekeepers_e_vazios(self):
+        """Valida que Secretária, Recepção, Atendente e cargos vazios viram conversa_decisor='n'."""
+        self.assertEqual(derivar_conversa_decisor("Secretária"), "n")
+        self.assertEqual(derivar_conversa_decisor("Recepcionista"), "n")
+        self.assertEqual(derivar_conversa_decisor("Telefonista"), "n")
+        self.assertEqual(derivar_conversa_decisor("Atendente da Portaria"), "n")
+        self.assertEqual(derivar_conversa_decisor("Não se aplica"), "n")
+        self.assertEqual(derivar_conversa_decisor(None), "n")
+
+    def test_chamada_transferida_recepcao_para_diretor_marca_conversa_decisor_s(self):
+        """Chamada que capturou cargo mais alto (Diretor Financeiro) marca conversa_decisor='s'."""
+        dados = {
+            "avaliacao_ia": {
+                "interlocutor": "Carlos Eduardo",
+                "cargo": "Diretor Financeiro",
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+                "conversa_decisor": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 85, "feedback_geral": "Ótima condução com decisor."},
+            "avaliacao_criterio": [],
+            "analise_bant": {"authority_classificacao": "confirmado"},
+            "crm": {"acao": "reunião confirmada", "prazo": "Amanhã às 14h", "resumo": "Ok"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["conversa_decisor"], "s")
+
+    def test_chamada_retida_recepcao_com_retorno_marca_conversa_decisor_n(self):
+        """Chamada que parou na secretária com agendamento de retorno marca conversa_decisor='n'."""
+        dados = {
+            "avaliacao_ia": {
+                "interlocutor": "Mariana",
+                "cargo": "Secretária da Diretoria",
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+            },
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Não avaliável: Parou na recepção."},
             "avaliacao_criterio": [],
             "crm": {
-                "acao": "sem próximo passo definido",
-                "prazo": "Não se aplica",
-                "resumo": "Sem data.",
+                "acao": "retorno com data combinado",
+                "prazo": "Sexta às 10h",
+                "resumo": "Retornar com decisor.",
             },
         }
-        res_sp = calcular_e_sanitizar_analise(dados_sem_prazo)
-        self.assertEqual(res_sp["avaliacao_ia"]["data_confirmada"], "n")
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
+        self.assertEqual(res["avaliacao_ia"]["conversa_decisor"], "n")
+
+    def test_derivar_spin_investigado_cenarios(self):
+        """Valida a derivação determinística das flags de investigação SPIN."""
+        # Conteúdo substantivo com confirmação
+        self.assertEqual(derivar_spin_investigado("Empresa na indústria metalúrgica", "s", False), "s")
+        # Conteúdo substantivo sem flag explícita (fallback seguro/legado)
+        self.assertEqual(derivar_spin_investigado("Relatou problemas fiscais", None, False), "s")
+        # Flag negativa explícita da IA preservada
+        self.assertEqual(derivar_spin_investigado("SDR não abordou este ponto", "n", False), "n")
+        self.assertEqual(derivar_spin_investigado("SDR não abordou", "nao", False), "n")
+        # Textos vazios / Não se aplica forçam 'n' mesmo se IA sugerir 's'
+        self.assertEqual(derivar_spin_investigado("Não se aplica", "s", False), "n")
+        self.assertEqual(derivar_spin_investigado("não informado", "s", False), "n")
+        self.assertEqual(derivar_spin_investigado("nenhum", "s", False), "n")
+        self.assertEqual(derivar_spin_investigado("", "s", False), "n")
+        self.assertEqual(derivar_spin_investigado(None, "s", False), "n")
+        # Chamada não avaliável (queda/URA) SEMPRE força 'n'
+        self.assertEqual(
+            derivar_spin_investigado("Perguntou sobre ICMS", "s", eh_nao_avaliavel=True),
+            "n",
+        )
+
+    def test_sanitizacao_spin_flags_chamada_avaliavel(self):
+        """Garante que calcular_e_sanitizar_analise preenche as 4 flags SPIN corretamente."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Boa condução."},
+            "avaliacao_criterio": [],
+            "analise_spin": {
+                "situacao": "Empresa no Simples Nacional com 50 funcionários.",
+                "situacao_investigada": "s",
+                "problema": "Contabilidade atual demora para emitir guias.",
+                "problema_investigado": "s",
+                "implicacao": "Não se aplica",
+                "implicacao_investigada": "s",  # IA alucinou 's', mas texto é Não se aplica -> deve virar 'n'
+                "necessidade_solucao": "Nenhum",
+                "necessidade_investigada": "n",
+            },
+            "crm": {"acao": "reunião confirmada", "prazo": "Amanhã 15h"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        spin = res["analise_spin"]
+        self.assertEqual(spin["situacao_investigada"], "s")
+        self.assertEqual(spin["problema_investigado"], "s")
+        self.assertEqual(spin["implicacao_investigada"], "n")  # Coagido para 'n'
+        self.assertEqual(spin["necessidade_investigada"], "n")
+
+    def test_sanitizacao_spin_flags_chamada_nao_avaliavel(self):
+        """Garante que chamadas não avaliáveis forçam todas as 4 flags SPIN para 'n'."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "n",
+            },
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Não avaliável: URA."},
+            "avaliacao_criterio": [],
+            "analise_spin": {
+                "situacao": "Algum texto",
+                "situacao_investigada": "s",
+                "problema": "Algum problema",
+                "problema_investigado": "s",
+                "implicacao": "Alguma implicação",
+                "implicacao_investigada": "s",
+                "necessidade_solucao": "Alguma solução",
+                "necessidade_investigada": "s",
+            },
+            "crm": {"acao": "Não se aplica"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        spin = res["analise_spin"]
+        self.assertEqual(spin["situacao_investigada"], "n")
+        self.assertEqual(spin["problema_investigado"], "n")
+        self.assertEqual(spin["implicacao_investigada"], "n")
+        self.assertEqual(spin["necessidade_investigada"], "n")
+
+    def test_pydantic_analise_spin_model_default_flags(self):
+        """Garante que AnaliseSpinModel inicializa as 4 flags como 'n' por padrão."""
+        modelo = AnaliseSpinModel()
+        self.assertEqual(modelo.situacao_investigada, "n")
+        self.assertEqual(modelo.problema_investigado, "n")
+        self.assertEqual(modelo.implicacao_investigada, "n")
+        self.assertEqual(modelo.necessidade_investigada, "n")
+
+    def test_multiplas_oportunidades_treinamento_sanitizacao(self):
+        """Valida que múltiplas oportunidades válidas são preservadas e códigos inválidos descartados."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+                "data_confirmada": "s",
+            },
+            "avaliacao_sdr": {
+                "nota_final": 85,
+                "feedback_geral": "Boa condução com pontos a aprimorar.",
+                "codigos_oportunidade": ["OP_SPIN_03", "OP_ESC_04", "OP_PERF_01", "OP_INVALIDO_99", "OP_SPIN_03"],
+            },
+            "avaliacao_criterio": [],
+            "crm": {"acao": "reunião confirmada", "prazo": "10/10 às 15h"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        av_sdr = res["avaliacao_sdr"]
+        # OP_ESC_04 e OP_INVALIDO descartados, duplicata deduplicada
+        self.assertEqual(av_sdr["codigos_oportunidade"], ["OP_SPIN_03", "OP_PERF_01"])
+        self.assertEqual(av_sdr["codigo_oportunidade"], "OP_SPIN_03")
+
+    def test_blindagem_notas_null_quando_nao_avaliavel_no_meio_do_feedback(self):
+        """Garante que 'não avaliável' no meio do feedback força NULL em todas as notas, mesmo com notas nos critérios."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Dados insuficientes",
+                "ligacao_relevante": "s",  # IA errou aqui, mas feedback diz não avaliável
+            },
+            "avaliacao_sdr": {
+                "nota_final": 60,
+                "feedback_geral": "O contato ocorreu com a portaria, sendo não avaliável tecnicamente para SDR.",
+                "codigos_oportunidade": ["OP_SPIN_03"],
+            },
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "nota_criterio": 10, "justificativa_criterio": "Abriu bem"},
+                {"codigo_criterio": "CRIT_SPIN", "nota_criterio": 15, "justificativa_criterio": "Tentou"},
+            ],
+            "crm": {"acao": "Não se aplica"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        av_sdr = res["avaliacao_sdr"]
+        self.assertIsNone(av_sdr["nota_final"])
+        self.assertEqual(av_sdr["codigos_oportunidade"], [])
+        self.assertIsNone(av_sdr["codigo_oportunidade"])
+        for crit in res["avaliacao_criterio"]:
+            self.assertIsNone(crit["nota_criterio"])
+
+    def test_pydantic_avaliacao_sdr_model_harmoniza_legado_e_lista(self):
+        """Valida que AvaliacaoSDRModel aceita tanto string única (legado) quanto lista de códigos."""
+        m1 = AvaliacaoSDRModel(feedback_geral="ok", codigo_oportunidade="OP_SPIN_03")
+        self.assertEqual(m1.codigos_oportunidade, ["OP_SPIN_03"])
+        self.assertEqual(m1.codigo_oportunidade, "OP_SPIN_03")
+
+        m2 = AvaliacaoSDRModel(feedback_geral="ok", codigos_oportunidade=["OP_SPIN_03", "OP_PERF_01"])
+        self.assertEqual(m2.codigos_oportunidade, ["OP_SPIN_03", "OP_PERF_01"])
+        self.assertEqual(m2.codigo_oportunidade, "OP_SPIN_03")
+
+
 
 
 if __name__ == "__main__":

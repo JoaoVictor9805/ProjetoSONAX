@@ -24,5 +24,7 @@ Thumbs.db
 
 build/
 dist/
+*.rar
+*.zip
 
 .agents/

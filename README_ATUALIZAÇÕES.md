@@ -207,7 +207,119 @@ Este documento registra todas as alterações e correções estruturais, determi
   * `test_prazo_crm_preenche_data_confirmada`: valida derivação automática de `data_confirmada = 's'`.
   * `test_derivar_status_consolidado_empresa`: testa a consolidação multi-chamada dos dados cadastrais acumulados da empresa.
 
-* **Status da Validação nas Duas Branches:**
-  * **Branch `testeMatt`** (OpenRouter / GPT-4o-mini): **97 testes aprovados** (OK).
-  * **Branch `testeIa-gratuita`** (Gemini `ChatGoogleGenerativeAI`): **102 testes aprovados** (OK).
+---
+
+## 19. Unificação e Bidirecionalidade Estrita de `data_confirmada` (Ponto 2.1)
+
+* **Problema Original:**
+  1. A derivação de `data_confirmada` mantinha `s` se o LLM alucinasse confirmação mesmo sem haver prazo preenchido.
+  2. Prazos vazios ou genéricos (`"a definir"`, `"sem data"`, `"não definido"`, `"indefinido"`, `"em aberto"`) eram interpretados como datas válidas.
+  3. A branch avaliável e a branch não avaliável (recepção) divergiam para a ação `"envio de material solicitado"` com prazo.
+* **Implementação Concreta:**
+  * Criada a função canônica `derivar_data_confirmada(acao, prazo) -> str` em [`app/services/analise_final_AI.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/services/analise_final_AI.py):
+    - Conjunto rigoroso `_PRAZO_VAZIO` eliminando termos vagos.
+    - Exigência estrita de ação em `("reunião confirmada", "retorno com data combinado")` E prazo não vazio para retornar `'s'`, devolvendo `'n'` em todos os demais casos.
+  * Substituição direta nas **duas branches** (`eh_nao_avaliavel` e avaliável), eliminando qualquer herança de alucinação do modelo.
+
+---
+
+## 20. Validação Pydantic de Unicidade dos Critérios e Proteção da Nota (Ponto 2.2)
+
+* **Problema Original:**
+  1. O modelo Pydantic garantia 6 itens, mas permitia repetição de códigos (ex.: dois `CRIT_SPIN`), fazendo o critério omitido sumir e virar `null` silenciosamente no sanitizador, sem acionar as retentativas do LangChain.
+  2. O modelo poderia usar `null` como atalho para inflar a nota final em 20 pontos em vez de zerar oportunidades desperdiçadas onde o SDR teve abertura para atuar.
+* **Implementação Concreta:**
+  * Em [`app/services/analise_final_AI.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/services/analise_final_AI.py), adicionado `@field_validator("avaliacao_criterio")` em `AnaliseCompletaModel` validando que os 6 critérios são estritamente os 6 códigos oficiais únicos. Caso o LLM repita ou omita códigos, o Pydantic dispara erro imediato, acionando a retentativa automática (`max_retries=3`).
+  * Em [`app/config/prompts.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/config/prompts.py), reforçada a instrução de que oportunidade clara desperdiçada recebe **nota 0**, reservando `null` exclusivamente para falta de abertura dinâmica comprovada na conversa.
+
+---
+
+## 21. Eliminação de Duplicação no DAO (`derivar_status_consolidado_empresa`) (Ponto 2.3)
+
+* **Problema Original:** A lógica de consolidação multichamada de perfil da empresa existia de forma duplicada (como função no DAO e inline dentro de `inserir_analise()`), tornando a função pública código morto em produção e arriscando divergências futuras.
+* **Implementação Concreta:**
+  * Em [`app/database/chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/database/chamadas_dao.py), `derivar_status_consolidado_empresa()` foi aprimorada para suportar dados pré-carregados da transação ativa e parâmetro `persistir: bool`.
+  * Todo o bloco duplicado inline em `inserir_analise()` foi removido, delegando a consolidação multi-chamadas diretamente à função canônica `derivar_status_consolidado_empresa()`.
+  * Garantida a condição `status_final != status_atual` para evitar comandos `UPDATE` redundantes quando o status comercial não sofrer alteração.
+
+---
+
+## 23. Regra do Cargo Mais Alto e Campo `conversa_decisor` (Ponto 2.4)
+
+* **Problema Original:**
+  1. Em prospecções B2B, a ligação quase sempre é atendida por uma secretária/recepcionista (gatekeeper) e em seguida transferida para o decisor ou setor responsável. Se o modelo capturasse apenas a primeira pessoa que atendeu, o cargo relevante era perdido.
+  2. A métrica de "Conversas com Decisor" no Power BI ficava inflada porque qualquer texto livre em `cargo` (incluindo secretária, telefonista ou assistente) era interpretado como conversa com decisor.
+* **Implementação Concreta:**
+  * **Regra do Cargo Mais Alto no Prompt:** Instrução obrigatória em [`app/config/prompts.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/config/prompts.py) ordenando que, em chamadas com múltiplos interlocutores (transferência da recepção), a IA registre o nome (`interlocutor`) e função (`cargo`) do contato mais alto e estratégico com quem o SDR dialogou.
+  * **Campo `conversa_decisor`:**
+    - Criada a coluna `conversa_decisor VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (conversa_decisor IN ('s', 'n'))` na tabela `avaliacao_ia` ([`copia_bd_final.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/copia_bd_final.sql) e migração [`migrations/003_adicionar_conversa_decisor.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/migrations/003_adicionar_conversa_decisor.sql)).
+    - Mapeada no schema Pydantic `AvaliacaoIAModel`.
+    - Persistida no banco via [`app/database/chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/database/chamadas_dao.py).
+  * **Sanitizador Determinístico (`derivar_conversa_decisor`):**
+    - Retorna `'s'` estritamente para **Decisores** (Diretoria, C-Level, Sócios, Proprietário) e **Influenciadores com autonomia de agenda** (Controller, Gerente Fiscal/Financeiro, Contador, Coordenador).
+    - Retorna `'n'` incondicionalmente para Gatekeepers (secretárias, recepção, telefonista, portaria) ou chamadas não avaliáveis (URA, quedas, contato retido).
+    - Permite ao Power BI medir o KPI com uma coluna booleana direta (`conversa_decisor = 's'`), sem risco de dados inflados.
+
+---
+
+## 24. Suíte de Testes Automatizados e Validação Cruzada Atualizada (Fase 3)
+
+* **Novos Testes Adicionados:**
+  * `test_derivar_conversa_decisor_decisores_e_influenciadores`: valida Diretor, Sócio, Controller, Gerente Fiscal, Contador gerando `'s'`.
+  * `test_derivar_conversa_decisor_gatekeepers_e_vazios`: valida Secretária, Recepção, Atendente gerando `'n'`.
+  * `test_chamada_transferida_recepcao_para_diretor_marca_conversa_decisor_s`: valida chamada transferida que capturou Diretor Financeiro.
+  * `test_chamada_retida_recepcao_com_retorno_marca_conversa_decisor_n`: valida chamada retida na secretária gerando `'n'`.
+
+* **Status da Validação da Suíte Completa:**
+  * **114 testes aprovados** (100% OK em 2.74s).
+
+---
+
+## 25. Flags Estruturadas de Investigação do SPIN Selling (`analise_spin`) para o Power BI
+
+* **Problema Original:**
+  * A tabela `analise_spin` continha exclusivamente campos de texto livre (`situacao`, `problema`, `implicacao`, `necessidade_solucao`, `evidencias`, `lacunas`).
+  * No Power BI, o cálculo de indicadores como a **Frequência de Investigação de Implicação** ou **Aderência ao SPIN** dependia de regras frágeis em DAX checando texto não vazio. Isso gerava falsos positivos (ex.: IA explicando em texto longo que o SDR *não* investigou a implicação) e degradação de performance nas consultas analíticas.
+* **Implementação Concreta:**
+  * **Colunas no Banco de Dados:**
+    - Adicionadas as colunas `situacao_investigada`, `problema_investigado`, `implicacao_investigada` e `necessidade_investigada` (`VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (IN ('s', 'n'))`) em `analise_spin` ([`copia_bd_final.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/copia_bd_final.sql)).
+    - Criada a migração [`migrations/004_adicionar_flags_investigacao_spin.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/migrations/004_adicionar_flags_investigacao_spin.sql) com suporte a `ADD COLUMN IF NOT EXISTS` e script de backfill automático para chamadas legadas com base no conteúdo textual existente.
+  * **Schema Pydantic (`AnaliseSpinModel`):**
+    - Campos tipados como `Literal["s", "n"] = Field(default="n")` em [`app/services/analise_final_AI.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/services/analise_final_AI.py), garantindo retrocompatibilidade com payloads sem flags explícitas.
+  * **Sanitizador Determinístico (`derivar_spin_investigado`):**
+    - Em [`app/services/analise_final_AI.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/services/analise_final_AI.py), todas as chamadas não avaliáveis (quedas, URA, contato retido) forçam incondicionalmente as 4 flags para `'n'`.
+    - Textos correspondentes a `"Não se aplica"`, `"não informado"`, `"nenhum"` ou vazios forçam a flag para `'n'`, protegendo o dashboard contra alucinações da IA.
+    - Se a IA marcar explicitamente `'n'`, o valor negativo é respeitado mesmo que haja texto descritivo.
+    - Diálogos com investigação comprovada recebem `'s'`.
+  * **Camada de Persistência (DAO):**
+    - Atualizado o comando de persistência em [`app/database/chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/database/chamadas_dao.py) no `INSERT INTO analise_spin` e no bloco `ON CONFLICT (log) DO UPDATE SET` para gravar as 4 flags.
+  * **Prompt da IA:**
+    - Em [`app/config/prompts.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/config/prompts.py), atualizadas as instruções da metodologia SPIN Selling e o exemplo de payload JSON com as 4 chaves de classificação.
+  * **Testes Unitários:**
+    - Criados 4 novos testes cobrindo derivação determinística, sanitização com chamadas avaliáveis e não avaliáveis, e modelo Pydantic em [`tests/test_analise.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/tests/test_analise.py), além de asserções no DAO em [`tests/test_chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/tests/test_chamadas_dao.py). Total de **114 testes passando**.
+
+---
+
+## 26. Múltiplas Oportunidades de Treinamento (N:N) e Blindagem de Notas NULL ("Não Avaliável")
+
+* **Problema Original:**
+  1. **Oportunidades de Treinamento 1:1:** A tabela `avaliacao_sdr` possuía apenas uma coluna de chave estrangeira (`codigo_oportunidade VARCHAR(20)`). Quando o SDR cometia mais de um desvio na mesma ligação (ex.: falha de investigação de regime tributário e falha em aprofundar implicação), a IA era obrigada a escolher apenas um código, distorcendo e subdimensionando o ranking de capacitação do Power BI.
+  2. **Risco de Vazamento de Notas em Chamadas Não Avaliáveis:** O motor de gravação no banco (`inserir_analise` em `chamadas_dao.py`) confiava no dicionário recebido sem trava defensiva própria. Além disso, no sanitizador, uma condição checando `not tem_pontos_positivos` permitia que alucinações de pontuação no critério contornassem a detecção quando o texto "não avaliável" ocorria no meio da frase.
+* **Implementação Concreta:**
+  * **Banco de Dados (Tabela N:N e Migração 005):**
+    - Criada a tabela fato-ponte `avaliacao_oportunidade_treinamento (log, codigo_oportunidade)` com chave primária composta e integridade referencial com cascata em [`copia_bd_final.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/copia_bd_final.sql).
+    - Criada a migração [`migrations/005_criar_avaliacao_oportunidade_treinamento.sql`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/migrations/005_criar_avaliacao_oportunidade_treinamento.sql) com bloco seguro de backfill automático dos registros históricos de `avaliacao_sdr.codigo_oportunidade` e subsequente remoção da coluna legada.
+  * **Modelagem Pydantic (`AvaliacaoSDRModel`):**
+    - Adicionado o campo `codigos_oportunidade: list[str] = Field(default_factory=list)`.
+    - Implementado `model_validator(mode="before")` para harmonização retrocompatível: aceita string única legada ou lista, mantendo ambos os campos consistentes.
+  * **Dupla Barreira Defensiva para Notas NULL:**
+    - **Barreira 1 (Sanitizador):** Menção a `"não avaliável"` ou `"nao avaliavel"` no feedback ou `ligacao_relevante = 'n'` agora é incondicionalmente soberana em [`app/services/analise_final_AI.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/services/analise_final_AI.py), forçando `nota_final = None`, `codigos_oportunidade = []` e todas as `nota_criterio = None`.
+    - **Barreira 2 (Motor de Banco / DAO):** Trava de segurança autônoma implementada no início de `inserir_analise()` em [`app/database/chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/database/chamadas_dao.py). Qualquer chamada classificada como não avaliável tem todas as suas notas zeradas para `NULL` antes da gravação no PostgreSQL.
+  * **Prompt da IA:**
+    - Atualizada a Seção 6 e o exemplo de JSON em [`app/config/prompts.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/config/prompts.py) para instruir o modelo a retornar uma lista de 1 a 3 códigos em `codigos_oportunidade`.
+  * **Validação Automatizada:**
+    - Novos testes unitários em `tests/test_analise.py` e `tests/test_chamadas_dao.py` cobrindo sanitização de múltiplas tags, harmonização Pydantic, inserção no DAO e a trava defensiva contra vazamento de notas.
+    - **118 testes aprovados** (100% OK em 2.73s).
+
+
 
