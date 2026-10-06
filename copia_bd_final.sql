@@ -204,8 +204,7 @@ CREATE TABLE IF NOT EXISTS analise_perfil (
         'confirmado pelo interlocutor',
         'afirmado apenas pelo SDR',
         'inferência plausível',
-        'não informado',
-        'calculado'
+        'não informado'
     )),
     faturamento_regra VARCHAR(50) NOT NULL CHECK (faturamento_regra IN (
         'declarado_mensal',
@@ -228,7 +227,8 @@ INSERT INTO dim_criterio_avaliacao (codigo, descricao) VALUES
 ('CRIT_PERFIL', 'Investigação adequada do perfil: setor, regime tributário, faturamento'),
 ('CRIT_BANT', 'Investigação BANT: viabilidade comercial, autoridade, necessidade, prazo'),
 ('CRIT_ESCUTA', 'Escuta, aprofundamento e tratamento respeitoso de dúvidas ou objeções'),
-('CRIT_PROX_PASSO', 'Proposta de próximo passo pertinente e tentativa de obter compromisso claro');
+('CRIT_PROX_PASSO', 'Proposta de próximo passo pertinente e tentativa de obter compromisso claro')
+ON CONFLICT (codigo) DO NOTHING;
 
 
 INSERT INTO dim_oportunidade_treinamento (codigo, fase_venda, descricao) VALUES
@@ -281,5 +281,6 @@ INSERT INTO dim_oportunidade_treinamento (codigo, fase_venda, descricao) VALUES
 -- 7. Direcionamento Final e Resolução da Chamada
 ('OP_DIR_01', '7. Direcionamento Final e Resolução da Chamada', 'Direcionamento assertivo com base no perfil: Avaliar se o SDR identificou corretamente quando uma empresa estava fora do perfil (ex: Simples Nacional ou faturamento baixo) e encerrou a conversa de forma polida e adequada, sem forçar avanço em leads desqualificados.'),
 ('OP_DIR_02', '7. Direcionamento Final e Resolução da Chamada', 'Condução para uma conversa substantiva: Observar se o vendedor teve a habilidade de transpor a barreira inicial (recepção, desinteresse inicial) para gerar uma conversa real com o decisor, em vez de aceitar recusas passivas nos primeiros segundos.'),
-('OP_DIR_03', '7. Direcionamento Final e Resolução da Chamada', 'Consolidação de um status claro: Verificar se o SDR conduziu a ligação até um desfecho conclusivo (perfil confirmado, perfil pendente com próximo passo ou descarte claro), evitando encerrar a chamada deixando o status da empresa como uma "área cinzenta" de dados insuficientes por falta de perguntas.');
+('OP_DIR_03', '7. Direcionamento Final e Resolução da Chamada', 'Consolidação de um status claro: Verificar se o SDR conduziu a ligação até um desfecho conclusivo (perfil confirmado, perfil pendente com próximo passo ou descarte claro), evitando encerrar a chamada deixando o status da empresa como uma "área cinzenta" de dados insuficientes por falta de perguntas.')
+ON CONFLICT (codigo) DO NOTHING;
 

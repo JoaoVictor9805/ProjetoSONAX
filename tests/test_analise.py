@@ -349,7 +349,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res = calcular_e_sanitizar_analise(dados)
         perfil = res["analise_perfil"]
         self.assertEqual(perfil["faturamento_mensal"], 2000000.0)
-        self.assertEqual(perfil["faturamento_origem"], "calculado")
+        self.assertEqual(perfil["faturamento_origem"], "confirmado pelo interlocutor")
         self.assertEqual(perfil["faturamento_regra"], "calculado_12_meses")
         self.assertIn("calculada deterministicamente", perfil["detalhes_faturamento"])
         # Como Lucro Real foi confirmado e 2M >= 1M calculado, qualifica como Perfil confirmado!
@@ -691,8 +691,8 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(criterios_dict["CRIT_PERFIL"], 20)
         self.assertIsNone(criterios_dict["CRIT_SPIN"])        # Criado como None pois estava ausente
 
-        # Soma total: 8 + 20 = 28
-        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 28)
+        # Como soma dos tetos avaliados (10 + 25 = 35) < 50 (piso mínimo), nota_final global fica None
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
 
     def test_bant_normalizado(self):
         dados = {
@@ -726,6 +726,129 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(bant["need_evidencia"], "Prospect afirmou não ter dores fiscais.")
         self.assertEqual(bant["timeline_classificacao"], "não informado")
         self.assertEqual(bant["timeline_evidencia"], "Não se aplica")
+
+    def test_faturamento_anual_afirmado_sdr_nao_confirma_perfil(self):
+        """Faturamento afirmado apenas pelo SDR calcula mensal mas NÃO qualifica Perfil confirmado."""
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil confirmado", "ligacao_relevante": "s"},
+            "analise_perfil": {
+                "faturamento_declarado_texto": "Vocês faturam 24 milhões ano passado, certo?",
+                "faturamento_anual": 24000000.0,
+                "periodo_meses": 12,
+                "faturamento_origem": "afirmado apenas pelo SDR",
+                "regime_tributario": "Lucro Real",
+                "regime_origem": "confirmado pelo interlocutor",
+            },
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        perfil = res["analise_perfil"]
+        self.assertEqual(perfil["faturamento_mensal"], 2000000.0)
+        self.assertEqual(perfil["faturamento_origem"], "afirmado apenas pelo SDR")
+        self.assertEqual(perfil["faturamento_regra"], "calculado_12_meses")
+        # Não pode virar Perfil confirmado pois o faturamento não foi confirmado pelo lead!
+        self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
+
+    def test_normalizacao_proporcional_nota_final(self):
+        """Testa que 4 critérios avaliados somando 62/75 normalizam para nota_final = 83."""
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Boa condução parcial."},
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "nota_criterio": 9},    # teto 10
+                {"codigo_criterio": "CRIT_SPIN", "nota_criterio": 25},        # teto 30
+                {"codigo_criterio": "CRIT_PERFIL", "nota_criterio": 20},      # teto 25
+                {"codigo_criterio": "CRIT_PROX_PASSO", "nota_criterio": 8},   # teto 10
+                # CRIT_BANT (15) e CRIT_ESCUTA (10) ausentes -> soma_tetos = 75, soma_obtida = 62
+            ],
+            "crm": {"resumo": "Ok"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        # 62 / 75 * 100 = 82.666... -> round -> 83
+        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 83)
+
+        # Critérios ausentes devem permanecer com nota None
+        crit_map = {c["codigo_criterio"]: c["nota_criterio"] for c in res["avaliacao_criterio"]}
+        self.assertEqual(crit_map["CRIT_ABERTURA"], 9)
+        self.assertEqual(crit_map["CRIT_SPIN"], 25)
+        self.assertEqual(crit_map["CRIT_PERFIL"], 20)
+        self.assertEqual(crit_map["CRIT_PROX_PASSO"], 8)
+        self.assertIsNone(crit_map["CRIT_BANT"])
+        self.assertIsNone(crit_map["CRIT_ESCUTA"])
+
+    def test_normalizacao_proporcional_abaixo_piso_fica_null(self):
+        """Chamada avaliável com soma de tetos < 50 pontos não gera nota_final global (fica None)."""
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Chamada breve com decisor."},
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "nota_criterio": 9},  # teto 10
+                {"codigo_criterio": "CRIT_ESCUTA", "nota_criterio": 8},    # teto 10 -> soma_tetos = 20 (< 50)
+            ],
+            "crm": {"resumo": "Ok"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        # Como soma_tetos = 20 < 50, nota_final é None para não gerar um falso 85/100
+        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+
+        # Mas as notas individuais nos critérios existem para fins de coaching
+        crit_map = {c["codigo_criterio"]: c["nota_criterio"] for c in res["avaliacao_criterio"]}
+        self.assertEqual(crit_map["CRIT_ABERTURA"], 9)
+        self.assertEqual(crit_map["CRIT_ESCUTA"], 8)
+
+    def test_codigo_oportunidade_op_esc_04_e_invalido_vira_none(self):
+        """OP_ESC_04 ou código inexistente vira None (sem código inventado)."""
+        dados1 = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": 70, "codigo_oportunidade": "OP_ESC_04", "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+        res1 = calcular_e_sanitizar_analise(dados1)
+        self.assertIsNone(res1["avaliacao_sdr"]["codigo_oportunidade"])
+
+        dados2 = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": 70, "codigo_oportunidade": "OP_CODIGO_INEXISTENTE", "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"resumo": "Ok"},
+        }
+        res2 = calcular_e_sanitizar_analise(dados2)
+        self.assertIsNone(res2["avaliacao_sdr"]["codigo_oportunidade"])
+
+    def test_data_confirmada_derivada_do_prazo(self):
+        """data_confirmada deve ser 's' quando o prazo for uma data/hora concreta."""
+        # Caso 1: Recepção com retorno agendado com data
+        dados_recepcao = {
+            "avaliacao_ia": {"resultado": "Dados insuficientes", "ligacao_relevante": "n"},
+            "avaliacao_sdr": {"nota_final": None, "feedback_geral": "Não avaliável: Recepção"},
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "retorno com data combinado",
+                "prazo": "Amanhã às 14h",
+                "resumo": "Falar com financeiro.",
+            },
+        }
+        res_rec = calcular_e_sanitizar_analise(dados_recepcao)
+        self.assertEqual(res_rec["avaliacao_ia"]["ligacao_relevante"], "s")
+        self.assertEqual(res_rec["avaliacao_ia"]["data_confirmada"], "s")
+        self.assertEqual(res_rec["avaliacao_ia"]["reuniao_confirmada"], "n")
+
+        # Caso 2: Chamada sem prazo definido
+        dados_sem_prazo = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": 80, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "sem próximo passo definido",
+                "prazo": "Não se aplica",
+                "resumo": "Sem data.",
+            },
+        }
+        res_sp = calcular_e_sanitizar_analise(dados_sem_prazo)
+        self.assertEqual(res_sp["avaliacao_ia"]["data_confirmada"], "n")
 
 
 if __name__ == "__main__":

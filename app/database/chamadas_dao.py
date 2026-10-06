@@ -362,6 +362,70 @@ def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:
     pass
 
 
+def derivar_status_consolidado_empresa(cur: psycopg.Cursor, empresa_id: int) -> str | None:
+    """
+    Avalia os dados consolidados da empresa no banco e calcula o status_comercial resultante:
+    - 'Perfil confirmado': Lucro Real (confirmado pelo interlocutor) E faturamento mensal >= R$ 1 milhão (confirmado pelo interlocutor).
+    - 'Fora do perfil desta campanha': outro regime confirmado (Simples, Presumido, MEI) OU faturamento < 1M (confirmado pelo interlocutor).
+    - 'Perfil pendente': empresa possui algum contato/dado, mas falta confirmar regime ou faturamento.
+    - 'Dados insuficientes': sem dados cadastrais mínimos.
+    """
+    cur.execute(
+        """
+        SELECT regime_tributario, regime_origem, faturamento_mensal, faturamento_origem, status_comercial
+        FROM empresa
+        WHERE id_empresa = %s
+        LIMIT 1;
+        """,
+        (empresa_id,),
+    )
+    row = cur.fetchone()
+    if not row or len(row) < 5:
+        return None
+
+    regime, orig_regime, fat_mensal, orig_fat, status_atual = row
+    regime_str = (regime or "").strip().lower()
+    regime_conf = orig_regime == "confirmado pelo interlocutor"
+    eh_lucro_real = "lucro real" in regime_str
+    outro_regime_conf = regime_conf and not eh_lucro_real and any(r in regime_str for r in ("simples", "presumido", "mei"))
+
+    try:
+        fat_val = float(fat_mensal) if fat_mensal is not None else None
+    except (ValueError, TypeError):
+        fat_val = None
+
+    fat_conf = orig_fat == "confirmado pelo interlocutor"
+    fat_minimo_ok = fat_val is not None and fat_val >= 1000000.0
+    fat_abaixo_conf = fat_conf and fat_val is not None and fat_val < 1000000.0
+
+    if outro_regime_conf or fat_abaixo_conf:
+        novo_status = "Fora do perfil desta campanha"
+    elif eh_lucro_real and regime_conf and fat_minimo_ok and fat_conf:
+        novo_status = "Perfil confirmado"
+    elif regime or fat_val is not None or status_atual in ("Perfil pendente", "Perfil confirmado"):
+        novo_status = "Perfil pendente"
+    else:
+        novo_status = status_atual or "Dados insuficientes"
+
+    pesos_status = {
+        "Perfil confirmado": 3,
+        "Fora do perfil desta campanha": 3,
+        "Perfil pendente": 2,
+        "Dados insuficientes": 1,
+    }
+    peso_novo = pesos_status.get(novo_status, 1)
+    peso_atual = pesos_status.get(status_atual, 0) if status_atual else 0
+
+    if peso_novo >= peso_atual or status_atual is None:
+        cur.execute(
+            "UPDATE empresa SET status_comercial = %s WHERE id_empresa = %s;",
+            (novo_status, empresa_id),
+        )
+        return novo_status
+
+    return status_atual
+
+
 def inserir_analise(
     cur: psycopg.Cursor,
     log: str,
@@ -658,7 +722,6 @@ def inserir_analise(
     if empresa_id:
         pesos_origem = {
             "confirmado pelo interlocutor": 3,
-            "calculado": 3,
             "afirmado apenas pelo SDR": 2,
             "inferência plausível": 1,
             "não informado": 0,
@@ -674,7 +737,7 @@ def inserir_analise(
         # Busca dados, origens e status atuais da empresa
         cur.execute(
             """
-            SELECT setor_origem, regime_origem, faturamento_origem, status_comercial
+            SELECT setor_origem, regime_origem, faturamento_origem, status_comercial, regime_tributario, faturamento_mensal
             FROM empresa
             WHERE id_empresa = %s
             LIMIT 1;
@@ -686,6 +749,8 @@ def inserir_analise(
         orig_regime_atual = row_emp[1] if row_emp and len(row_emp) > 1 else None
         orig_fat_atual = row_emp[2] if row_emp and len(row_emp) > 2 else None
         status_comercial_atual = row_emp[3] if row_emp and len(row_emp) > 3 else None
+        regime_atual = row_emp[4] if row_emp and len(row_emp) > 4 else None
+        fat_atual = row_emp[5] if row_emp and len(row_emp) > 5 else None
 
         nova_orig_setor = str(perfil.get("setor_origem") or "não informado")
         nova_orig_regime = str(perfil.get("regime_origem") or "não informado")
@@ -710,10 +775,35 @@ def inserir_analise(
             and pesos_origem.get(nova_orig_fat, 0) > 0
         )
 
-        peso_novo_status = pesos_status.get(str(resultado_comercial), 0)
+        # Consolidação inteligente de status multichamadas
+        regime_final = regime_val if deve_atualizar_regime else regime_atual
+        orig_regime_final = nova_orig_regime if deve_atualizar_regime else orig_regime_atual
+        fat_final = fat_mensal if deve_atualizar_fat else fat_atual
+        orig_fat_final = nova_orig_fat if deve_atualizar_fat else orig_fat_atual
+
+        eh_lucro_real_final = "lucro real" in str(regime_final or "").lower()
+        regime_conf_final = orig_regime_final == "confirmado pelo interlocutor"
+        fat_conf_final = orig_fat_final == "confirmado pelo interlocutor"
+        try:
+            fat_num_final = float(fat_final) if fat_final is not None else None
+        except (ValueError, TypeError):
+            fat_num_final = None
+        fat_minimo_final = fat_num_final is not None and fat_num_final >= 1000000.0
+
+        outro_regime_conf_final = regime_conf_final and not eh_lucro_real_final and any(r in str(regime_final or "").lower() for r in ("simples", "presumido", "mei"))
+        fat_abaixo_conf_final = fat_conf_final and fat_num_final is not None and fat_num_final < 1000000.0
+
+        if outro_regime_conf_final or fat_abaixo_conf_final:
+            resultado_consolidado = "Fora do perfil desta campanha"
+        elif eh_lucro_real_final and regime_conf_final and fat_minimo_final and fat_conf_final:
+            resultado_consolidado = "Perfil confirmado"
+        else:
+            resultado_consolidado = resultado_comercial
+
+        peso_novo_status = pesos_status.get(str(resultado_consolidado), 0)
         peso_atual_status = pesos_status.get(str(status_comercial_atual), 0)
         deve_atualizar_status = (
-            resultado_comercial is not None
+            resultado_consolidado is not None
             and (status_comercial_atual is None or peso_novo_status >= peso_atual_status)
         )
 
@@ -721,7 +811,7 @@ def inserir_analise(
         params = []
         if deve_atualizar_status:
             updates.append("status_comercial = %s")
-            params.append(str(resultado_comercial)[:100])
+            params.append(str(resultado_consolidado)[:100])
         if deve_atualizar_setor:
             updates.append("setor = %s, setor_origem = %s")
             params.extend([str(setor_val)[:100], nova_orig_setor[:50]])
