@@ -119,7 +119,7 @@ Este documento registra todas as alterações e correções estruturais, determi
 
 ---
 
-## 11. Suíte de Testes Automatizados e Validação Cruzada
+## 11. Suíte de Testes Automatizados e Validação Cruzada (Fase 1)
 
 * **Testes Dedicados Implementados:**
   * `test_sobrescrita_incondicional_metadados_sistema`: injeção forçada de protocolo, data, modelo e substituição/limpeza de ID de empresa alucinado (1054).
@@ -132,6 +132,82 @@ Este documento registra todas as alterações e correções estruturais, determi
   * `test_inserir_analise_nao_executa_ddl_runtime`: verificação de ausência de comandos `ALTER TABLE` / `CREATE TABLE` em runtime.
   * `test_bant_normalizado`: normalização das 4 classificações BANT e suas evidências.
 
+---
+
+## 12. Validação Estrita de Faturamento e Qualificação de Perfil (Ponto 1.1)
+
+* **Problema Original:** Quando o SDR afirmava o faturamento da empresa ("Vocês faturam 500 mil, né?") e o cliente apenas concordava monossilabicamente ou desconversava, o LLM classificava a origem como `"calculado"` ou `"afirmado pelo SDR"`. Mesmo assim, o sistema promovia a chamada para `"Perfil confirmado"`. Além disso, a opção `"calculado"` existia no `CHECK` constraint do banco e no schema Pydantic, permitindo inferências não auditadas.
+* **Implementação Concreta:**
+  * **Remoção de `"calculado"`:** Eliminado de `ORIGENS_FATURAMENTO_VALIDAS`, do enum Pydantic `AnalisePerfilModel`, do prompt oficial e do `CHECK` constraint em `copia_bd_final.sql`. Caso o LLM gere `"calculado"`, a função determinística `normalizar_origem_faturamento()` converte automaticamente para `"não informado"`.
+  * **Coerção Rigorosa de Status da Chamada:** Para que uma chamada receba `resultado: "Perfil confirmado"`, é mandatório que `faturamento_origem == "confirmado pelo interlocutor"`. Se a origem for `"afirmado pelo SDR"` ou `"não informado"`, o status da chamada é coagido deterministicamente para `"Perfil pendente"`, impedindo que presunções do vendedor distorçam as métricas do BI.
+
+---
+
+## 13. Consolidação Multi-Chamada do Perfil da Empresa no DAO (Ponto 1.2)
+
+* **Problema Original:** O status comercial da empresa (`empresa.status_comercial`) era atualizado com base apenas no resultado isolado da última chamada. Se a Chamada 1 confirmava o regime tributário (ex.: Lucro Real) e a Chamada 2 confirmava o faturamento (ex.: R$ 200k), a Chamada 2 isoladamente era classificada como `"Perfil pendente"` e o status da empresa permanecia `"Perfil pendente"`, ignorando os dados já acumulados no cadastro da empresa.
+* **Implementação Concreta:**
+  * Implementada a função `derivar_status_consolidado_empresa(cur, empresa_id)` em `app/database/chamadas_dao.py`.
+  * Na persistência da análise (`inserir_analise`), o sistema consolida as informações acumuladas na tabela `empresa` (regime tributário e faturamento mensal histórico + dados da chamada atual).
+  * Se a união dos dados acumulados atender aos critérios de qualificação (regime tributário conhecido e elegível + faturamento dentro da faixa de interesse com origem confirmada), o status acumulado da empresa é promovido para `"Perfil confirmado"`. A hierarquia anti-regressão impede que contatos subsequentes fracos rebaixem esse status consolidado.
+
+---
+
+## 14. Aumento do Limite de Saída do LLM (`max_tokens = 4096`) (Ponto 1.3)
+
+* **Problema Original:** O parâmetro `max_tokens` da chamada ao modelo de análise final estava configurado em `2500`. Em conversas longas ou com justificativas detalhadas em todos os 6 critérios, o JSON de resposta estourava o teto e era truncado, causando erro de parsing de JSON.
+* **Implementação Concreta:**
+  * O limite `max_tokens` foi elevado para `4096` em `app/services/analise_final_AI.py` (e no cliente LLM correspondente), acomodando com folga o payload estruturado completo (SPIN, BANT, Perfil, 6 Critérios, CRM e Oportunidades).
+
+---
+
+## 15. Idempotência das Cargas Iniciais DDL (`ON CONFLICT DO NOTHING`) (Ponto 1.4)
+
+* **Problema Original:** Os comandos de carga inicial nas tabelas `dim_criterio_avaliacao` e `dim_oportunidade_treinamento` no script `copia_bd_final.sql` eram `INSERT INTO ...` diretos. Se o script fosse executado mais de uma vez para atualização do banco, gerava violação de chave primária duplicada (`unique_violation`).
+* **Implementação Concreta:**
+  * Adicionada a cláusula `ON CONFLICT (codigo) DO NOTHING;` aos blocos de inserção de dimensões em `copia_bd_final.sql`, tornando o script SQL seguro e 100% idempotente para reexecução contínua.
+
+---
+
+## 16. Oportunidades de Treinamento e Confirmação de Reunião (Ponto 1.5)
+
+* **Problema Original:**
+  1. O código de oportunidade `OP_ESC_04` ("Interrupção ou sobreposição excessiva de fala") gerava frequentes falsos positivos porque os áudios gravados são mono sem diarização acústica por locutor, impossibilitando mensuração fidedigna de interrupções reais.
+  2. Caso o LLM sugerisse um código inexistente, a restrição de FK no banco falhava.
+  3. Quando uma reunião era agendada com data definida (`crm.prazo`), o campo booleano `data_confirmada` não era automaticamente preenchido.
+* **Implementação Concreta:**
+  * **Remoção de `OP_ESC_04`:** O código foi retirado do prompt oficial (`app/config/prompts.py`) e da tabela `dim_oportunidade_treinamento`.
+  * **Fallback Seguro de Oportunidades:** Se o modelo retornar um código desconhecido ou o legado `OP_ESC_04`, o sanitizador converte graciosamente para `None`, sem quebrar a ingestão.
+  * **Derivação de `data_confirmada`:** Quando `crm.prazo` contiver uma data/horário válido de agendamento e a ação indicar reunião marcada, o sanitizador preenche deterministicamente `data_confirmada = 's'`, garantindo consistência com o visual de reuniões no Power BI.
+
+---
+
+## 17. Normalização Proporcional de Notas com Cláusula de Barreira (Ponto 1.6)
+
+* **Problema Original:** Em chamadas enxutas ou objetivas onde o interlocutor aceitou a proposta rapidamente ou não permitiu aprofundar todos os blocos (ex.: sem necessidade de BANT completo na ligação), zerar critérios não abordados penalizaria injustamente a nota do SDR. Por outro lado, avaliar apenas 1 critério isolado (ex.: Abertura, 10/10) e extrapolar para 100 criaria notas máximas ilusórias em ligações de 30 segundos.
+* **Implementação Concreta:**
+  * **Normalização Proporcional (Regra dos 100 pontos):**
+    * Quando determinados critérios não puderem ser avaliados por falta de oportunidade na conversa, o LLM retorna `nota_criterio: null` com a justificativa *"Sem oportunidade na conversa"*.
+    * O sanitizador preserva as notas individuais dos critérios abordados (alimentando o coaching do SDR).
+    * A nota final da chamada é recalculada proporcionalmente em base 100:
+      $$\text{nota\_final} = \text{round}\left(\frac{\sum \text{notas obtidas}}{\sum \text{tetos dos critérios avaliados}} \times 100\right)$$
+  * **Cláusula de Barreira (Mínimo de 50 pontos possíveis):**
+    * Se a soma dos tetos dos critérios avaliáveis for **menor que 50 pontos** (ex.: apenas Abertura de 10 pts ou Abertura + Escuta = 20 pts), a ligação é considerada sem profundidade suficiente para ter nota final representativa.
+    * Nesses casos, o sanitizador força `nota_final = None` (não entra no cálculo de `AVERAGE` do Power BI), enquanto as notas dos critérios existentes permanecem armazenadas para histórico e mentoria.
+
+---
+
+## 18. Suíte de Testes Automatizados e Validação Cruzada Atualizada
+
+* **Novos Testes Adicionados:**
+  * `test_faturamento_afirmado_sdr_nao_confirma_perfil`: garante que faturamento afirmado apenas pelo SDR ou calculado coaja o status da chamada para `Perfil pendente`.
+  * `test_normalizacao_proporcional_nota_final_acima_50_pontos`: valida recálculo proporcional (ex.: 62/75 pontos possíveis normalizado para 83/100).
+  * `test_normalizacao_proporcional_abaixo_50_pontos_anula_nota_final`: valida cláusula de barreira (< 50 pontos possíveis resulta em `nota_final = None`).
+  * `test_oportunidade_treinamento_invalida_vira_none`: garante fallback para `None` em códigos inválidos ou `OP_ESC_04`.
+  * `test_prazo_crm_preenche_data_confirmada`: valida derivação automática de `data_confirmada = 's'`.
+  * `test_derivar_status_consolidado_empresa`: testa a consolidação multi-chamada dos dados cadastrais acumulados da empresa.
+
 * **Status da Validação nas Duas Branches:**
-  * **Branch `testeMatt`** (OpenRouter / GPT-4o-mini): **91 testes aprovados** (OK).
-  * **Branch `testeIa-gratuita`** (Gemini `ChatGoogleGenerativeAI` preservado): **96 testes aprovados** (OK).
+  * **Branch `testeMatt`** (OpenRouter / GPT-4o-mini): **97 testes aprovados** (OK).
+  * **Branch `testeIa-gratuita`** (Gemini `ChatGoogleGenerativeAI`): **102 testes aprovados** (OK).
+
