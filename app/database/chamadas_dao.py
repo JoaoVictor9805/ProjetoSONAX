@@ -362,7 +362,18 @@ def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:
     pass
 
 
-def derivar_status_consolidado_empresa(cur: psycopg.Cursor, empresa_id: int) -> str | None:
+def derivar_status_consolidado_empresa(
+    cur: psycopg.Cursor,
+    empresa_id: int,
+    *,
+    resultado_ligacao: str | None = None,
+    regime: str | None = None,
+    orig_regime: str | None = None,
+    fat_mensal: float | None = None,
+    orig_fat: str | None = None,
+    status_atual: str | None = None,
+    persistir: bool = True,
+) -> str | None:
     """
     Avalia os dados consolidados da empresa no banco e calcula o status_comercial resultante:
     - 'Perfil confirmado': Lucro Real (confirmado pelo interlocutor) E faturamento mensal >= R$ 1 milhão (confirmado pelo interlocutor).
@@ -370,20 +381,22 @@ def derivar_status_consolidado_empresa(cur: psycopg.Cursor, empresa_id: int) -> 
     - 'Perfil pendente': empresa possui algum contato/dado, mas falta confirmar regime ou faturamento.
     - 'Dados insuficientes': sem dados cadastrais mínimos.
     """
-    cur.execute(
-        """
-        SELECT regime_tributario, regime_origem, faturamento_mensal, faturamento_origem, status_comercial
-        FROM empresa
-        WHERE id_empresa = %s
-        LIMIT 1;
-        """,
-        (empresa_id,),
-    )
-    row = cur.fetchone()
-    if not row or len(row) < 5:
-        return None
+    if regime is None and orig_regime is None and fat_mensal is None and status_atual is None:
+        cur.execute(
+            """
+            SELECT regime_tributario, regime_origem, faturamento_mensal, faturamento_origem, status_comercial
+            FROM empresa
+            WHERE id_empresa = %s
+            LIMIT 1;
+            """,
+            (empresa_id,),
+        )
+        row = cur.fetchone()
+        if not row or len(row) < 5:
+            return None
 
-    regime, orig_regime, fat_mensal, orig_fat, status_atual = row
+        regime, orig_regime, fat_mensal, orig_fat, status_atual = row
+
     regime_str = (regime or "").strip().lower()
     regime_conf = orig_regime == "confirmado pelo interlocutor"
     eh_lucro_real = "lucro real" in regime_str
@@ -402,10 +415,12 @@ def derivar_status_consolidado_empresa(cur: psycopg.Cursor, empresa_id: int) -> 
         novo_status = "Fora do perfil desta campanha"
     elif eh_lucro_real and regime_conf and fat_minimo_ok and fat_conf:
         novo_status = "Perfil confirmado"
+    elif resultado_ligacao in ("Perfil confirmado", "Fora do perfil desta campanha", "Perfil pendente"):
+        novo_status = resultado_ligacao
     elif regime or fat_val is not None or status_atual in ("Perfil pendente", "Perfil confirmado"):
         novo_status = "Perfil pendente"
     else:
-        novo_status = status_atual or "Dados insuficientes"
+        novo_status = status_atual or resultado_ligacao or "Dados insuficientes"
 
     pesos_status = {
         "Perfil confirmado": 3,
@@ -416,14 +431,15 @@ def derivar_status_consolidado_empresa(cur: psycopg.Cursor, empresa_id: int) -> 
     peso_novo = pesos_status.get(novo_status, 1)
     peso_atual = pesos_status.get(status_atual, 0) if status_atual else 0
 
-    if peso_novo >= peso_atual or status_atual is None:
+    status_final = novo_status if (peso_novo >= peso_atual or status_atual is None) else status_atual
+
+    if persistir and status_final != status_atual and (peso_novo >= peso_atual or status_atual is None):
         cur.execute(
             "UPDATE empresa SET status_comercial = %s WHERE id_empresa = %s;",
-            (novo_status, empresa_id),
+            (status_final, empresa_id),
         )
-        return novo_status
 
-    return status_atual
+    return status_final
 
 
 def inserir_analise(
@@ -442,6 +458,23 @@ def inserir_analise(
     bant = analise.get("analise_bant", {})
     interlocutor = analise.get("interlocutor", {})
     crm = analise.get("crm", {})
+
+    # Trava defensiva do motor de banco: força NULL em notas se chamada for não avaliável
+    fb_geral_lower = str(av_sdr.get("feedback_geral") or "").lower()
+    eh_nao_avaliavel_dao = (
+        av_ia.get("ligacao_relevante") == "n"
+        or fb_geral_lower.startswith("não avaliável")
+        or fb_geral_lower.startswith("nao avaliavel")
+        or "não avaliável" in fb_geral_lower
+        or "nao avaliavel" in fb_geral_lower
+    )
+    if eh_nao_avaliavel_dao:
+        av_sdr["nota_final"] = None
+        av_sdr["codigos_oportunidade"] = []
+        av_sdr["codigo_oportunidade"] = None
+        for crit in av_criterios:
+            crit["nota_criterio"] = None
+
 
     # Data da avaliação
     dt_av_str = av_ia.get("data_avaliacao")
@@ -468,6 +501,7 @@ def inserir_analise(
     lig_rel = "s" if str(av_ia.get("ligacao_relevante", "n")).lower() == "s" else "n"
     reun_conf = "s" if str(av_ia.get("reuniao_confirmada", "n")).lower() == "s" else "n"
     data_conf = "s" if str(av_ia.get("data_confirmada", "n")).lower() == "s" else "n"
+    conv_dec = "s" if str(av_ia.get("conversa_decisor", "n")).lower() == "s" else "n"
 
     # 1. Inserir / Atualizar avaliacao_ia
     cur.execute(
@@ -475,9 +509,9 @@ def inserir_analise(
         INSERT INTO avaliacao_ia (
             log, data_avaliacao, modelo_ia, interlocutor, cargo,
             empresa_contatada, resultado, ligacao_relevante,
-            reuniao_confirmada, data_confirmada, resultado_frase
+            reuniao_confirmada, data_confirmada, conversa_decisor, resultado_frase
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (log) DO UPDATE SET
             data_avaliacao = EXCLUDED.data_avaliacao,
             modelo_ia = EXCLUDED.modelo_ia,
@@ -488,6 +522,7 @@ def inserir_analise(
             ligacao_relevante = EXCLUDED.ligacao_relevante,
             reuniao_confirmada = EXCLUDED.reuniao_confirmada,
             data_confirmada = EXCLUDED.data_confirmada,
+            conversa_decisor = EXCLUDED.conversa_decisor,
             resultado_frase = EXCLUDED.resultado_frase
         RETURNING log;
         """,
@@ -502,6 +537,7 @@ def inserir_analise(
             lig_rel,
             reun_conf,
             data_conf,
+            conv_dec,
             str(av_ia.get("resultado_frase", "")),
         ),
     )
@@ -509,28 +545,21 @@ def inserir_analise(
         return None
 
     # 2. Inserir / Atualizar avaliacao_sdr
-    cod_op = av_sdr.get("codigo_oportunidade")
-    if cod_op:
-        cur.execute("SELECT 1 FROM dim_oportunidade_treinamento WHERE codigo = %s LIMIT 1;", (cod_op,))
-        if not cur.fetchone():
-            cod_op = None
-
     frase_alt = str(av_sdr.get("frase_alternativa", ""))[:500] if av_sdr.get("frase_alternativa") else None
 
     cur.execute(
         """
         INSERT INTO avaliacao_sdr (
             log, nota_final, feedback_geral, acertos, melhorias,
-            frase_alternativa, codigo_oportunidade
+            frase_alternativa
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (log) DO UPDATE SET
             nota_final = EXCLUDED.nota_final,
             feedback_geral = EXCLUDED.feedback_geral,
             acertos = EXCLUDED.acertos,
             melhorias = EXCLUDED.melhorias,
-            frase_alternativa = EXCLUDED.frase_alternativa,
-            codigo_oportunidade = EXCLUDED.codigo_oportunidade;
+            frase_alternativa = EXCLUDED.frase_alternativa;
         """,
         (
             log,
@@ -539,9 +568,31 @@ def inserir_analise(
             str(av_sdr.get("acertos", "")) or None,
             str(av_sdr.get("melhorias", "")) or None,
             frase_alt,
-            cod_op,
         ),
     )
+
+    # 2.1 Inserir avaliacao_oportunidade_treinamento (N:N)
+    cur.execute("DELETE FROM avaliacao_oportunidade_treinamento WHERE log = %s;", (log,))
+    codigos_op = av_sdr.get("codigos_oportunidade")
+    if not codigos_op and av_sdr.get("codigo_oportunidade"):
+        codigos_op = [av_sdr.get("codigo_oportunidade")]
+    if isinstance(codigos_op, list):
+        for cod_op in codigos_op:
+            if not cod_op:
+                continue
+            cur.execute("SELECT 1 FROM dim_oportunidade_treinamento WHERE codigo = %s LIMIT 1;", (cod_op,))
+            if not cur.fetchone():
+                continue
+            cur.execute(
+                """
+                INSERT INTO avaliacao_oportunidade_treinamento (
+                    log, codigo_oportunidade
+                )
+                VALUES (%s, %s)
+                ON CONFLICT (log, codigo_oportunidade) DO NOTHING;
+                """,
+                (log, cod_op),
+            )
 
     # 3. Inserir avaliacao_criterio
     cur.execute("DELETE FROM avaliacao_criterio WHERE log = %s;", (log,))
@@ -573,23 +624,33 @@ def inserir_analise(
     cur.execute(
         """
         INSERT INTO analise_spin (
-            log, situacao, problema, implicacao, necessidade_solucao, evidencias, lacunas
+            log, situacao, situacao_investigada, problema, problema_investigado,
+            implicacao, implicacao_investigada, necessidade_solucao, necessidade_investigada,
+            evidencias, lacunas
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (log) DO UPDATE SET
             situacao = EXCLUDED.situacao,
+            situacao_investigada = EXCLUDED.situacao_investigada,
             problema = EXCLUDED.problema,
+            problema_investigado = EXCLUDED.problema_investigado,
             implicacao = EXCLUDED.implicacao,
+            implicacao_investigada = EXCLUDED.implicacao_investigada,
             necessidade_solucao = EXCLUDED.necessidade_solucao,
+            necessidade_investigada = EXCLUDED.necessidade_investigada,
             evidencias = EXCLUDED.evidencias,
             lacunas = EXCLUDED.lacunas;
         """,
         (
             log,
             spin.get("situacao"),
+            spin.get("situacao_investigada", "n"),
             spin.get("problema"),
+            spin.get("problema_investigado", "n"),
             spin.get("implicacao"),
+            spin.get("implicacao_investigada", "n"),
             spin.get("necessidade_solucao"),
+            spin.get("necessidade_investigada", "n"),
             spin.get("evidencias"),
             spin.get("lacunas"),
         ),
@@ -775,35 +836,29 @@ def inserir_analise(
             and pesos_origem.get(nova_orig_fat, 0) > 0
         )
 
-        # Consolidação inteligente de status multichamadas
+        # Consolidação inteligente de status multichamadas via função canônica do DAO
         regime_final = regime_val if deve_atualizar_regime else regime_atual
         orig_regime_final = nova_orig_regime if deve_atualizar_regime else orig_regime_atual
         fat_final = fat_mensal if deve_atualizar_fat else fat_atual
         orig_fat_final = nova_orig_fat if deve_atualizar_fat else orig_fat_atual
 
-        eh_lucro_real_final = "lucro real" in str(regime_final or "").lower()
-        regime_conf_final = orig_regime_final == "confirmado pelo interlocutor"
-        fat_conf_final = orig_fat_final == "confirmado pelo interlocutor"
-        try:
-            fat_num_final = float(fat_final) if fat_final is not None else None
-        except (ValueError, TypeError):
-            fat_num_final = None
-        fat_minimo_final = fat_num_final is not None and fat_num_final >= 1000000.0
-
-        outro_regime_conf_final = regime_conf_final and not eh_lucro_real_final and any(r in str(regime_final or "").lower() for r in ("simples", "presumido", "mei"))
-        fat_abaixo_conf_final = fat_conf_final and fat_num_final is not None and fat_num_final < 1000000.0
-
-        if outro_regime_conf_final or fat_abaixo_conf_final:
-            resultado_consolidado = "Fora do perfil desta campanha"
-        elif eh_lucro_real_final and regime_conf_final and fat_minimo_final and fat_conf_final:
-            resultado_consolidado = "Perfil confirmado"
-        else:
-            resultado_consolidado = resultado_comercial
+        resultado_consolidado = derivar_status_consolidado_empresa(
+            cur,
+            empresa_id,
+            resultado_ligacao=resultado_comercial,
+            regime=regime_final,
+            orig_regime=orig_regime_final,
+            fat_mensal=fat_final,
+            orig_fat=orig_fat_final,
+            status_atual=status_comercial_atual,
+            persistir=False,
+        )
 
         peso_novo_status = pesos_status.get(str(resultado_consolidado), 0)
         peso_atual_status = pesos_status.get(str(status_comercial_atual), 0)
         deve_atualizar_status = (
             resultado_consolidado is not None
+            and resultado_consolidado != status_comercial_atual
             and (status_comercial_atual is None or peso_novo_status >= peso_atual_status)
         )
 

@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS avaliacao_ia (
     ligacao_relevante VARCHAR(1) NOT NULL CHECK (ligacao_relevante IN ('s','n')),
     reuniao_confirmada VARCHAR(1) NOT NULL CHECK (reuniao_confirmada IN ('s','n')),
     data_confirmada VARCHAR(1) NOT NULL CHECK (data_confirmada IN ('s','n')),
+    conversa_decisor VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (conversa_decisor IN ('s','n')),
     resultado_frase TEXT NOT NULL,
    
     FOREIGN KEY (log) REFERENCES registro_chamadas(log),
@@ -96,9 +97,17 @@ CREATE TABLE IF NOT EXISTS avaliacao_sdr (
     acertos TEXT,
     melhorias TEXT,
     frase_alternativa VARCHAR(500),
-    codigo_oportunidade VARCHAR(20),    
    
-    FOREIGN KEY (log) REFERENCES avaliacao_ia(log),
+    FOREIGN KEY (log) REFERENCES avaliacao_ia(log)
+);
+
+
+CREATE TABLE IF NOT EXISTS avaliacao_oportunidade_treinamento (
+    log VARCHAR(255) NOT NULL,
+    codigo_oportunidade VARCHAR(20) NOT NULL,
+    
+    PRIMARY KEY (log, codigo_oportunidade),
+    FOREIGN KEY (log) REFERENCES avaliacao_sdr(log) ON DELETE CASCADE,
     FOREIGN KEY (codigo_oportunidade) REFERENCES dim_oportunidade_treinamento(codigo)
 );
 
@@ -119,9 +128,13 @@ CREATE TABLE IF NOT EXISTS avaliacao_criterio (
 CREATE TABLE IF NOT EXISTS analise_spin (
     log VARCHAR(255) PRIMARY KEY NOT null,
     situacao TEXT,
+    situacao_investigada VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (situacao_investigada IN ('s', 'n')),
     problema TEXT,
+    problema_investigado VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (problema_investigado IN ('s', 'n')),
     implicacao TEXT,
+    implicacao_investigada VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (implicacao_investigada IN ('s', 'n')),
     necessidade_solucao TEXT,
+    necessidade_investigada VARCHAR(1) NOT NULL DEFAULT 'n' CHECK (necessidade_investigada IN ('s', 'n')),
     evidencias TEXT,
     lacunas TEXT,
    

@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.prompts import prompt_analise
 
@@ -141,6 +141,10 @@ class AvaliacaoIAModel(BaseModel):
     data_confirmada: Literal["s", "n"] = Field(
         description="'s' se houve confirmação explícita de data e horário para próximo passo, 'n' caso contrário"
     )
+    conversa_decisor: Literal["s", "n"] = Field(
+        default="n",
+        description="'s' se houve conversa com decisor ou influenciador relevante (Diretor, Sócio, Gerente, Controller), 'n' caso contrário"
+    )
     resultado_frase: str = Field(
         description="Resultado em uma frase: o que aconteceu e qual compromisso foi obtido"
     )
@@ -211,11 +215,24 @@ class AnalisePerfilModel(BaseModel):
 
 class AnaliseSpinModel(BaseModel):
     situacao: str | None = Field(default=None, description="Contexto atual, estrutura fiscal/contábil e prioridades")
+    situacao_investigada: Literal["s", "n"] = Field(
+        default="n", description="Flag binária: 's' se a situação foi ativamente investigada pelo SDR, 'n' caso contrário"
+    )
     problema: str | None = Field(default=None, description="Dificuldades ou atritos fiscais reconhecidos pelo interlocutor")
+    problema_investigado: Literal["s", "n"] = Field(
+        default="n", description="Flag binária: 's' se o problema foi ativamente investigado pelo SDR, 'n' caso contrário"
+    )
     implicacao: str | None = Field(default=None, description="Consequências operacionais, financeiras ou estratégicas")
+    implicacao_investigada: Literal["s", "n"] = Field(
+        default="n", description="Flag binária: 's' se a implicação foi ativamente investigada pelo SDR, 'n' caso contrário"
+    )
     necessidade_solucao: str | None = Field(default=None, description="Benefícios e resultados esperados pelo interlocutor")
+    necessidade_investigada: Literal["s", "n"] = Field(
+        default="n", description="Flag binária: 's' se a necessidade de solução foi ativamente investigada pelo SDR, 'n' caso contrário"
+    )
     evidencias: str | None = Field(default=None, description="Citações textuais curtas entre aspas")
     lacunas: str | None = Field(default=None, description="O que o SDR deixou de aprofundar na descoberta SPIN")
+
 
 
 CLASSIFICACAO_BANT = Literal["confirmado", "indício", "não informado", "negado"]
@@ -257,10 +274,31 @@ class AvaliacaoSDRModel(BaseModel):
     acertos: str | None = Field(default=None, description="Até 2 acertos observáveis na atuação do SDR")
     melhorias: str | None = Field(default=None, description="Até 2 oportunidades pontuais de melhoria para o SDR")
     frase_alternativa: str | None = Field(default=None, description="Uma frase ou pergunta concreta sugerida")
+    codigos_oportunidade: list[str] = Field(
+        default_factory=list,
+        description="Lista de até 3 códigos de dim_oportunidade_treinamento (ex: ['OP_SPIN_03', 'OP_PERF_01']), ou lista vazia se não avaliável",
+    )
     codigo_oportunidade: str | None = Field(
         default=None,
-        description="Exatamente 1 código de dim_oportunidade_treinamento (ex: OP_SPIN_03), ou null se não avaliável",
+        description="Campo de compatibilidade: primeiro código ou null",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonizar_codigos_oportunidade(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw_lista = data.get("codigos_oportunidade")
+            raw_unico = data.get("codigo_oportunidade")
+            if isinstance(raw_lista, str):
+                data["codigos_oportunidade"] = [raw_lista] if raw_lista.strip() else []
+            elif raw_lista is None and raw_unico:
+                data["codigos_oportunidade"] = [raw_unico]
+            elif raw_lista is None:
+                data["codigos_oportunidade"] = []
+
+            if not data.get("codigo_oportunidade") and data.get("codigos_oportunidade"):
+                data["codigo_oportunidade"] = data["codigos_oportunidade"][0]
+        return data
 
 
 class AvaliacaoCriterioItemModel(BaseModel):
@@ -338,6 +376,19 @@ class AnaliseCompletaModel(BaseModel):
     avaliacao_criterio: list[AvaliacaoCriterioItemModel] = Field(min_length=6, max_length=6)
     interlocutor: InterlocutorModel
     crm: CrmModel
+
+    @field_validator("avaliacao_criterio")
+    @classmethod
+    def validar_unicidade_criterios(cls, v: list[AvaliacaoCriterioItemModel]) -> list[AvaliacaoCriterioItemModel]:
+        codigos_esperados = set(CRITERIOS_OFICIAIS.keys())
+        codigos_recebidos = {c.codigo_criterio for c in v}
+        if codigos_recebidos != codigos_esperados:
+            faltantes = codigos_esperados - codigos_recebidos
+            raise ValueError(
+                f"avaliacao_criterio deve conter exatamente os 6 critérios oficiais únicos. "
+                f"Faltantes/duplicados: {faltantes}"
+            )
+        return v
 
 
 # ==========================================================
@@ -704,6 +755,115 @@ def normalizar_classificacao_bant(val: Any) -> str:
     return "não informado"
 
 
+_PRAZO_VAZIO = {
+    "", "não se aplica", "nao se aplica", "não informado", "nao informado",
+    "a definir", "sem data", "não definido", "nao definido", "indefinido",
+    "none", "null", "em aberto", "a combinar", "não há", "nao ha",
+}
+ACOES_COM_DATA = ("reunião confirmada", "retorno com data combinado")
+
+
+def derivar_data_confirmada(acao: Any, prazo: Any) -> str:
+    """
+    Deriva deterministicamente 's' ou 'n' para data_confirmada:
+    - 's' se a ação for de compromisso de agenda ('reunião confirmada' ou 'retorno com data combinado')
+      E o prazo contiver uma data/horário concreta (não vazia/indefinida).
+    - 'n' em qualquer outro caso (inclusive sem prazo ou ações como envio de material).
+    """
+    acao_str = str(acao or "").strip().lower()
+    prazo_limpo = str(prazo or "").strip().lower().rstrip(".")
+    vazio = not prazo_limpo or prazo_limpo in _PRAZO_VAZIO
+    return "s" if acao_str in ACOES_COM_DATA and not vazio else "n"
+
+
+_CARGOS_DECISORES = (
+    "sócio", "socio", "proprietário", "proprietario", "dono", "dona",
+    "diretor", "diretora", "ceo", "cfo", "coo", "presidente",
+    "superintendente", "vice-presidente", "head", "fundador", "fundadora",
+)
+
+_CARGOS_INFLUENCIADORES = (
+    "controller", "gerente", "contador", "contadora",
+    "coordenador", "coordenadora", "supervisor", "supervisora",
+    "auditor", "consultor tributár", "consultor fiscal",
+)
+
+_CARGOS_GATEKEEPERS = (
+    "secretária", "secretaria", "recepcionista", "atendente", "telefonista",
+    "portaria", "estagiár", "estagiar", "porteiro", "telefonista",
+)
+
+
+def derivar_conversa_decisor(
+    cargo: Any,
+    conversa_decisor_raw: Any = None,
+    authority_classificacao: Any = None,
+    eh_nao_avaliavel: bool = False,
+) -> str:
+    """
+    Deriva deterministicamente se houve conversa com decisor ou influenciador ('s' ou 'n'):
+    - 's': se o interlocutor é decisor (Diretoria, Sócios, C-Level) ou influenciador com autonomia
+           (Gerência, Controladoria, Coordenação Fiscal/Financeira, Contabilidade).
+    - 'n': para gatekeepers (secretária, recepção), contatos meramente operacionais sem autoridade,
+           ou ligações não avaliáveis (quedas, URA, recusas imediatas).
+    """
+    if eh_nao_avaliavel:
+        return "n"
+
+    cargo_str = str(cargo or "").strip().lower()
+    if not cargo_str or cargo_str in ("não se aplica", "nao se aplica", "não informado", "nao informado"):
+        return "n"
+
+    # Gatekeepers nunca são decisores de reunião
+    if any(g in cargo_str for g in _CARGOS_GATEKEEPERS):
+        return "n"
+
+    # Decisores ou influenciadores diretos
+    if any(d in cargo_str for d in _CARGOS_DECISORES) or any(i in cargo_str for i in _CARGOS_INFLUENCIADORES):
+        return "s"
+
+    # Se a IA sugeriu 's' e a autoridade BANT não foi negada/não informada
+    raw_sugestao = str(conversa_decisor_raw or "").strip().lower()
+    if raw_sugestao == "s" and str(authority_classificacao or "").strip().lower() in ("confirmado", "indício", "indicio"):
+        return "s"
+
+    return "n"
+
+
+_SPIN_TEXTO_VAZIO = {
+    "", "não se aplica", "nao se aplica", "não informado", "nao informado",
+    "nenhum", "nenhuma", "não houve", "nao houve", "n/a", "null", "none",
+    "não explorado", "nao explorado", "não investigado", "nao investigado",
+}
+
+
+def derivar_spin_investigado(
+    texto: Any,
+    flag_raw: Any = None,
+    eh_nao_avaliavel: bool = False,
+) -> str:
+    """
+    Deriva deterministicamente 's' ou 'n' para a investigação de cada dimensão do SPIN:
+    - 'n': se a chamada for não avaliável (queda, URA, etc.) ou se o texto descritivo for
+           vazio / 'Não se aplica' / 'não informado'.
+    - 's': se houver conteúdo substantivo investigado E a flag do LLM não for explicitamente negativa.
+    - Se a flag bruta vier como 's', 'sim', 'true', valida com a presença de texto.
+    """
+    if eh_nao_avaliavel:
+        return "n"
+
+    texto_limpo = str(texto or "").strip().lower().rstrip(".").strip()
+    if not texto_limpo or texto_limpo in _SPIN_TEXTO_VAZIO:
+        return "n"
+
+    flag_str = str(flag_raw or "").strip().lower()
+    if flag_str in ("n", "nao", "não", "false", "0"):
+        return "n"
+
+    return "s"
+
+
+
 def calcular_e_sanitizar_analise(
     resultado: dict[str, Any],
     *,
@@ -773,34 +933,34 @@ def calcular_e_sanitizar_analise(
 
     # Detecção de chamadas não avaliáveis / não relevantes
     # Toda ligação não relevante (ligacao_relevante = 'n') tem notas estritamente NULL para o Power BI
-    tem_pontos_positivos = any(n > 0 for n in notas_validas)
+    feedback_lower = feedback.lower()
     eh_nao_avaliavel = (
         av_ia.get("ligacao_relevante") == "n"
-        or feedback.lower().startswith("não avaliável")
-        or feedback.lower().startswith("nao avaliavel")
-        or (not tem_pontos_positivos and (
-            "não avaliável" in feedback.lower()
-            or "nao avaliavel" in feedback.lower()
-            or bool(re.search(r"\bura\b", feedback.lower()))
-            or "inválida para a avali" in feedback.lower()
-        ))
+        or feedback_lower.startswith("não avaliável")
+        or feedback_lower.startswith("nao avaliavel")
+        or "não avaliável" in feedback_lower
+        or "nao avaliavel" in feedback_lower
+        or bool(re.search(r"\bura\b", feedback_lower))
+        or "inválida para a avali" in feedback_lower
         or (not notas_validas and av_sdr.get("nota_final") is None)
     )
 
     if eh_nao_avaliavel:
         av_sdr["nota_final"] = None
+        av_sdr["codigos_oportunidade"] = []
         av_sdr["codigo_oportunidade"] = None
-        if not feedback.lower().startswith("não avaliável"):
+        if not feedback_lower.startswith("não avaliável") and not feedback_lower.startswith("nao avaliavel"):
             av_sdr["feedback_geral"] = f"Não avaliável: {feedback}" if feedback else "Não avaliável: Sem diálogo suficiente para avaliação."
 
         for crit in criterios:
             crit["nota_criterio"] = None
             just = (crit.get("justificativa_criterio") or "").strip()
-            if not just.lower().startswith("não avaliável"):
+            if not just.lower().startswith("não avaliável") and not just.lower().startswith("nao avaliavel"):
                 crit["justificativa_criterio"] = f"Não avaliável: {just}" if just else "Não avaliável: Sem contexto para este critério."
 
         av_ia["reuniao_confirmada"] = "n"
         av_ia["data_confirmada"] = "n"
+        av_ia["conversa_decisor"] = "n"
 
     else:
         # Ligações avaliáveis: aplicação estrita do teto individual por critério (max_pontos) e normalização proporcional
@@ -831,11 +991,24 @@ def calcular_e_sanitizar_analise(
         else:
             av_sdr["nota_final"] = None
 
-        # Validação do código de oportunidade contra a dimensão (OP_ESC_04 ou inválido vira None)
-        cod_op = av_sdr.get("codigo_oportunidade")
-        if cod_op:
-            if cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS or cod_op == "OP_ESC_04":
-                av_sdr["codigo_oportunidade"] = None
+        # Validação dos códigos de oportunidade contra a dimensão (OP_ESC_04 ou inválido descartado)
+        codigos_candidatos = av_sdr.get("codigos_oportunidade", [])
+        if isinstance(codigos_candidatos, str):
+            codigos_candidatos = [codigos_candidatos]
+        elif not isinstance(codigos_candidatos, list):
+            codigos_candidatos = []
+
+        if not codigos_candidatos and av_sdr.get("codigo_oportunidade"):
+            codigos_candidatos = [av_sdr.get("codigo_oportunidade")]
+
+        codigos_validos = []
+        for c in codigos_candidatos:
+            c_str = str(c or "").strip()
+            if c_str in CODIGOS_OPORTUNIDADE_VALIDOS and c_str != "OP_ESC_04" and c_str not in codigos_validos:
+                codigos_validos.append(c_str)
+
+        av_sdr["codigos_oportunidade"] = codigos_validos[:3]
+        av_sdr["codigo_oportunidade"] = codigos_validos[0] if codigos_validos else None
 
     # Padronização de campos de avaliação SDR
     for k in ("acertos", "melhorias", "frase_alternativa"):
@@ -845,6 +1018,20 @@ def calcular_e_sanitizar_analise(
     spin = resultado.setdefault("analise_spin", {})
     for k in ("situacao", "problema", "implicacao", "necessidade_solucao", "evidencias", "lacunas"):
         spin[k] = normalizar_texto_nao_se_aplica(spin.get(k))
+
+    spin["situacao_investigada"] = derivar_spin_investigado(
+        spin.get("situacao"), spin.get("situacao_investigada"), eh_nao_avaliavel=eh_nao_avaliavel
+    )
+    spin["problema_investigado"] = derivar_spin_investigado(
+        spin.get("problema"), spin.get("problema_investigado"), eh_nao_avaliavel=eh_nao_avaliavel
+    )
+    spin["implicacao_investigada"] = derivar_spin_investigado(
+        spin.get("implicacao"), spin.get("implicacao_investigada"), eh_nao_avaliavel=eh_nao_avaliavel
+    )
+    spin["necessidade_investigada"] = derivar_spin_investigado(
+        spin.get("necessidade_solucao"), spin.get("necessidade_investigada"), eh_nao_avaliavel=eh_nao_avaliavel
+    )
+
 
     # 5. Padronização de campos em analise_bant
     bant = resultado.setdefault("analise_bant", {})
@@ -946,34 +1133,29 @@ def calcular_e_sanitizar_analise(
         if tem_proximo_passo:
             av_ia["ligacao_relevante"] = "s"
             av_ia["resultado"] = "Perfil pendente"
-            if crm.get("acao") == "reunião confirmada":
-                av_ia["reuniao_confirmada"] = "s"
-            if tem_prazo_definido:
-                av_ia["data_confirmada"] = "s"
-            else:
-                av_ia["data_confirmada"] = "n"
+            av_ia["reuniao_confirmada"] = "s" if crm.get("acao") == "reunião confirmada" else "n"
+            av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"))
+            av_ia["conversa_decisor"] = "n"
         else:
             av_ia["ligacao_relevante"] = "n"
             av_ia["resultado"] = "Dados insuficientes"
+            av_ia["reuniao_confirmada"] = "n"
             av_ia["data_confirmada"] = "n"
+            av_ia["conversa_decisor"] = "n"
     else:
         av_ia["ligacao_relevante"] = "s"
-        prazo_val = str(crm.get("prazo") or "").strip().lower()
-        tem_prazo_definido = bool(
-            prazo_val
-            and prazo_val not in ("não se aplica", "nao se aplica", "não informado", "nao informado", "none", "null")
-        )
         if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
             av_ia["reuniao_confirmada"] = "s"
         else:
             av_ia["reuniao_confirmada"] = "s" if str(av_ia.get("reuniao_confirmada", "n")).lower() == "s" else "n"
 
-        if tem_prazo_definido and crm.get("acao") in ("reunião confirmada", "retorno com data combinado"):
-            av_ia["data_confirmada"] = "s"
-        elif str(av_ia.get("data_confirmada", "n")).lower() == "s":
-            av_ia["data_confirmada"] = "s"
-        else:
-            av_ia["data_confirmada"] = "n"
+        av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"))
+        av_ia["conversa_decisor"] = derivar_conversa_decisor(
+            av_ia.get("cargo"),
+            conversa_decisor_raw=av_ia.get("conversa_decisor"),
+            authority_classificacao=bant.get("authority_classificacao"),
+            eh_nao_avaliavel=False,
+        )
 
         regime_str = str(perfil.get("regime_tributario") or "").strip().lower()
         regime_conf = perfil.get("regime_origem") == "confirmado pelo interlocutor"

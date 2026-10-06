@@ -96,9 +96,12 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
        1. URA eletrônica pura sem atendimento humano, ligação muda, queda instantânea antes de qualquer fala, ou engano.
        2. Chamadas que pararam na recepção/secretária SEM próximo passo (apenas informou indisponibilidade sem retorno, ou recusa imediata e definitiva sem diálogo).
      * Nesses casos: retorne `ligacao_relevante: "n"`, `nota_final: null`, `nota_criterio: null` em todos os critérios, `codigo_oportunidade: null`, `crm.acao: "Não se aplica"` e `resultado: "Dados insuficientes"`.
-   - **Interlocutor e Cargo**:
-     * Preencha `interlocutor` com o nome da pessoa identificada na ligação (ou "Não se aplica").
-     * Cargo: Preencha a função do contato se o atendente conseguiu dialogar com um perfil decisor, influenciador ou operacional do setor relevante (ex.: Sócio, Proprietário, Diretor, CEO, CFO, Controller, Gerente Fiscal/Tributário, Contador, Analista Financeiro, Responsável Contas a Pagar). Para secretária, recepcionista ou ligação sem contato com o setor responsável, retorne estritamente `"Não se aplica"`.
+   - **Interlocutor, Cargo e Conversa com Decisor**:
+     * **REGRA DO CARGO MAIS ALTO (HIERARQUIA)**: Em chamadas transferidas (ex.: iniciadas na secretária/recepção e depois repassadas para o setor financeiro/fiscal ou diretoria), preencha SEMPRE o nome (`interlocutor`) e o cargo (`cargo`) do **contato mais alto e relevante com quem o SDR dialogou na ligação** (ex.: se falou com a secretária Ana e depois foi transferido para o Diretor Carlos, preencha "Carlos" e "Diretor Financeiro").
+     * Preencha `cargo` com a função identificada na chamada (ex.: Sócio, Diretor Financeiro, Controller, Gerente Fiscal, Contador, Analista, Secretária, etc.) ou "Não se aplica".
+     * **Conversa com Decisor (`conversa_decisor: "s"` ou `"n"`)**:
+       - Marque `"s"` se houve conversa com alguém com papel de **Decisor** (Sócio, Proprietário, Dono, Diretor, CEO, CFO, Presidente) ou **Influenciador Relevante** (Controller, Gerente Financeiro/Fiscal/Tributário, Contador, Coordenador Fiscal) com autonomia para avaliar ou aceitar a proposta de reunião.
+       - Marque `"n"` se o contato foi apenas com **Gatekeepers** (Secretária, Recepcionista, Telefonista) ou **Operacionais sem poder de decisão de agenda** (Auxiliar, Assistente, Contas a Pagar rotineiro), ou ligações não avaliáveis (queda, URA).
 
 7. **Avaliação Parcial de Categorias e Critério de Penalização Justa**:
    - **Quando não for possível avaliar TODAS as categorias solicitadas**, avalie as que for possível e atribua uma nota geral (`nota_final`).
@@ -119,11 +122,12 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
 ### Metodologias de Avaliação
 
 #### 1. Análise de SPIN Selling
-Identifique, em cada dimensão, a pergunta ou abordagem do SDR, a resposta obtida e o que ficou pendente:
-- **Situação**: contexto atual, estrutura fiscal/contábil, processo de revisão tributária e prioridades da empresa.
-- **Problema**: dificuldades, riscos, trabalhos não realizados ou insatisfações que o próprio interlocutor reconheça. Uma hipótese levantada pelo SDR não equivale a uma dor confirmada.
-- **Implicação**: consequências operacionais, financeiras ou estratégicas do problema, quando exploradas na conversa.
-- **Necessidade de solução (Need-payoff)**: benefícios ou resultados que o interlocutor gostaria de obter ao tratar o problema.
+Identifique, em cada dimensão, a pergunta ou abordagem do SDR, a resposta obtida e o que ficou pendente.
+Para cada uma das 4 dimensões (`situacao`, `problema`, `implicacao`, `necessidade_solucao`), preencha a flag de classificação correspondente com `"s"` (se a dimensão foi ativamente investigada pelo SDR) ou `"n"` (se não foi investigada, se a resposta foi "Não se aplica" ou se a ligação for não avaliável):
+- **Situação (`situacao_investigada`: "s"/"n")**: contexto atual, estrutura fiscal/contábil, processo de revisão tributária e prioridades da empresa.
+- **Problema (`problema_investigado`: "s"/"n")**: dificuldades, riscos, trabalhos não realizados ou insatisfações que o próprio interlocutor reconheça. Uma hipótese levantada pelo SDR não equivale a uma dor confirmada.
+- **Implicação (`implicacao_investigada`: "s"/"n")**: consequências operacionais, financeiras ou estratégicas do problema, quando exploradas na conversa.
+- **Necessidade de solução (`necessidade_investigada`: "s"/"n")**: benefícios ou resultados que o interlocutor gostaria de obter ao tratar o problema.
 - **Evidências**: cite trechos curtos entre aspas.
 - **Lacunas**: o que o SDR deixou de aprofundar ou explorar.
 
@@ -176,16 +180,16 @@ Em `avaliacao_criterio`, avalie OBRIGATORIAMENTE os 6 critérios a seguir, utili
 | `CRIT_PROX_PASSO` | Proposta de próximo passo pertinente e tentativa de obter compromisso claro | **10** | Proposta de reunião com especialista tributário ou compromisso concreto de retorno (máx: 10) |
 
 **Regras de Aplicação das Notas**:
-- **Limites Máximos por Critério**: A nota de cada critério NUNCA deve ultrapassar o seu limite máximo (10, 30, 25, 15, 10, 10). Avalie os 6 critérios sem repetir códigos.
+- **Limites Máximos por Critério**: A nota de cada critério NUNCA deve ultrapassar o seu limite máximo (10, 30, 25, 15, 10, 10). Avalie OBRIGATORIAMENTE os 6 critérios distintos oficiais sem repetir códigos e sem omitir nenhum.
 - **Execução Eficaz**: pontuação integral da dimensão.
 - **Tentativa Incompleta ou Desempenho Parcial**: pontuação proporcional/parcial.
-- **Oportunidade Clara Desperdiçada (Houve Abertura e Não Fez)**: penalize e diminua a nota do SDR naquela dimensão (podendo zerar o item se o SDR ignorou abertura evidente).
-- **Sem Oportunidade no Diálogo**: Se a dinâmica da conversa não permitiu ao SDR abordar o critério (ex.: ligação breve ou prospect solicitou brevidade), retorne `nota_criterio: null` e `justificativa_criterio: "Sem oportunidade na conversa"`. O sistema recalculará a nota final proporcionalmente sem punir o SDR.
+- **Oportunidade Clara Desperdiçada (Houve Abertura e Não Fez)**: ATRIBUA NOTA ZERO (0). Se o SDR teve tempo e contexto para investigar o perfil, fazer perguntas de SPIN/BANT ou contornar objeções e simplesmente não o fez, atribua nota 0 (oportunidade desperdiçada). NUNCA retorne null nesses casos, pois o null recalcula a nota proporcionalmente e beneficiaria indevidamente o SDR com notas infladas.
+- **Sem Oportunidade no Diálogo (Uso Restrito de Null)**: Retorne `nota_criterio: null` e `justificativa_criterio: "Sem oportunidade na conversa"` EXCLUSIVAMENTE quando a dinâmica da conversa REALMENTE NÃO DEU ABERTURA (ex.: ligação interrompida antes da hora pelo interlocutor ou prospect foi direto ao ponto de agendamento sem dar espaço para aprofundamento). O sistema recalculará a nota final proporcionalmente sem punir o SDR.
 - **Recusa do Prospect**: Se o SDR fez a pergunta adequada mas o interlocutor se recusou a responder, dê crédito à condução do SDR e justifique no campo `justificativa_criterio`.
 - Se a ligação for estritamente não avaliável (apenas URA/queda ou contato retido na recepção sem conversa técnica), retorne `nota_criterio: null` para todos os 6 critérios e `nota_final: null`.
 
-#### 6. Código de Oportunidade de Treinamento (`dim_oportunidade_treinamento`)
-Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que melhor representa o principal ponto cego do SDR na ligação (ou `null` se não avaliável):
+#### 6. Códigos de Oportunidade de Treinamento (`dim_oportunidade_treinamento`)
+Em `codigos_oportunidade`, selecione uma lista com 1 a 3 códigos da lista abaixo que melhor representam os principais pontos cegos ou oportunidades de melhoria do SDR identificados na ligação (ou `[]` se não avaliável):
 
 **1. Abertura e Relevância:**
 - `OP_ABERT_01`: Apresentar-se e situar a empresa com objetividade (sem monólogos institucionais, partindo direto para a razão da chamada).
@@ -275,6 +279,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "ligacao_relevante": "s",
     "reuniao_confirmada": "s",
     "data_confirmada": "s",
+    "conversa_decisor": "s",
     "resultado_frase": "O SDR validou o regime de Lucro Real e o faturamento, agendando uma reunião de apresentação técnica para a próxima terça-feira."
   },
   "analise_perfil": {
@@ -292,9 +297,13 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
   },
   "analise_spin": {
     "situacao": "...",
+    "situacao_investigada": "s",
     "problema": "...",
+    "problema_investigado": "s",
     "implicacao": "...",
+    "implicacao_investigada": "s",
     "necessidade_solucao": "...",
+    "necessidade_investigada": "s",
     "evidencias": "...",
     "lacunas": "..."
   },
@@ -314,7 +323,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "acertos": "1. ... 2. ...",
     "melhorias": "1. ... 2. ...",
     "frase_alternativa": "...",
-    "codigo_oportunidade": "OP_SPIN_03"
+    "codigos_oportunidade": ["OP_SPIN_03", "OP_PERF_01"]
   },
   "avaliacao_criterio": [
     {
