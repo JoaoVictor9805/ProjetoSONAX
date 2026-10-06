@@ -228,7 +228,7 @@ class TestChamadasDao(unittest.TestCase):
                 "regime_origem": "confirmado pelo interlocutor",
                 "faturamento_mensal": 2000000.0,
                 "faturamento_anual": 24000000.0,
-                "faturamento_origem": "calculado",
+                "faturamento_origem": "confirmado pelo interlocutor",
                 "faturamento_regra": "calculado_12_meses",
                 "detalhes_faturamento": "Calculado a partir de 12 meses.",
             },
@@ -385,6 +385,41 @@ class TestChamadasDao(unittest.TestCase):
         # Garante que nenhuma instrução DDL é executada em tempo de execução
         self.assertFalse(any("ALTER TABLE" in q for q in queries))
         self.assertFalse(any("CREATE TABLE" in q for q in queries))
+
+    def test_derivar_status_consolidado_empresa(self):
+        from app.database.chamadas_dao import derivar_status_consolidado_empresa
+
+        # Caso 1: Empresa com Lucro Real e 2M confirmados -> Perfil confirmado
+        cur1 = MagicMock()
+        cur1.fetchone.return_value = (
+            "Lucro Real", "confirmado pelo interlocutor",
+            2000000.0, "confirmado pelo interlocutor",
+            "Perfil pendente"
+        )
+        res1 = derivar_status_consolidado_empresa(cur1, 100)
+        self.assertEqual(res1, "Perfil confirmado")
+        queries1 = [call[0][0] for call in cur1.execute.call_args_list]
+        self.assertTrue(any("UPDATE empresa SET status_comercial = %s" in q for q in queries1))
+
+        # Caso 2: Empresa com Simples Nacional confirmado -> Fora do perfil
+        cur2 = MagicMock()
+        cur2.fetchone.return_value = (
+            "Simples Nacional", "confirmado pelo interlocutor",
+            None, "não informado",
+            "Perfil pendente"
+        )
+        res2 = derivar_status_consolidado_empresa(cur2, 101)
+        self.assertEqual(res2, "Fora do perfil desta campanha")
+
+        # Caso 3: Empresa com apenas Lucro Real confirmado -> Perfil pendente
+        cur3 = MagicMock()
+        cur3.fetchone.return_value = (
+            "Lucro Real", "confirmado pelo interlocutor",
+            None, "não informado",
+            "Dados insuficientes"
+        )
+        res3 = derivar_status_consolidado_empresa(cur3, 102)
+        self.assertEqual(res3, "Perfil pendente")
 
 
 if __name__ == "__main__":

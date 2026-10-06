@@ -107,7 +107,6 @@ ORIGENS_FATURAMENTO_VALIDAS = (
     "afirmado apenas pelo SDR",
     "inferência plausível",
     "não informado",
-    "calculado",
 )
 
 REGRAS_FATURAMENTO_VALIDAS = (
@@ -192,7 +191,6 @@ class AnalisePerfilModel(BaseModel):
         "afirmado apenas pelo SDR",
         "inferência plausível",
         "não informado",
-        "calculado",
     ] = Field(
         default="não informado",
         description="Origem da informação de faturamento",
@@ -353,7 +351,7 @@ client = ChatOpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
     model="openai/gpt-4o-mini",
     temperature=0.0,
-    max_tokens=2500,
+    max_tokens=4096,
     max_retries=3,
 )
 
@@ -492,12 +490,12 @@ def normalizar_origem_dado(origem: Any, eh_nao_avaliavel: bool = False) -> str:
 
 
 def normalizar_origem_faturamento(origem: Any, eh_nao_avaliavel: bool = False) -> str:
-    """Normaliza a origem de faturamento incluindo 'calculado'."""
+    """Normaliza a origem de faturamento (quem informou o dado)."""
     if eh_nao_avaliavel or origem is None:
         return "não informado"
     val = str(origem).strip().lower()
     if "calculad" in val:
-        return "calculado"
+        return "não informado"
     if any(k in val for k in ("confirmado pelo interlocutor", "confirmado pelo lead", "confirmado pelo cliente", "confirmado")):
         return "confirmado pelo interlocutor"
     if any(k in val for k in ("afirmado apenas pelo sdr", "afirmado pelo sdr", "sdr")):
@@ -805,8 +803,9 @@ def calcular_e_sanitizar_analise(
         av_ia["data_confirmada"] = "n"
 
     else:
-        # Ligações avaliáveis: aplicação estrita do teto individual por critério (max_pontos) e soma determinística
+        # Ligações avaliáveis: aplicação estrita do teto individual por critério (max_pontos) e normalização proporcional
         notas_clamped = []
+        tetos_avaliados = []
         for crit in criterios:
             cod_crit = crit["codigo_criterio"]
             max_pontos = CRITERIOS_OFICIAIS[cod_crit]["max_pontos"]
@@ -817,21 +816,26 @@ def calcular_e_sanitizar_analise(
                     clamped_nota = max(0, min(max_pontos, nota_int))
                     crit["nota_criterio"] = clamped_nota
                     notas_clamped.append(clamped_nota)
+                    tetos_avaliados.append(max_pontos)
                 except (ValueError, TypeError):
                     crit["nota_criterio"] = None
             else:
                 crit["nota_criterio"] = None
 
-        if notas_clamped:
-            soma = sum(notas_clamped)
-            av_sdr["nota_final"] = max(0, min(100, soma))
+        soma_tetos = sum(tetos_avaliados)
+        soma_obtida = sum(notas_clamped)
+
+        # Trava de segurança: exige pelo menos 50 pontos avaliados para gerar nota_final global proporcional
+        if soma_tetos >= 50:
+            av_sdr["nota_final"] = max(0, min(100, int(round((soma_obtida / soma_tetos) * 100))))
         else:
             av_sdr["nota_final"] = None
 
-        # Validação do código de oportunidade contra a dimensão
+        # Validação do código de oportunidade contra a dimensão (OP_ESC_04 ou inválido vira None)
         cod_op = av_sdr.get("codigo_oportunidade")
-        if cod_op and cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS:
-            av_sdr["codigo_oportunidade"] = "OP_DIR_03"
+        if cod_op:
+            if cod_op not in CODIGOS_OPORTUNIDADE_VALIDOS or cod_op == "OP_ESC_04":
+                av_sdr["codigo_oportunidade"] = None
 
     # Padronização de campos de avaliação SDR
     for k in ("acertos", "melhorias", "frase_alternativa"):
@@ -902,7 +906,7 @@ def calcular_e_sanitizar_analise(
             calc_mensal = round(fat_anual / 12.0, 2)
             perfil["faturamento_mensal"] = calc_mensal
             perfil["faturamento_regra"] = "calculado_12_meses"
-            perfil["faturamento_origem"] = "calculado"
+            perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem"))
             if perfil["detalhes_faturamento"] in ("Não se aplica", "", None):
                 perfil["detalhes_faturamento"] = (
                     f"Média mensal de R$ {calc_mensal:,.2f} calculada deterministicamente a partir de "
@@ -934,19 +938,42 @@ def calcular_e_sanitizar_analise(
             "reunião proposta sem aceite",
             "reunião confirmada",
         )
+        prazo_val = str(crm.get("prazo") or "").strip().lower()
+        tem_prazo_definido = bool(
+            prazo_val
+            and prazo_val not in ("não se aplica", "nao se aplica", "não informado", "nao informado", "none", "null")
+        )
         if tem_proximo_passo:
             av_ia["ligacao_relevante"] = "s"
             av_ia["resultado"] = "Perfil pendente"
             if crm.get("acao") == "reunião confirmada":
                 av_ia["reuniao_confirmada"] = "s"
+            if tem_prazo_definido:
+                av_ia["data_confirmada"] = "s"
+            else:
+                av_ia["data_confirmada"] = "n"
         else:
             av_ia["ligacao_relevante"] = "n"
             av_ia["resultado"] = "Dados insuficientes"
+            av_ia["data_confirmada"] = "n"
     else:
         av_ia["ligacao_relevante"] = "s"
-        # Se IA indicou reunião confirmada em qualquer campo, liga a flag reuniao_confirmada
+        prazo_val = str(crm.get("prazo") or "").strip().lower()
+        tem_prazo_definido = bool(
+            prazo_val
+            and prazo_val not in ("não se aplica", "nao se aplica", "não informado", "nao informado", "none", "null")
+        )
         if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
             av_ia["reuniao_confirmada"] = "s"
+        else:
+            av_ia["reuniao_confirmada"] = "s" if str(av_ia.get("reuniao_confirmada", "n")).lower() == "s" else "n"
+
+        if tem_prazo_definido and crm.get("acao") in ("reunião confirmada", "retorno com data combinado"):
+            av_ia["data_confirmada"] = "s"
+        elif str(av_ia.get("data_confirmada", "n")).lower() == "s":
+            av_ia["data_confirmada"] = "s"
+        else:
+            av_ia["data_confirmada"] = "n"
 
         regime_str = str(perfil.get("regime_tributario") or "").strip().lower()
         regime_conf = perfil.get("regime_origem") == "confirmado pelo interlocutor"
@@ -954,7 +981,7 @@ def calcular_e_sanitizar_analise(
 
         fat_mensal_val = perfil.get("faturamento_mensal")
         fat_orig = perfil.get("faturamento_origem")
-        fat_conf = fat_orig in ("confirmado pelo interlocutor", "calculado")
+        fat_conf = fat_orig == "confirmado pelo interlocutor"
         fat_minimo_ok = fat_mensal_val is not None and fat_mensal_val >= 1000000.0
 
         # Regra de descarte explícito

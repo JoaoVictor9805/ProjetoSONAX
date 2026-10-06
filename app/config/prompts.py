@@ -141,7 +141,6 @@ Extraia a qualificação do perfil comercial identificando com rigor a confiabil
   * `"afirmado apenas pelo SDR"`: Informação dita exclusivamente pelo SDR sem confirmação nem validação pelo prospect (ex: "Vocês são Lucro Real, certo?" e o cliente não respondeu ou desconversou).
   * `"inferência plausível"`: Suposição baseada em contexto ou porte da empresa, mas sem validação explícita na chamada.
   * `"não informado"`: O assunto não foi abordado ou não houve dados mínimos.
-  * *(Apenas para `faturamento_origem`)*: `"calculado"`: Quando a média mensal for calculada a partir de faturamento anual de 12 meses informado.
 - **Setor (`setor`)**: Selecione ESTRITAMENTE um dos 3 valores abaixo:
   * `"industrial"`: empresa pertencente ao segmento industrial (fabricação, manufatura, usinagem, metalúrgica, química, alimentos, etc. - segmento preferencial da campanha).
   * `"outro confirmado"`: empresa pertencente a outro setor econômico confirmado na chamada (ex.: transporte, comércio, serviços, agronegócio), sem descartá-la automaticamente caso cumpra os demais requisitos de regime e faturamento.
@@ -177,12 +176,13 @@ Em `avaliacao_criterio`, avalie OBRIGATORIAMENTE os 6 critérios a seguir, utili
 | `CRIT_PROX_PASSO` | Proposta de próximo passo pertinente e tentativa de obter compromisso claro | **10** | Proposta de reunião com especialista tributário ou compromisso concreto de retorno (máx: 10) |
 
 **Regras de Aplicação das Notas**:
-- **Limites Máximos por Critério**: A nota de cada critério NUNCA deve ultrapassar o seu limite máximo (10, 30, 25, 15, 10, 10). Avalie EXATAMENTE os 6 critérios, sem repetir códigos e sem omitir nenhum dos 6.
+- **Limites Máximos por Critério**: A nota de cada critério NUNCA deve ultrapassar o seu limite máximo (10, 30, 25, 15, 10, 10). Avalie os 6 critérios sem repetir códigos.
 - **Execução Eficaz**: pontuação integral da dimensão.
-- **Tentativa Incompleta ou Contexto Limitado (Sem Abertura)**: pontuação proporcional/parcial, sem penalizar injustamente o agente se o interlocutor não deu espaço.
+- **Tentativa Incompleta ou Desempenho Parcial**: pontuação proporcional/parcial.
 - **Oportunidade Clara Desperdiçada (Houve Abertura e Não Fez)**: penalize e diminua a nota do SDR naquela dimensão (podendo zerar o item se o SDR ignorou abertura evidente).
+- **Sem Oportunidade no Diálogo**: Se a dinâmica da conversa não permitiu ao SDR abordar o critério (ex.: ligação breve ou prospect solicitou brevidade), retorne `nota_criterio: null` e `justificativa_criterio: "Sem oportunidade na conversa"`. O sistema recalculará a nota final proporcionalmente sem punir o SDR.
 - **Recusa do Prospect**: Se o SDR fez a pergunta adequada mas o interlocutor se recusou a responder, dê crédito à condução do SDR e justifique no campo `justificativa_criterio`.
-- Se a ligação for estritamente não avaliável (apenas URA/queda ou contato retido na recepção), retorne `nota_criterio: null` para todos os 6 critérios e `nota_final: null`.
+- Se a ligação for estritamente não avaliável (apenas URA/queda ou contato retido na recepção sem conversa técnica), retorne `nota_criterio: null` para todos os 6 critérios e `nota_final: null`.
 
 #### 6. Código de Oportunidade de Treinamento (`dim_oportunidade_treinamento`)
 Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que melhor representa o principal ponto cego do SDR na ligação (ou `null` se não avaliável):
@@ -218,7 +218,6 @@ Em `codigo_oportunidade`, selecione EXATAMENTE 1 código da lista abaixo que mel
 - `OP_ESC_01`: Posicionar o trabalho como complementar à contabilidade atual, sem confrontar o contador da empresa.
 - `OP_ESC_02`: Retomar e espelhar termos utilizados pelo lead (demonstrar escuta ativa em vez de script rígido).
 - `OP_ESC_03`: Tratar com empatia e segurança o receio de riscos, autuações ou fiscalização do Fisco.
-- `OP_ESC_04`: Evitar interrupções e sobreposição de falas no fluxo da conversa.
 - `OP_ESC_05`: Investigar o motivo do desinteresse ("não temos interesse") para contornar a real objeção.
 
 **6. Próximo Passo e Compromisso:**
@@ -287,7 +286,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "faturamento_anual": 24000000.0,
     "faturamento_mensal": 2000000.0,
     "periodo_meses": 12,
-    "faturamento_origem": "calculado",
+    "faturamento_origem": "confirmado pelo interlocutor",
     "faturamento_regra": "calculado_12_meses",
     "detalhes_faturamento": "Média mensal de R$ 2.000.000,00 calculada a partir de faturamento anual de 12 meses (R$ 24.000.000,00)."
   },
