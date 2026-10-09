@@ -42,8 +42,10 @@ class ProvedorIA(Protocol):
     def revisar(
         self,
         transcricao: str,
+        *,
+        texto_copiado_google: str | None = None,
         nome_atendente: str | None = None,
-    ) -> str:
+    ) -> dict[str, str]:
         """Diariza locutores e corrige pontuação da transcrição contínua."""
         ...
 
@@ -55,6 +57,7 @@ class ProvedorIA(Protocol):
         empresa_contatada: int | None = None,
         empresa_nome: str | None = None,
         nome_sdr: str | None = None,
+        data_referencia: str | None = None,
     ) -> dict[str, Any]:
         """Avalia qualidade comercial B2B (SPIN, BANT, SDR, CRM) da ligação."""
         ...
