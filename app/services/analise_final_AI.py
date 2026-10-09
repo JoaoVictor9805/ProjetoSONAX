@@ -14,7 +14,7 @@ Responsabilidades:
     7. Validação determinística estrita da qualificação técnica da empresa (resultado).
     8. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
        para integridade em agregações no Power BI.
-    9. Estruturação tipada com Pydantic e chamada com Structured Output (GPT-4o-mini via OpenRouter).
+    9. Estruturação tipada com Pydantic e chamada com Structured Output (Llama 3.1 8B Instruct via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -396,15 +396,15 @@ class AnaliseCompletaModel(BaseModel):
 
 
 # ==========================================================
-# CLIENTE E CHAIN LANGCHAIN (GPT-4o-mini via OpenRouter)
+# CLIENTE E CHAIN LANGCHAIN (Llama 3.1 8B Instruct via OpenRouter)
 # ==========================================================
 
-MODELO_ANALISE = "gpt-4o-mini"
+MODELO_ANALISE = os.getenv("ANALISE_MODEL", "meta-llama/llama-3.1-8b-instruct")
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
-    model="openai/gpt-4o-mini",
+    model=MODELO_ANALISE,
     temperature=0.0,
     max_tokens=4096,
     max_retries=3,
@@ -1250,7 +1250,7 @@ def analisar_ligacao(
     data_referencia: str | None = None,
 ) -> dict[str, Any]:
     """
-    Submete a transcrição revisada ao GPT-4o-mini e devolve o dicionário
+    Submete a transcrição revisada ao Llama 3.1 8B Instruct e devolve o dicionário
     completo com as 8 chaves relacionais padronizadas.
     """
     inputs = {

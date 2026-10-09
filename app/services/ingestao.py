@@ -373,7 +373,7 @@ class ChamadaIngestor:
         }
 
     # ------------------------------------------------------------------------
-    # Fase 3: Análise de Critérios com IA (GPT-4o-mini)
+    # Fase 3: Análise de Critérios com IA (Llama 3.1 8B)
     # ------------------------------------------------------------------------
 
     def analisar_chamada(
@@ -450,7 +450,7 @@ class ChamadaIngestor:
             dia_extenso = dias_semana[dt_chamada_ref.weekday()]
             data_referencia_str = f"{dt_chamada_ref.strftime('%Y-%m-%d %H:%M:%S')} ({dia_extenso})"
 
-        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} (SPIN/BANT/SDR - GPT-4o-mini)...")
+        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} (SPIN/BANT/SDR - Llama 3.1 8B)...")
         analise_ia = None
         for tentativa in range(1, 4):
             try:

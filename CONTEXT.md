@@ -21,7 +21,7 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Triangulação de Dados**: Consolidação entre o texto coletado pelo robô Google (`[GOOGLE]`) e os nomes citados na chamada (`[DIARIZAÇÃO]`) para identificar a entidade comercial.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
 - **Revisão e Diarização Textual**: Etapa conduzida por LLM (`qwen/qwen3-30b-a3b-instruct-2507`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
-- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`openai/gpt-4o-mini`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
+- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
 - **Critérios Oficiais (`dim_criterio_avaliacao`)**: Seis dimensões com pontuação máxima total de 100 pontos:
   - `CRIT_ABERTURA` (10 pts)
   - `CRIT_SPIN` (30 pts)
@@ -56,7 +56,7 @@ Arquivos WAV / ZIP / RAR
           │ Identificação de empresa -> Tabela `empresa`
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼
-6. Análise de Qualidade Comercial (GPT-4o-mini)
+6. Análise de Qualidade Comercial (Llama 3.1 8B Instruct)
           │ Persistência atômica nas 7 tabelas normalizadas:
           │   - avaliacao_ia
           │   - avaliacao_sdr

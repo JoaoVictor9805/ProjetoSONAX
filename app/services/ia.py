@@ -155,7 +155,7 @@ class FakeProvedorIA:
             "avaliacao_ia": {
                 "protocolo": 123456789,
                 "data_avaliacao": "2026-09-30",
-                "modelo_ia": "gpt-4o-mini",
+                "modelo_ia": "meta-llama/llama-3.1-8b-instruct",
                 "interlocutor": "Carlos Silva",
                 "cargo": "Diretor Financeiro",
                 "empresa_contatada": 1,

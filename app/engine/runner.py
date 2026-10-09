@@ -402,7 +402,7 @@ class PipelineRunner:
 
                 # 4.75) Análise com IA (ChamadaIngestor)
                 self.on_log(
-                    f"[INFO] Iniciando avaliação de critérios comerciais (GPT-4o-mini) de {total_copiados} chamada(s) ...",
+                    f"[INFO] Iniciando avaliação de critérios comerciais (Llama 3.1 8B) de {total_copiados} chamada(s) ...",
                     "out", False, None,
                 )
                 for idx, caminho in enumerate(copiados, 1):
@@ -410,7 +410,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial SPIN/BANT/SDR (GPT-4o-mini): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial SPIN/BANT/SDR (Llama 3.1 8B): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "analyzing", msg, caminho.name)
 
                     self.ingestor.analisar_chamada(
