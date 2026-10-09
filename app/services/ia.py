@@ -101,6 +101,7 @@ class ProvedorIAReal:
         empresa_contatada: int | None = None,
         empresa_nome: str | None = None,
         nome_sdr: str | None = None,
+        data_referencia: str | None = None,
     ) -> dict[str, Any]:
         from app.services.analise_final_AI import analisar_ligacao
         return analisar_ligacao(
@@ -109,6 +110,7 @@ class ProvedorIAReal:
             empresa_contatada=empresa_contatada,
             empresa_nome=empresa_nome,
             nome_sdr=nome_sdr,
+            data_referencia=data_referencia,
         )
 
 
@@ -295,6 +297,7 @@ class FakeProvedorIA:
         empresa_contatada: int | None = None,
         empresa_nome: str | None = None,
         nome_sdr: str | None = None,
+        data_referencia: str | None = None,
     ) -> dict[str, Any]:
         self.chamadas_analisar.append(ligacao)
         if self.falhas_restantes > 0:

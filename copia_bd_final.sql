@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS crm (
     )),
     responsavel VARCHAR(100),
     prazo VARCHAR(100),
+    prazo_data TIMESTAMP,
     dados_extras TEXT,
     resumo TEXT,
    

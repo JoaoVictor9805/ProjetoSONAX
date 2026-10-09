@@ -11,10 +11,12 @@ from app.services.analise_final_AI import (
     normalizar_acao_crm,
     normalizar_setor,
     normalizar_resultado_status_comercial,
+    normalizar_prazo_data_timestamp,
     _limpar_resposta_json,
     AnaliseCompletaModel,
     AnaliseSpinModel,
     AvaliacaoSDRModel,
+    CrmModel,
     SETORES_VALIDOS,
     ACOES_CRM_VALIDAS,
     MODELO_ANALISE,
@@ -1142,7 +1144,108 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(m2.codigos_oportunidade, ["OP_SPIN_03", "OP_PERF_01"])
         self.assertEqual(m2.codigo_oportunidade, "OP_SPIN_03")
 
+    def test_normalizar_prazo_data_timestamp_com_data_referencia(self):
+        """Valida que normalizar_prazo_data_timestamp formata e valida datas corretamente quando há referência."""
+        # 1. ISO completo com segundos
+        self.assertEqual(
+            normalizar_prazo_data_timestamp("2026-10-10 14:00:00", tem_data_referencia=True),
+            "2026-10-10 14:00:00"
+        )
+        # 2. ISO sem segundos (adiciona :00)
+        self.assertEqual(
+            normalizar_prazo_data_timestamp("2026-10-10 14:00", tem_data_referencia=True),
+            "2026-10-10 14:00:00"
+        )
+        # 3. ISO com separador 'T'
+        self.assertEqual(
+            normalizar_prazo_data_timestamp("2026-10-10T14:00:00", tem_data_referencia=True),
+            "2026-10-10 14:00:00"
+        )
+        # 4. Apenas data (complementa com 00:00:00)
+        self.assertEqual(
+            normalizar_prazo_data_timestamp("2026-10-10", tem_data_referencia=True),
+            "2026-10-10 00:00:00"
+        )
+        # 5. Strings de ausência ou não se aplica
+        self.assertIsNone(normalizar_prazo_data_timestamp("Não se aplica", tem_data_referencia=True))
+        self.assertIsNone(normalizar_prazo_data_timestamp("a definir", tem_data_referencia=True))
+        self.assertIsNone(normalizar_prazo_data_timestamp("null", tem_data_referencia=True))
+        self.assertIsNone(normalizar_prazo_data_timestamp(None, tem_data_referencia=True))
+        # 6. Data impossível no calendário (rejeição segura)
+        self.assertIsNone(normalizar_prazo_data_timestamp("2026-02-31 10:00:00", tem_data_referencia=True))
 
+    def test_normalizar_prazo_data_timestamp_sem_data_referencia_forca_none(self):
+        """Regra estrita: se não houver data_referencia (tem_data_referencia=False), força incondicionalmente None."""
+        self.assertIsNone(
+            normalizar_prazo_data_timestamp("2026-10-10 14:00:00", tem_data_referencia=False)
+        )
+        self.assertIsNone(
+            normalizar_prazo_data_timestamp("2026-10-10", tem_data_referencia=False)
+        )
+
+    def test_calcular_e_sanitizar_analise_com_dt_inicio_preserva_prazo_data(self):
+        """Quando data_referencia é informada, prazo textual e prazo_data TIMESTAMP são preservados."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 85, "feedback_geral": "Ótima abordagem."},
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "reunião confirmada",
+                "prazo": "Amanhã às 14h",
+                "prazo_data": "2026-10-10 14:00:00",
+                "resumo": "Reunião técnica agendada.",
+            },
+        }
+        res = calcular_e_sanitizar_analise(
+            dados,
+            data_referencia="2026-10-09 10:15:00 (Sexta-feira)",
+        )
+        self.assertEqual(res["crm"]["prazo"], "Amanhã às 14h")
+        self.assertEqual(res["crm"]["prazo_data"], "2026-10-10 14:00:00")
+        self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "s")
+
+    def test_calcular_e_sanitizar_analise_sem_dt_inicio_forca_prazo_data_none(self):
+        """Quando NÃO há data_referencia (None ou 'Não informado'), prazo_data é forçado para None."""
+        dados = {
+            "avaliacao_ia": {
+                "resultado": "Perfil confirmado",
+                "ligacao_relevante": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 85, "feedback_geral": "Ótima abordagem."},
+            "avaliacao_criterio": [],
+            "crm": {
+                "acao": "reunião confirmada",
+                "prazo": "Amanhã às 14h",
+                "prazo_data": "2026-10-10 14:00:00",  # Alucinação/tentativa de preencher sem referência
+                "resumo": "Reunião técnica agendada.",
+            },
+        }
+        # Caso 1: data_referencia=None
+        res1 = calcular_e_sanitizar_analise(dados, data_referencia=None)
+        self.assertEqual(res1["crm"]["prazo"], "Amanhã às 14h")
+        self.assertIsNone(res1["crm"]["prazo_data"])
+
+        # Caso 2: data_referencia="Não informado"
+        res2 = calcular_e_sanitizar_analise(dados, data_referencia="Não informado")
+        self.assertEqual(res2["crm"]["prazo"], "Amanhã às 14h")
+        self.assertIsNone(res2["crm"]["prazo_data"])
+
+    def test_pydantic_crm_model_valida_prazo_data_opcional(self):
+        """Garante que o Pydantic CrmModel aceita prazo e prazo_data opcionalmente."""
+        m = CrmModel(
+            acao="reunião confirmada",
+            prazo="Amanhã às 14h",
+            prazo_data="2026-10-10 14:00:00",
+        )
+        self.assertEqual(m.prazo, "Amanhã às 14h")
+        self.assertEqual(m.prazo_data, "2026-10-10 14:00:00")
+
+        m_vazio = CrmModel(acao="Não se aplica")
+        self.assertIsNone(m_vazio.prazo)
+        self.assertIsNone(m_vazio.prazo_data)
 
 
 if __name__ == "__main__":

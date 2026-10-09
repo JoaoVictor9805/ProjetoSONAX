@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from dotenv import load_dotenv
@@ -362,7 +362,11 @@ class CrmModel(BaseModel):
         ),
     )
     responsavel: str | None = Field(default=None, description="Responsável pelo próximo passo")
-    prazo: str | None = Field(default=None, description="Data e horário agendados ou 'não informado'")
+    prazo: str | None = Field(default=None, description="Data mencionada identificada na ligação ou 'Não se aplica'")
+    prazo_data: str | None = Field(
+        default=None,
+        description="Data estipulada no formato ISO 'YYYY-MM-DD HH:MM:SS' calculada a partir de data_referencia, ou null",
+    )
     dados_extras: str | None = Field(default=None, description="Dados pendentes de confirmação")
     resumo: str | None = Field(default=None, description="Resumo executivo de até 80 palavras para colar no CRM")
 
@@ -417,6 +421,7 @@ prompt = ChatPromptTemplate.from_messages(
             "user",
             """
 ### METADADOS DA LIGAÇÃO:
+- Data e Hora de Início da Ligação: {data_referencia}
 - Protocolo: {protocolo}
 - ID da Empresa: {empresa_contatada}
 - Nome da Empresa: {empresa_nome}
@@ -763,17 +768,60 @@ _PRAZO_VAZIO = {
 ACOES_COM_DATA = ("reunião confirmada", "retorno com data combinado")
 
 
-def derivar_data_confirmada(acao: Any, prazo: Any) -> str:
+def normalizar_prazo_data_timestamp(valor: Any, tem_data_referencia: bool = False) -> str | None:
+    """
+    Normaliza e valida o formato TIMESTAMP para 'YYYY-MM-DD HH:MM:SS'.
+    Se não houver data de referência da ligação (tem_data_referencia=False), força incondicionalmente None.
+    """
+    if not tem_data_referencia or not valor:
+        return None
+
+    val_str = str(valor).strip()
+    if val_str.lower() in ("none", "null", "não se aplica", "nao se aplica", "a definir", "não informado", "nao informado", ""):
+        return None
+
+    # Tenta extrair padrão ISO completo: YYYY-MM-DD HH:MM[:SS] ou YYYY-MM-DDTHH:MM[:SS]
+    m_full = re.search(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)", val_str)
+    if m_full:
+        data_part = m_full.group(1)
+        hora_part = m_full.group(2)
+        if len(hora_part) == 5:
+            hora_part += ":00"
+        iso_str = f"{data_part} {hora_part}"
+        try:
+            datetime.strptime(iso_str, "%Y-%m-%d %H:%M:%S")
+            return iso_str
+        except ValueError:
+            return None
+
+    # Fallback se for apenas data: YYYY-MM-DD -> complementa com 00:00:00
+    m_date = re.search(r"(\d{4}-\d{2}-\d{2})", val_str)
+    if m_date:
+        iso_str = f"{m_date.group(1)} 00:00:00"
+        try:
+            datetime.strptime(iso_str, "%Y-%m-%d %H:%M:%S")
+            return iso_str
+        except ValueError:
+            return None
+
+    return None
+
+
+def derivar_data_confirmada(acao: Any, prazo: Any, prazo_data: Any = None) -> str:
     """
     Deriva deterministicamente 's' ou 'n' para data_confirmada:
     - 's' se a ação for de compromisso de agenda ('reunião confirmada' ou 'retorno com data combinado')
-      E o prazo contiver uma data/horário concreta (não vazia/indefinida).
+      E (prazo_data for válido OU prazo contiver uma data/horário concreta não vazia).
     - 'n' em qualquer outro caso (inclusive sem prazo ou ações como envio de material).
     """
     acao_str = str(acao or "").strip().lower()
+    if acao_str not in ACOES_COM_DATA:
+        return "n"
+    if prazo_data:
+        return "s"
     prazo_limpo = str(prazo or "").strip().lower().rstrip(".")
     vazio = not prazo_limpo or prazo_limpo in _PRAZO_VAZIO
-    return "s" if acao_str in ACOES_COM_DATA and not vazio else "n"
+    return "s" if not vazio else "n"
 
 
 _CARGOS_DECISORES = (
@@ -869,6 +917,7 @@ def calcular_e_sanitizar_analise(
     *,
     protocolo: int | None = None,
     empresa_contatada: int | None = None,
+    data_referencia: str | None = None,
 ) -> dict[str, Any]:
     """
     Aplica regras determinísticas de negócio:
@@ -1051,6 +1100,12 @@ def calcular_e_sanitizar_analise(
     for k in ("responsavel", "prazo", "dados_extras"):
         crm[k] = normalizar_texto_nao_se_aplica(crm.get(k))
 
+    tem_ref = bool(
+        data_referencia
+        and str(data_referencia).strip().lower() not in ("não informado", "nao informado", "none", "null", "")
+    )
+    crm["prazo_data"] = normalizar_prazo_data_timestamp(crm.get("prazo_data"), tem_data_referencia=tem_ref)
+
     resumo_crm = (crm.get("resumo") or "").strip()
     if resumo_crm:
         palavras = resumo_crm.split()
@@ -1134,7 +1189,7 @@ def calcular_e_sanitizar_analise(
             av_ia["ligacao_relevante"] = "s"
             av_ia["resultado"] = "Perfil pendente"
             av_ia["reuniao_confirmada"] = "s" if crm.get("acao") == "reunião confirmada" else "n"
-            av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"))
+            av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"), crm.get("prazo_data"))
             av_ia["conversa_decisor"] = "n"
         else:
             av_ia["ligacao_relevante"] = "n"
@@ -1149,7 +1204,7 @@ def calcular_e_sanitizar_analise(
         else:
             av_ia["reuniao_confirmada"] = "s" if str(av_ia.get("reuniao_confirmada", "n")).lower() == "s" else "n"
 
-        av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"))
+        av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"), crm.get("prazo_data"))
         av_ia["conversa_decisor"] = derivar_conversa_decisor(
             av_ia.get("cargo"),
             conversa_decisor_raw=av_ia.get("conversa_decisor"),
@@ -1192,6 +1247,7 @@ def analisar_ligacao(
     empresa_contatada: int | None = None,
     empresa_nome: str | None = None,
     nome_sdr: str | None = None,
+    data_referencia: str | None = None,
 ) -> dict[str, Any]:
     """
     Submete a transcrição revisada ao GPT-4o-mini e devolve o dicionário
@@ -1199,6 +1255,7 @@ def analisar_ligacao(
     """
     inputs = {
         "ligacao": ligacao,
+        "data_referencia": data_referencia or "Não informado",
         "protocolo": protocolo or "Não informado",
         "empresa_contatada": empresa_contatada or "Não informado",
         "empresa_nome": empresa_nome or "Não informado",
@@ -1222,6 +1279,7 @@ def analisar_ligacao(
         resultado,
         protocolo=protocolo,
         empresa_contatada=empresa_contatada,
+        data_referencia=data_referencia,
     )
 
     return resultado
