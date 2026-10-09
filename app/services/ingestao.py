@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 from typing import Any
@@ -427,19 +427,28 @@ class ChamadaIngestor:
                     if row_emp:
                         empresa_nome = row_emp[0]
 
+                dt_chamada_ref = None
                 if protocolo:
                     cur.execute(
-                        "SELECT agente_nome FROM chamadas WHERE protocolo = %s LIMIT 1;",
+                        "SELECT agente_nome, dt_inicio FROM chamadas WHERE protocolo = %s LIMIT 1;",
                         (protocolo,),
                     )
                     row_ch = cur.fetchone()
                     if row_ch:
                         agente_nome = row_ch[0]
+                        dt_chamada_ref = row_ch[1]
 
         except Exception:
             print(f"  [ERRO] Falha ao verificar dados da análise de '{nome_exibicao}' no banco")
             log_dev_exc()
             return None
+
+        # Data de referência estrita: apenas se dt_inicio existir no banco (sem fallback para data atual)
+        data_referencia_str = None
+        if dt_chamada_ref and isinstance(dt_chamada_ref, (datetime, date)):
+            dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+            dia_extenso = dias_semana[dt_chamada_ref.weekday()]
+            data_referencia_str = f"{dt_chamada_ref.strftime('%Y-%m-%d %H:%M:%S')} ({dia_extenso})"
 
         print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} (SPIN/BANT/SDR - GPT-4o-mini)...")
         analise_ia = None
@@ -451,6 +460,7 @@ class ChamadaIngestor:
                     empresa_contatada=id_empresa,
                     empresa_nome=empresa_nome,
                     nome_sdr=agente_nome,
+                    data_referencia=data_referencia_str,
                 )
                 break
             except Exception:

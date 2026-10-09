@@ -253,7 +253,16 @@ Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_i
   * `"sem interesse explícito"`: Recusa clara e expressa do interlocutor em avançar ou ouvir a proposta comercial (ou pediu para não ligar mais).
   * `"Não se aplica"`: Chamadas sem diálogo substantivo e sem qualquer próximo passo (apenas URA eletrônica, ligação muda, queda, engano ou recepção sem próximo passo).
 - `responsavel`: SDR, Executivo do respectivo SDR ou responsável nomeado (ou "Não se aplica").
-- `prazo`: data e horário combinados (ou "Não se aplica").
+- `prazo`: Data e horário combinados ou mencionados na chamada (ex.: 'Amanhã às 14h', 'Sexta-feira às 10h') ou 'Não se aplica'.
+- `prazo_data`: Data e hora estipuladas calculadas no formato ISO 'YYYY-MM-DD HH:MM:SS', ou null.
+  * REGRAS ESTRITAS DE PREENCHIMENTO DE `prazo_data`:
+    1. Se 'Data e Hora de Início da Ligação' nos metadados for 'Não informado' ou nula, retorne OBRIGATORIAMENTE null (não calcule nem adivinhe datas sem referência temporal).
+    2. Se houver data de início informada (ex: '2026-10-09 10:15:00 (Sexta-feira)'):
+       - Calcule a data estipulada baseando-se estritamente nessa referência e no que foi combinado na chamada:
+         * 'Amanhã às 14h' -> '2026-10-10 14:00:00'.
+         * 'Na próxima terça às 10h' -> '2026-10-13 10:00:00'.
+         * Se foi acordado apenas o dia sem horário explícito (ex: 'Amanhã'), use '00:00:00' no horário.
+    3. Se a ação não tiver compromisso de data (ex: 'sem próximo passo definido', 'sem interesse explícito', 'a definir', ou ligação não avaliável), retorne null.
 - `dados_extras`: dados pendentes que ainda precisam ser validados (ou "Não se aplica").
 - `resumo`: resumo executivo para colar no CRM de NO MÁXIMO 80 PALAVRAS, sem informações inferidas apresentadas como fatos (ou "Não se aplica").
 
@@ -373,7 +382,8 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
   "crm": {
     "acao": "reunião confirmada",
     "responsavel": "...",
-    "prazo": "...",
+    "prazo": "Amanhã às 14h",
+    "prazo_data": "2026-10-10 14:00:00",
     "dados_extras": "...",
     "resumo": "..."
   }

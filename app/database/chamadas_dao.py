@@ -712,16 +712,18 @@ def inserir_analise(
     )
 
     # 7. Inserir / Atualizar crm
+    prazo_data_val = crm.get("prazo_data") or None
     cur.execute(
         """
         INSERT INTO crm (
-            log, acao, responsavel, prazo, dados_extras, resumo
+            log, acao, responsavel, prazo, prazo_data, dados_extras, resumo
         )
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (log) DO UPDATE SET
             acao = EXCLUDED.acao,
             responsavel = EXCLUDED.responsavel,
             prazo = EXCLUDED.prazo,
+            prazo_data = EXCLUDED.prazo_data,
             dados_extras = EXCLUDED.dados_extras,
             resumo = EXCLUDED.resumo;
         """,
@@ -730,6 +732,7 @@ def inserir_analise(
             (crm.get("acao") or None)[:255] if crm.get("acao") else None,
             (crm.get("responsavel") or None)[:100] if crm.get("responsavel") else None,
             (crm.get("prazo") or None)[:100] if crm.get("prazo") else None,
+            prazo_data_val,
             crm.get("dados_extras"),
             crm.get("resumo"),
         ),
