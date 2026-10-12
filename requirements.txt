@@ -11,4 +11,6 @@ soundfile==0.14.0
 requests
 pywinauto==0.6.9
 pyperclip==1.11.0
+faster-whisper==1.2.1
+ctranslate2==4.8.2
 

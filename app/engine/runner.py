@@ -212,7 +212,7 @@ class PipelineRunner:
                         i - 1,
                         total,
                         "transcribing",
-                        f"[INFO] [{i}/{total}] Enviando {rotulo} para NVIDIA Nemotron (OpenRouter)...",
+                        f"[INFO] [{i}/{total}] Transcrevendo {rotulo} via Faster-Whisper local (small)...",
                         caminho.name,
                     )
 

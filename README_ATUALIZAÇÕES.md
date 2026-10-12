@@ -317,9 +317,27 @@ Este documento registra todas as alterações e correções estruturais, determi
     - **Barreira 2 (Motor de Banco / DAO):** Trava de segurança autônoma implementada no início de `inserir_analise()` em [`app/database/chamadas_dao.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/database/chamadas_dao.py). Qualquer chamada classificada como não avaliável tem todas as suas notas zeradas para `NULL` antes da gravação no PostgreSQL.
   * **Prompt da IA:**
     - Atualizada a Seção 6 e o exemplo de JSON em [`app/config/prompts.py`](file:///c:/Users/joao.oliveira/Documents/SONAX/ProjetoSONAX/app/config/prompts.py) para instruir o modelo a retornar uma lista de 1 a 3 códigos em `codigos_oportunidade`.
-  * **Validação Automatizada:**
-    - Novos testes unitários em `tests/test_analise.py` e `tests/test_chamadas_dao.py` cobrindo sanitização de múltiplas tags, harmonização Pydantic, inserção no DAO e a trava defensiva contra vazamento de notas.
-    - **118 testes aprovados** (100% OK em 2.73s).
 
+---
 
+## 27. Transcrição Local via Faster-Whisper (Modelo Small Offline)
 
+* **Motivação:**
+  - Eliminar dependência de rede, latência externa e custos por minuto de ASR em nuvem na etapa de transcrição de áudio, operando com privacidade total e execução 100% local.
+* **Implementação Concreta:**
+  - **Módulo de Transcrição ([`app/services/transcricao.py`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/app/services/transcricao.py)):**
+    - Implementada a função `transcrever_audio_faster_whisper()` utilizando o modelo `small` com CTranslate2.
+    - Gerenciamento lazy singleton com detecção automática de aceleração de hardware e fallback seguro para CPU (`device="cpu"`, `compute_type="int8"` / `"float32"`).
+    - Cancelamento cooperativo com suporte a `threading.Event`: interrupção antes do início e a cada segmento gerado durante a inferência.
+    - Cálculo contínuo da barra de progresso baseado na duração total do áudio (`segment.end / duration`).
+    - Coleta e agregação das métricas acústicas reais de cada segmento (`logprob_media`, `taxa_compressao_media`, `probabilidade_media_sem_fala`), alimentando diretamente o algoritmo de avaliação de qualidade em [`app/services/qualidade_transcricao.py`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/app/services/qualidade_transcricao.py).
+    - Roteamento configurável via variável de ambiente `TRANSCRICAO_PROVIDER` (padrão: `faster_whisper`).
+  - **Conexão com Provedores ([`app/services/ia.py`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/app/services/ia.py)):**
+    - `ProvedorIAReal.transcrever()` agora invoca a transcrição padrão via Faster-Whisper local.
+  - **Interface e Motor de Execução ([`app/engine/runner.py`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/app/engine/runner.py)):**
+    - Ajustada mensagem de progresso para `[INFO] [{i}/{total}] Transcrevendo {rotulo} via Faster-Whisper local (small)...`.
+  - **Empacotamento e Dependências:**
+    - Atualizados [`requirements.txt`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/requirements.txt) e [`compilar_instalador.bat`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/compilar_instalador.bat) com `--collect-all faster_whisper` e `--collect-all ctranslate2`.
+  - **Validação Automatizada:**
+    - Criada a suíte [`tests/test_transcricao.py`](file:///c:/Users/joaov/Desktop/Estágio/ProjetoSONAX/tests/test_transcricao.py) com testes unitários para inferência, cancelamento, progresso e métricas.
+    - **124 testes aprovados** (100% OK).
