@@ -5,7 +5,7 @@ Módulo Profundo de Ingestão e Enriquecimento de Chamadas do SONAX.
 
 Responsabilidades:
     1. Idempotência e consulta de duplicidade no banco de dados.
-    2. Transcrição de áudio com retries (NVIDIA Nemotron via OpenRouter).
+    2. Transcrição de áudio com retries (Faster-Whisper local).
     3. Avaliação de qualidade do texto transcrito.
     4. Parsing de metadados do nome do arquivo (ramal, data, hora).
     5. Associação do atendente e persistência em `registro_chamadas`.
