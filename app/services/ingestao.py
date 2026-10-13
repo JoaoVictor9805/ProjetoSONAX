@@ -510,9 +510,12 @@ class ChamadaIngestor:
                                 prazo_txt = f" ({crm_dados.get('prazo')})" if crm_dados.get("prazo") else ""
                                 print(f"    • Próximo Passo CRM: {crm_dados.get('acao')}{prazo_txt}")
                         else:
-                            print(f"  [AVISO] {nome_exibicao} [Não Avaliável]: Análise gravada com notas NULL para Power BI")
+                            print(f"  [AVISO] {nome_exibicao}: Algumas notas acabaram em aberto e alguns aspectos não puderam ser avaliados")
                             print(f"    • Motivo: {av_sdr.get('feedback_geral', 'Chamada sem conteúdo avaliável')}")
                             print(f"    • Status comercial: {av_ia.get('resultado', 'N/A')}")
+                            if crm_dados.get("acao"):
+                                prazo_txt = f" ({crm_dados.get('prazo')})" if crm_dados.get("prazo") else ""
+                                print(f"    • Próximo Passo CRM: {crm_dados.get('acao')}{prazo_txt}")
 
                         from app.logs import log_dev
                         log_dev(f"[{nome_exibicao}] Feedback SDR: {av_sdr.get('feedback_geral')}")
