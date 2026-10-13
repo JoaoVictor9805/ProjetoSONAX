@@ -10,7 +10,7 @@ Responsabilidades:
     3. Preservação estrita do conteúdo e vocabulário original da chamada
        (sem alucinar diálogos nem remover termos de negócio).
     4. Limpeza de artefatos, tags especiais de parada e rótulos órfãos pós-processamento.
-    5. Integração com modelo LLM via LangChain (Qwen 30B Instruct via OpenRouter).
+    5. Integração com modelo LLM via LangChain (Llama 3.1 8B Instruct via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -36,10 +36,15 @@ client = ChatGoogleGenerativeAI (
 )
 """
 
+MODELO_REVISAO = os.getenv(
+    "REVISAO_MODEL",
+    "meta-llama/llama-3.1-8b-instruct",
+)
+
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
-    model="qwen/qwen3-30b-a3b-instruct-2507",
+    model=MODELO_REVISAO,
     temperature=0.0,  # Zero para evitar criação de diálogos falsos
     max_tokens=4096,  # Margem segura para devolver a transcrição inteira
     max_retries=3,

@@ -20,7 +20,7 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Robô Google (RPA)**: Serviço de automação (`app/services/rpa_google.py`) que abre o navegador padrão / Google Chrome local, pesquisa o telefone formatado no Google, copia os dados da entidade comercial (Google My Business / cartões locais) e fecha a aba sem custos de API externa.
 - **Triangulação de Dados**: Consolidação entre o texto coletado pelo robô Google (`[GOOGLE]`) e os nomes citados na chamada (`[DIARIZAÇÃO]`) para identificar a entidade comercial.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
-- **Revisão e Diarização Textual**: Etapa conduzida por LLM (`qwen/qwen3-30b-a3b-instruct-2507`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
+- **Revisão e Diarização Textual**: Etapa conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
 - **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
 - **Critérios Oficiais (`dim_criterio_avaliacao`)**: Seis dimensões com pontuação máxima total de 100 pontos:
   - `CRIT_ABERTURA` (10 pts)
@@ -52,7 +52,7 @@ Arquivos WAV / ZIP / RAR
 4. Coleta RPA Google (Triangulação de Dados)
           │ Pywinauto + Navegador local + Cache por telefone
           ▼
-5. Revisão & Diarização com IA (Qwen 30B Instruct)
+5. Revisão & Diarização com IA (Llama 3.1 8B Instruct)
           │ Identificação de empresa -> Tabela `empresa`
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼

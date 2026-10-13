@@ -346,7 +346,7 @@ class PipelineRunner:
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
                 self.on_log(
-                    f"[INFO] Iniciando diarização e revisão com IA (Qwen 30B Instruct) de {total_copiados} chamada(s) ...",
+                    f"[INFO] Iniciando diarização e revisão com IA (Llama 3.1 8B Instruct) de {total_copiados} chamada(s) ...",
                     "out", False, None,
                 )
                 for idx, caminho in enumerate(copiados, 1):
@@ -354,7 +354,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando (Qwen Instruct): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando (Llama 3.1 8B): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 
                     dados_audio = mapa_diarizacao.get(caminho.name, {})

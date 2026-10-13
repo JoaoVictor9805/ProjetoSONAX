@@ -9,7 +9,7 @@ Responsabilidades:
     3. Avaliação de qualidade do texto transcrito.
     4. Parsing de metadados do nome do arquivo (ramal, data, hora).
     5. Associação do atendente e persistência em `registro_chamadas`.
-    6. Diarização e revisão com IA (Qwen Instruct).
+    6. Diarização e revisão com IA (Llama 3.1 8B Instruct).
     7. Análise de qualidade comercial com IA (SPIN/BANT/SDR).
 ============================================================================
 """
@@ -252,7 +252,7 @@ class ChamadaIngestor:
         )
 
     # ------------------------------------------------------------------------
-    # Fase 2: Diarização e Revisão com IA (Qwen)
+    # Fase 2: Diarização e Revisão com IA (Llama 3.1 8B)
     # ------------------------------------------------------------------------
 
     def revisar_transcricao(
@@ -293,7 +293,7 @@ class ChamadaIngestor:
         if not texto_diarizado or not texto_diarizado.strip():
             return None
 
-        print(f"  [INFO] Diarizando e revisando {nome_exibicao} (Qwen 30B Instruct)...")
+        print(f"  [INFO] Diarizando e revisando {nome_exibicao} (Llama 3.1 8B Instruct)...")
 
         resultado_ia = None
         for tentativa in range(1, 4):
