@@ -18,7 +18,8 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Chamada / Áudio**: Gravação telefônica em formato WAV. Identificada internamente pelo `call_id` (protocolo) e `ramal`.
 - **Origem / Chamadas**: Tabela no banco de dados com metadados brutos das ligações geradas pela central (protocolo, ramal, atendente, número discado, DDD, duração, data/hora).
 - **Robô Google (RPA)**: Serviço de automação (`app/services/rpa_google.py`) que abre o navegador padrão / Google Chrome local, pesquisa o telefone formatado no Google, copia os dados da entidade comercial (Google My Business / cartões locais) e fecha a aba sem custos de API externa.
-- **Triangulação de Dados**: Consolidação entre o texto coletado pelo robô Google (`[GOOGLE]`) e os nomes citados na chamada (`[DIARIZAÇÃO]`) para identificar a entidade comercial.
+- **Triangulação de Dados**: Comparação contextual no prompt de IA entre os dados coletados pelo robô Google e a transcrição da chamada para identificar a entidade comercial correta.
+- **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no banco.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
 - **Revisão e Diarização Textual**: Etapa conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
 - **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
@@ -30,7 +31,9 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
   - `CRIT_ESCUTA` (10 pts)
   - `CRIT_PROX_PASSO` (10 pts)
 - **Oportunidade de Treinamento (`dim_oportunidade_treinamento`)**: Catálogo pré-definido de 27 códigos (`OP_ABERT_*`, `OP_SPIN_*`, `OP_PERF_*`, `OP_BANT_*`, `OP_ESC_*`, `OP_PROX_*`, `OP_DIR_*`), onde cada chamada avaliável recebe **exatamente 1 código prioritário**.
-- **Chamada Não Avaliável**: Chamadas sem conversa substantiva (URA, queda imediata, secretária eletrônica ou recusa nos primeiros segundos). Recebem nota final e critérios como **NULL** no banco para não distorcer médias ou quebrar tipos inteiros (`Int64`) no Power BI.
+- **Chamada Relevante (`ligacao_relevante: 's'`)**: Chamada com diálogo comercial efetivo com decisor/área de interesse OU retenção na recepção com próximo passo comercial concreto (retorno agendado, envio de material, reunião proposta/confirmada). Toda ligação relevante gera obrigatoriamente a avaliação completa do SDR (`avaliacao_sdr`, critérios pontuados proporcionalmente, oportunidade de melhoria e feedback sem prefixo 'Não avaliável').
+- **Chamada Não Avaliável / Não Relevante (`ligacao_relevante: 'n'`)**: Chamadas sem contato útil (URA, queda imediata, número errado, secretária eletrônica ou retenção na recepção sem próximo passo / `crm.acao == "Não se aplica"`). Recebem nota final, notas de critério e código de oportunidade como **NULL** no banco para não distorcer médias ou quebrar tipos inteiros (`Int64`) no Power BI.
+- **Hierarquia e Expiração Temporal de Status Comercial (`data_status_comercial`)**: O status comercial da empresa (`status_comercial`) segue regras anti-regressão de pesos para proteger empresas qualificadas contra rebaixamento por chamadas fracas posteriores. Possui janela de validade de 1 mês (30 dias) ancorada na data de compromisso agendada (`crm.prazo_data`) ou, subsidiariamente, na data da ligação (`chamadas.dt_inicio`). Se recontatada após essa janela (> 30 dias), o status anterior expira e a nova ligação pode redefinir o status vigente da empresa.
 
 ---
 
@@ -46,7 +49,7 @@ Arquivos WAV / ZIP / RAR
 2. Cópia Segura para Pasta Temporária de Trabalho
           │
           ▼
-3. Transcrição ASR (NVIDIA Nemotron via OpenRouter / AssemblyAI)
+3. Transcrição ASR (Faster-Whisper local com fallback OpenRouter)
           │ Persistência em `registro_chamadas`
           ▼
 4. Coleta RPA Google (Triangulação de Dados)

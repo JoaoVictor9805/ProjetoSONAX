@@ -21,7 +21,9 @@ class TestTranscricaoFasterWhisper(unittest.TestCase):
 
     def setUp(self):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        self.temp_file.write(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+        self.temp_file.write(
+            b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+        )
         self.temp_file.close()
         self.audio_path = Path(self.temp_file.name)
 
@@ -60,6 +62,7 @@ class TestTranscricaoFasterWhisper(unittest.TestCase):
         mock_modelo.transcribe.return_value = ([mock_seg1, mock_seg2], mock_info)
 
         progresso_itens = []
+
         def _on_progress(frac: float, msg: str):
             progresso_itens.append((frac, msg))
 

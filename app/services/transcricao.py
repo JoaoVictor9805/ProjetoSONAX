@@ -5,26 +5,30 @@ Serviço de Transcrição de Áudio Local via Faster-Whisper (CTranslate2).
 ============================================================================
 
 Recursos:
-    - Transcrição 100% local e offline utilizando o modelo 'small'
-    - Carregamento lazy singleton do modelo com fallback inteligente de aceleração
+    - Transcrição 100% local e offline utilizando o modelo 'small' (CTranslate2)
+    - Carregamento lazy singleton do modelo com fallback inteligente de aceleração (CUDA/CPU)
     - Filtro VAD (Silero) para ignorar silêncios e ruídos de fundo
     - Controle de cancelamento imediato via threading.Event durante o streaming de segmentos
     - Coleta de métricas acústicas reais (avg_logprob, compression_ratio, no_speech_prob)
     - Cálculo contínuo de progresso para a UI do SONAX
-    - Suporte retrocompatível com OpenRouter ASR caso configurado
+    - Suporte retrocompatível com OpenRouter ASR caso configurado no ambiente
 ============================================================================
 """
 
-import os
-import time
+from __future__ import annotations
+
 import base64
+import os
 import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import requests
 from dotenv import load_dotenv
+
+from app.services.audio_inspector import obter_duracao_wav
 
 load_dotenv()
 
@@ -39,12 +43,15 @@ class ChaveOpenRouterNaoConfigurada(TranscricaoErro):
     pass
 
 
+class ChaveAssemblyAINaoConfigurada(TranscricaoErro):
+    """Lançada quando a chave ASSEMBLY_API_KEY não foi configurada (compatibilidade)."""
+    pass
+
+
 class TranscricaoCancelada(TranscricaoErro):
     """Lançada quando a operação de transcrição é cancelada pelo usuário."""
     pass
 
-
-from app.services.audio_inspector import obter_duracao_wav
 
 calcular_duracao_wav = obter_duracao_wav
 
@@ -80,16 +87,17 @@ def transcrever_audio_faster_whisper(
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Transcreve um arquivo de áudio utilizando Faster-Whisper (modelo small local).
-    
+
     Parâmetros:
         caminho: Caminho local do arquivo de áudio (.wav).
         cancel: Flag de cancelamento threading.Event para abortar a inferência.
         on_progress: Callback de progresso f(frac, mensagem) para a UI.
+        timeout: Não aplicável diretamente na inferência local, mantido por compatibilidade.
         language: Idioma para transcrição (padrão 'pt').
         beam_size: Tamanho do feixe de busca para decodificação (padrão 5).
         vad_filter: Ativação de VAD Silero para remover ruído/silêncio.
         modelo: Instância opcional de WhisperModel para testes ou injeção direta.
-        
+
     Retorno:
         dict contendo:
             - texto: texto completo contínuo da transcrição
@@ -249,7 +257,7 @@ def transcrever_audio_openrouter(
         with open(caminho_path, "rb") as f:
             files = {"file": (caminho_path.name, f, "audio/wav")}
             data = {"model": modelo_padrao}
-            
+
             resp = requests.post(
                 f"{base_url}/audio/transcriptions",
                 files=files,
@@ -341,7 +349,7 @@ def transcrever_audio(
     timeout: Optional[int] = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Encaminha para o provedor de transcrição configurado (padrão: faster_whisper)."""
+    """Encaminha para o provedor de transcrição configurado (padrão: faster_whisper local)."""
     provedor = os.getenv("TRANSCRICAO_PROVIDER", "faster_whisper").lower().strip()
     if provedor == "openrouter":
         return transcrever_audio_openrouter(
@@ -358,3 +366,10 @@ def transcrever_audio(
         timeout=timeout,
         **kwargs,
     )
+
+
+# Aliases para compatibilidade total entre módulos e branches
+transcrever_audio_faster = transcrever_audio_faster_whisper
+transcrever_audio_openrouter_alias = transcrever_audio_openrouter
+transcrever_audio_assembly = transcrever_audio
+transcrever_audio_assemblyai = transcrever_audio
