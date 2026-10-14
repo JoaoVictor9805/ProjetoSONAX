@@ -6,7 +6,7 @@ Mantém todo SQL e mapeamento relacional isolado na camada de persistência (`ap
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -362,6 +362,50 @@ def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:
     pass
 
 
+def _normalizar_para_datetime(valor: Any) -> datetime | None:
+    """Converte valores variados (datetime, date, str ISO) para datetime ou None."""
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return valor
+    if isinstance(valor, date):
+        return datetime.combine(valor, datetime.min.time())
+    val_str = str(valor).strip()
+    if not val_str or val_str.lower() in ("none", "null", "não informado", "nao informado", "não se aplica", "nao se aplica"):
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(val_str[:19], fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def status_comercial_expirou(
+    data_status_atual: datetime | date | str | None,
+    data_nova_ligacao: datetime | date | str | None,
+    dias_validade: int = 30,
+) -> bool:
+    """
+    Verifica se o status comercial da empresa já expirou (passou da janela de carência, padrão 30 dias / 1 mês).
+    
+    Regras de data:
+    - data_status_atual: 1ª prioridade: data agendada (crm.prazo_data); fallback: data da chamada anterior (dt_inicio).
+    - data_nova_ligacao: data de realização da chamada atual (chamadas.dt_inicio) ou momento da avaliação.
+    - Se data_nova_ligacao >= data_status_atual + 30 dias, retorna True (status expirado, trava liberada).
+    """
+    if not data_status_atual or not data_nova_ligacao:
+        return False
+
+    dt_atual = _normalizar_para_datetime(data_status_atual)
+    dt_nova = _normalizar_para_datetime(data_nova_ligacao)
+
+    if not dt_atual or not dt_nova:
+        return False
+
+    return dt_nova >= (dt_atual + timedelta(days=dias_validade))
+
+
 def derivar_status_consolidado_empresa(
     cur: psycopg.Cursor,
     empresa_id: int,
@@ -372,6 +416,8 @@ def derivar_status_consolidado_empresa(
     fat_mensal: float | None = None,
     orig_fat: str | None = None,
     status_atual: str | None = None,
+    data_status_atual: datetime | date | str | None = None,
+    data_nova_ligacao: datetime | date | str | None = None,
     persistir: bool = True,
 ) -> str | None:
     """
@@ -380,11 +426,15 @@ def derivar_status_consolidado_empresa(
     - 'Fora do perfil desta campanha': outro regime confirmado (Simples, Presumido, MEI) OU faturamento < 1M (confirmado pelo interlocutor).
     - 'Perfil pendente': empresa possui algum contato/dado, mas falta confirmar regime ou faturamento.
     - 'Dados insuficientes': sem dados cadastrais mínimos.
+    
+    Regra de expiração temporal:
+    - Se a janela de 1 mês (30 dias) em relação à data do status anterior tiver expirado,
+      a trava anti-regressão é suspensa, permitindo que a nova ligação reclassifique a empresa.
     """
     if regime is None and orig_regime is None and fat_mensal is None and status_atual is None:
         cur.execute(
             """
-            SELECT regime_tributario, regime_origem, faturamento_mensal, faturamento_origem, status_comercial
+            SELECT regime_tributario, regime_origem, faturamento_mensal, faturamento_origem, status_comercial, data_status_comercial
             FROM empresa
             WHERE id_empresa = %s
             LIMIT 1;
@@ -395,7 +445,13 @@ def derivar_status_consolidado_empresa(
         if not row or len(row) < 5:
             return None
 
-        regime, orig_regime, fat_mensal, orig_fat, status_atual = row
+        regime = row[0]
+        orig_regime = row[1]
+        fat_mensal = row[2]
+        orig_fat = row[3]
+        status_atual = row[4]
+        if data_status_atual is None and len(row) > 5:
+            data_status_atual = row[5]
 
     regime_str = (regime or "").strip().lower()
     regime_conf = orig_regime == "confirmado pelo interlocutor"
@@ -422,6 +478,8 @@ def derivar_status_consolidado_empresa(
     else:
         novo_status = status_atual or resultado_ligacao or "Dados insuficientes"
 
+    expirou = status_comercial_expirou(data_status_atual, data_nova_ligacao)
+
     pesos_status = {
         "Perfil confirmado": 3,
         "Fora do perfil desta campanha": 3,
@@ -431,9 +489,10 @@ def derivar_status_consolidado_empresa(
     peso_novo = pesos_status.get(novo_status, 1)
     peso_atual = pesos_status.get(status_atual, 0) if status_atual else 0
 
-    status_final = novo_status if (peso_novo >= peso_atual or status_atual is None) else status_atual
+    deve_sobrescrever = (peso_novo >= peso_atual or status_atual is None or expirou)
+    status_final = novo_status if deve_sobrescrever else status_atual
 
-    if persistir and status_final != status_atual and (peso_novo >= peso_atual or status_atual is None):
+    if persistir and status_final != status_atual and deve_sobrescrever:
         cur.execute(
             "UPDATE empresa SET status_comercial = %s WHERE id_empresa = %s;",
             (status_final, empresa_id),
@@ -801,7 +860,7 @@ def inserir_analise(
         # Busca dados, origens e status atuais da empresa
         cur.execute(
             """
-            SELECT setor_origem, regime_origem, faturamento_origem, status_comercial, regime_tributario, faturamento_mensal
+            SELECT setor_origem, regime_origem, faturamento_origem, status_comercial, regime_tributario, faturamento_mensal, data_status_comercial
             FROM empresa
             WHERE id_empresa = %s
             LIMIT 1;
@@ -815,6 +874,17 @@ def inserir_analise(
         status_comercial_atual = row_emp[3] if row_emp and len(row_emp) > 3 else None
         regime_atual = row_emp[4] if row_emp and len(row_emp) > 4 else None
         fat_atual = row_emp[5] if row_emp and len(row_emp) > 5 else None
+        data_status_atual = row_emp[6] if row_emp and len(row_emp) > 6 else None
+
+        # Data da chamada atual: prioriza dt_inicio em av_ia, data_avaliacao ou data atual
+        dt_chamada = (
+            _normalizar_para_datetime(av_ia.get("dt_inicio"))
+            or _normalizar_para_datetime(av_ia.get("data_avaliacao"))
+            or datetime.now()
+        )
+
+        # Verifica se a janela de validade (1 mês / 30 dias) expirou
+        expirou = status_comercial_expirou(data_status_atual, dt_chamada)
 
         nova_orig_setor = str(perfil.get("setor_origem") or "não informado")
         nova_orig_regime = str(perfil.get("regime_origem") or "não informado")
@@ -825,17 +895,17 @@ def inserir_analise(
 
         deve_atualizar_setor = (
             setor_val is not None
-            and pesos_origem.get(nova_orig_setor, 0) >= pesos_origem.get(orig_setor_atual, 0)
+            and (pesos_origem.get(nova_orig_setor, 0) >= pesos_origem.get(orig_setor_atual, 0) or expirou)
             and pesos_origem.get(nova_orig_setor, 0) > 0
         )
         deve_atualizar_regime = (
             regime_val is not None
-            and pesos_origem.get(nova_orig_regime, 0) >= pesos_origem.get(orig_regime_atual, 0)
+            and (pesos_origem.get(nova_orig_regime, 0) >= pesos_origem.get(orig_regime_atual, 0) or expirou)
             and pesos_origem.get(nova_orig_regime, 0) > 0
         )
         deve_atualizar_fat = (
             (fat_mensal is not None or fat_anual is not None)
-            and pesos_origem.get(nova_orig_fat, 0) >= pesos_origem.get(orig_fat_atual, 0)
+            and (pesos_origem.get(nova_orig_fat, 0) >= pesos_origem.get(orig_fat_atual, 0) or expirou)
             and pesos_origem.get(nova_orig_fat, 0) > 0
         )
 
@@ -854,6 +924,8 @@ def inserir_analise(
             fat_mensal=fat_final,
             orig_fat=orig_fat_final,
             status_atual=status_comercial_atual,
+            data_status_atual=data_status_atual,
+            data_nova_ligacao=dt_chamada,
             persistir=False,
         )
 
@@ -862,14 +934,22 @@ def inserir_analise(
         deve_atualizar_status = (
             resultado_consolidado is not None
             and resultado_consolidado != status_comercial_atual
-            and (status_comercial_atual is None or peso_novo_status >= peso_atual_status)
+            and (status_comercial_atual is None or peso_novo_status >= peso_atual_status or expirou)
         )
+
+        # Determina nova data de referência para salvar na empresa:
+        # 1ª prioridade: prazo_data (data de agenda para reunião/retorno)
+        # 2ª prioridade: dt_inicio da chamada atual
+        nova_data_status = _normalizar_para_datetime(prazo_data_val) or dt_chamada
 
         updates = []
         params = []
         if deve_atualizar_status:
-            updates.append("status_comercial = %s")
-            params.append(str(resultado_consolidado)[:100])
+            updates.append("status_comercial = %s, data_status_comercial = %s")
+            params.extend([str(resultado_consolidado)[:100], nova_data_status])
+        elif prazo_data_val and (data_status_atual is None or _normalizar_para_datetime(prazo_data_val) > _normalizar_para_datetime(data_status_atual)):
+            updates.append("data_status_comercial = %s")
+            params.append(_normalizar_para_datetime(prazo_data_val))
         if deve_atualizar_setor:
             updates.append("setor = %s, setor_origem = %s")
             params.extend([str(setor_val)[:100], nova_orig_setor[:50]])

@@ -37,10 +37,12 @@ CREATE TABLE IF NOT EXISTS empresa (
     fonte_dados TEXT,
     setor_origem VARCHAR(50),
     regime_origem VARCHAR(50),
-    faturamento_origem VARCHAR(50)
+    faturamento_origem VARCHAR(50),
+    data_status_comercial TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS empresa_telefone ON empresa(telefone);
+CREATE INDEX IF NOT EXISTS idx_empresa_data_status ON empresa(data_status_comercial);
 
 
 CREATE TABLE IF NOT EXISTS registro_chamadas (
