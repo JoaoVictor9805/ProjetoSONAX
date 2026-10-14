@@ -980,19 +980,47 @@ def calcular_e_sanitizar_analise(
         c["nota_criterio"] for c in criterios if c.get("nota_criterio") is not None
     ]
 
-    # Detecção de chamadas não avaliáveis / não relevantes
-    # Toda ligação não relevante (ligacao_relevante = 'n') tem notas estritamente NULL para o Power BI
-    feedback_lower = feedback.lower()
-    eh_nao_avaliavel = (
-        av_ia.get("ligacao_relevante") == "n"
-        or feedback_lower.startswith("não avaliável")
-        or feedback_lower.startswith("nao avaliavel")
-        or "não avaliável" in feedback_lower
-        or "nao avaliavel" in feedback_lower
-        or bool(re.search(r"\bura\b", feedback_lower))
-        or "inválida para a avali" in feedback_lower
-        or (not notas_validas and av_sdr.get("nota_final") is None)
+    # 3. Determinação de Relevância e Avaliação do SDR
+    crm = resultado.setdefault("crm", {})
+    acao_crm_pre = normalizar_acao_crm(crm.get("acao"), eh_nao_avaliavel=False)
+    tem_proximo_passo = acao_crm_pre in (
+        "retorno com data combinado",
+        "envio de material solicitado",
+        "reunião proposta sem aceite",
+        "reunião confirmada",
     )
+    raw_lig_rel = str(av_ia.get("ligacao_relevante") or "").strip().lower()
+    feedback_lower = feedback.lower()
+
+    # Descarte puro de chamada (URA, ligação muda, engano, queda antes da fala)
+    eh_descarte_puro = (
+        bool(re.search(r"\bura\b", feedback_lower))
+        or "engano" in feedback_lower
+        or "ligação muda" in feedback_lower
+        or "ligacao muda" in feedback_lower
+        or "queda instantânea" in feedback_lower
+        or "queda instantanea" in feedback_lower
+        or "sem diálogo" in feedback_lower
+        or "sem dialogo" in feedback_lower
+        or "sem atendimento" in feedback_lower
+        or (not tem_proximo_passo and ("não avaliável" in feedback_lower or "nao avaliavel" in feedback_lower or "portaria" in feedback_lower))
+    )
+
+    if tem_proximo_passo:
+        ligacao_relevante = "s"
+    elif raw_lig_rel == "s" and not eh_descarte_puro:
+        ligacao_relevante = "s"
+    elif not raw_lig_rel and (
+        av_ia.get("resultado") in ("Perfil confirmado", "Perfil pendente", "Fora do perfil desta campanha")
+        or notas_validas
+        or av_sdr.get("nota_final") is not None
+    ):
+        ligacao_relevante = "s"
+    else:
+        ligacao_relevante = "n"
+
+    av_ia["ligacao_relevante"] = ligacao_relevante
+    eh_nao_avaliavel = (ligacao_relevante == "n")
 
     if eh_nao_avaliavel:
         av_sdr["nota_final"] = None
@@ -1012,6 +1040,13 @@ def calcular_e_sanitizar_analise(
         av_ia["conversa_decisor"] = "n"
 
     else:
+        # Se feedback veio com prefixo 'Não avaliável', remove para manter feedback construtivo
+        if feedback_lower.startswith("não avaliável:") or feedback_lower.startswith("nao avaliavel:"):
+            av_sdr["feedback_geral"] = re.sub(r"^n[ãa]o avali[áa]vel:\s*", "", feedback, flags=re.IGNORECASE).strip()
+            feedback = av_sdr["feedback_geral"]
+        elif not feedback:
+            av_sdr["feedback_geral"] = "Atendimento de prospecção conduzido pelo SDR com avanço comercial."
+
         # Ligações avaliáveis: aplicação estrita do teto individual por critério (max_pontos) e normalização proporcional
         notas_clamped = []
         tetos_avaliados = []
@@ -1034,9 +1069,18 @@ def calcular_e_sanitizar_analise(
         soma_tetos = sum(tetos_avaliados)
         soma_obtida = sum(notas_clamped)
 
-        # Trava de segurança: exige pelo menos 50 pontos avaliados para gerar nota_final global proporcional
+        # Para ligações relevantes, SEMPRE gera nota_final!
         if soma_tetos >= 50:
             av_sdr["nota_final"] = max(0, min(100, int(round((soma_obtida / soma_tetos) * 100))))
+        elif av_sdr.get("nota_final") is not None:
+            try:
+                av_sdr["nota_final"] = max(0, min(100, int(round(float(av_sdr["nota_final"])))))
+            except (ValueError, TypeError):
+                av_sdr["nota_final"] = None
+        elif soma_tetos > 0 and tem_proximo_passo:
+            av_sdr["nota_final"] = max(0, min(100, int(round((soma_obtida / soma_tetos) * 100))))
+        elif tem_proximo_passo:
+            av_sdr["nota_final"] = 70
         else:
             av_sdr["nota_final"] = None
 
@@ -1055,6 +1099,9 @@ def calcular_e_sanitizar_analise(
             c_str = str(c or "").strip()
             if c_str in CODIGOS_OPORTUNIDADE_VALIDOS and c_str != "OP_ESC_04" and c_str not in codigos_validos:
                 codigos_validos.append(c_str)
+
+        if not codigos_validos and tem_proximo_passo:
+            codigos_validos = ["OP_PROX_01"]
 
         av_sdr["codigos_oportunidade"] = codigos_validos[:3]
         av_sdr["codigo_oportunidade"] = codigos_validos[0] if codigos_validos else None
@@ -1171,32 +1218,11 @@ def calcular_e_sanitizar_analise(
     # 9. Coerção determinística estrita de status comercial (resultado) e relevância
     raw_res = str(av_ia.get("resultado") or "").strip().lower()
     if eh_nao_avaliavel:
-        # Chamadas não avaliáveis para o SDR (ex.: recepção) que geraram próximo passo
-        # concreto são marcadas como RELEVANTES ('s') para a prospecção e mantêm status comercial "Perfil pendente",
-        # mas com notas estritamente NULL para o Power BI.
-        tem_proximo_passo = crm.get("acao") in (
-            "retorno com data combinado",
-            "envio de material solicitado",
-            "reunião proposta sem aceite",
-            "reunião confirmada",
-        )
-        prazo_val = str(crm.get("prazo") or "").strip().lower()
-        tem_prazo_definido = bool(
-            prazo_val
-            and prazo_val not in ("não se aplica", "nao se aplica", "não informado", "nao informado", "none", "null")
-        )
-        if tem_proximo_passo:
-            av_ia["ligacao_relevante"] = "s"
-            av_ia["resultado"] = "Perfil pendente"
-            av_ia["reuniao_confirmada"] = "s" if crm.get("acao") == "reunião confirmada" else "n"
-            av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"), crm.get("prazo_data"))
-            av_ia["conversa_decisor"] = "n"
-        else:
-            av_ia["ligacao_relevante"] = "n"
-            av_ia["resultado"] = "Dados insuficientes"
-            av_ia["reuniao_confirmada"] = "n"
-            av_ia["data_confirmada"] = "n"
-            av_ia["conversa_decisor"] = "n"
+        av_ia["ligacao_relevante"] = "n"
+        av_ia["resultado"] = "Dados insuficientes"
+        av_ia["reuniao_confirmada"] = "n"
+        av_ia["data_confirmada"] = "n"
+        av_ia["conversa_decisor"] = "n"
     else:
         av_ia["ligacao_relevante"] = "s"
         if crm.get("acao") == "reunião confirmada" or any(k in raw_res for k in ("reunião agendada", "reuniao agendada", "reunião confirmada", "reuniao confirmada")):
