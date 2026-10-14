@@ -31,7 +31,8 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
   - `CRIT_ESCUTA` (10 pts)
   - `CRIT_PROX_PASSO` (10 pts)
 - **Oportunidade de Treinamento (`dim_oportunidade_treinamento`)**: Catálogo pré-definido de 27 códigos (`OP_ABERT_*`, `OP_SPIN_*`, `OP_PERF_*`, `OP_BANT_*`, `OP_ESC_*`, `OP_PROX_*`, `OP_DIR_*`), onde cada chamada avaliável recebe **exatamente 1 código prioritário**.
-- **Chamada Não Avaliável**: Chamadas sem conversa substantiva (URA, queda imediata, secretária eletrônica ou recusa nos primeiros segundos). Recebem nota final e critérios como **NULL** no banco para não distorcer médias ou quebrar tipos inteiros (`Int64`) no Power BI.
+- **Chamada Relevante (`ligacao_relevante: 's'`)**: Chamada com diálogo comercial efetivo com decisor/área de interesse OU retenção na recepção com próximo passo comercial concreto (retorno agendado, envio de material, reunião proposta/confirmada). Toda ligação relevante gera obrigatoriamente a avaliação completa do SDR (`avaliacao_sdr`, critérios pontuados proporcionalmente, oportunidade de melhoria e feedback sem prefixo 'Não avaliável').
+- **Chamada Não Avaliável / Não Relevante (`ligacao_relevante: 'n'`)**: Chamadas sem contato útil (URA, queda imediata, número errado, secretária eletrônica ou retenção na recepção sem próximo passo / `crm.acao == "Não se aplica"`). Recebem nota final, notas de critério e código de oportunidade como **NULL** no banco para não distorcer médias ou quebrar tipos inteiros (`Int64`) no Power BI.
 
 ---
 
