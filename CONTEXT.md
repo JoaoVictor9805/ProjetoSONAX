@@ -18,7 +18,8 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Chamada / Áudio**: Gravação telefônica em formato WAV. Identificada internamente pelo `call_id` (protocolo) e `ramal`.
 - **Origem / Chamadas**: Tabela no banco de dados com metadados brutos das ligações geradas pela central (protocolo, ramal, atendente, número discado, DDD, duração, data/hora).
 - **Robô Google (RPA)**: Serviço de automação (`app/services/rpa_google.py`) que abre o navegador padrão / Google Chrome local, pesquisa o telefone formatado no Google, copia os dados da entidade comercial (Google My Business / cartões locais) e fecha a aba sem custos de API externa.
-- **Triangulação de Dados**: Consolidação entre o texto coletado pelo robô Google (`[GOOGLE]`) e os nomes citados na chamada (`[DIARIZAÇÃO]`) para identificar a entidade comercial.
+- **Triangulação de Dados**: Comparação contextual no prompt de IA entre os dados coletados pelo robô Google e a transcrição da chamada para identificar a entidade comercial correta.
+- **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no banco.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
 - **Revisão e Diarização Textual**: Etapa conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
 - **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`meta-llama/llama-3.1-8b-instruct`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.

@@ -60,18 +60,56 @@ chain = prompt | client | StrOutputParser()
 
 
 def montar_fonte_dados(
-    texto_google: str | None, 
-    nome_diarizado: str | None = None
+    revisao_texto: str | None = None, 
+    nome_diarizado: str | None = None,
+    *,
+    tem_interlocutor: bool | None = None,
+    tem_agente: bool | None = None,
 ) -> str:
-    """Monta a fonte de dados consolidada para a tabela empresa."""
-    partes = []
-    txt_g = (texto_google or "").strip()
-    partes.append(f"[GOOGLE]\n{txt_g if txt_g else 'Não encontrado'}")
+    """Monta a fonte de dados consolidada para a tabela empresa.
 
-    txt_d = (nome_diarizado or "").strip()
-    partes.append(f"[DIARIZAÇÃO]\n{txt_d if txt_d else 'Não identificado no diálogo'}")
+    Identifica as fontes primárias na ligação que forneceram/confirmaram 
+    informações sobre a empresa:
+    - 'Interlocutor / Agente' (diálogo com participação de ambos)
+    - 'Interlocutor' (informação obtida pelo cliente/contato)
+    - 'Agente' (menção isolada do SDR/agente)
+    - 'Não identificado' (sem diálogo conclusivo ou chamada não atendida)
+    """
+    texto = (revisao_texto or "").strip()
 
-    return "\n\n".join(partes)
+    interlocutor = tem_interlocutor
+    agente = tem_agente
+
+    if interlocutor is None:
+        interlocutor = bool(
+            re.search(r"^\s*Cliente\b", texto, re.MULTILINE | re.IGNORECASE)
+            or re.search(r"\bCliente\s*\(", texto, re.IGNORECASE)
+        )
+
+    if agente is None:
+        agente = bool(
+            re.search(r"^\s*Agente\b", texto, re.MULTILINE | re.IGNORECASE)
+            or re.search(r"\bAgente\s*\(", texto, re.IGNORECASE)
+        )
+
+    fontes = []
+    if interlocutor:
+        fontes.append("Interlocutor")
+    if agente:
+        fontes.append("Agente")
+
+    if fontes:
+        return " / ".join(fontes)
+
+    # Se não houver marcadores claros mas o nome diarizado estiver preenchido e válido
+    if (
+        nome_diarizado
+        and nome_diarizado.strip()
+        and nome_diarizado.strip().lower() not in ("não identificado", "não encontrado", "nao encontrado")
+    ):
+        return "Interlocutor"
+
+    return "Não identificado"
 
 
 def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
@@ -179,7 +217,7 @@ def revisar_texto(
         if rotulo_extraido.lower() != "cliente":
             nome_diarizado = rotulo_extraido
 
-    fonte_dados = montar_fonte_dados(google_str, nome_diarizado or empresa)
+    fonte_dados = montar_fonte_dados(revisao, nome_diarizado or empresa)
 
     return {
         "empresa": empresa,
