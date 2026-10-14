@@ -463,6 +463,110 @@ class TestChamadasDao(unittest.TestCase):
         # nota_criterio deve ter sido forçada para None
         self.assertIsNone(crit_call[0][1][2])
 
+    def test_status_comercial_expirou_funcao(self):
+        from app.database.chamadas_dao import status_comercial_expirou
+        from datetime import datetime
+
+        dt_antiga = datetime(2026, 8, 1, 10, 0, 0)
+        dt_recente = datetime(2026, 8, 20, 10, 0, 0) # 19 dias (< 30)
+        dt_expirada = datetime(2026, 9, 5, 10, 0, 0) # 35 dias (> 30)
+
+        self.assertFalse(status_comercial_expirou(dt_antiga, dt_recente))
+        self.assertTrue(status_comercial_expirou(dt_antiga, dt_expirada))
+        self.assertFalse(status_comercial_expirou(None, dt_expirada))
+        self.assertFalse(status_comercial_expirou(dt_antiga, None))
+
+    def test_hierarquia_status_comercial_permite_atualizacao_quando_expirado(self):
+        """Quando a reunião/status anterior tiver mais de 1 mês (30 dias), permite reclassificação da empresa."""
+        cur = MagicMock()
+        from datetime import datetime
+        dt_status_expirado = datetime(2026, 8, 1, 10, 0, 0)
+        # Empresa existente com Perfil confirmado com mais de 1 mês atrás
+        cur.fetchone.side_effect = [
+            ("audio.wav",),
+            ("audio.wav",),
+            (
+                "confirmado pelo interlocutor", "confirmado pelo interlocutor", "confirmado pelo interlocutor",
+                "Perfil confirmado", None, None, dt_status_expirado
+            ),
+        ]
+
+        # Nova ligação feita em 2026-09-15 (45 dias depois, > 30 dias)
+        dados_nova_ligacao = {
+            "avaliacao_ia": {
+                "empresa_contatada": 10,
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "data_avaliacao": "2026-09-15",
+                "resultado_frase": "Recepção pediu envio de material.",
+            },
+            "analise_perfil": {
+                "setor": "não informado",
+                "setor_origem": "não informado",
+                "regime_tributario": "Não se aplica",
+                "regime_origem": "não informado",
+                "faturamento_mensal": None,
+                "faturamento_origem": "não informado",
+            },
+            "avaliacao_sdr": {"nota_final": 75, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"acao": "envio de material solicitado", "resumo": "Ok"},
+        }
+
+        inserir_analise(cur, "audio_novo.wav", dados_nova_ligacao)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
+        # Como expirou (> 30 dias), deve atualizar o status_comercial para Perfil pendente
+        self.assertTrue(any("status_comercial =" in q for q in update_empresa_queries))
+        self.assertTrue(any("data_status_comercial =" in q for q in update_empresa_queries))
+
+    def test_hierarquia_status_comercial_mantem_protecao_quando_recente(self):
+        """Quando a reunião/status anterior estiver dentro da janela de 1 mês (< 30 dias), impede regressão de status."""
+        cur = MagicMock()
+        from datetime import datetime
+        dt_status_recente = datetime(2026, 9, 10, 10, 0, 0)
+        # Empresa existente com Perfil confirmado há apenas 5 dias
+        cur.fetchone.side_effect = [
+            ("audio.wav",),
+            ("audio.wav",),
+            (
+                "confirmado pelo interlocutor", "confirmado pelo interlocutor", "confirmado pelo interlocutor",
+                "Perfil confirmado", None, None, dt_status_recente
+            ),
+        ]
+
+        # Nova ligação feita em 2026-09-15 (apenas 5 dias depois)
+        dados_nova_ligacao = {
+            "avaliacao_ia": {
+                "empresa_contatada": 10,
+                "resultado": "Perfil pendente",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "n",
+                "data_confirmada": "n",
+                "data_avaliacao": "2026-09-15",
+                "resultado_frase": "Recepção atendeu.",
+            },
+            "analise_perfil": {
+                "setor": "não informado",
+                "setor_origem": "não informado",
+                "regime_tributario": "Não se aplica",
+                "regime_origem": "não informado",
+                "faturamento_mensal": None,
+                "faturamento_origem": "não informado",
+            },
+            "avaliacao_sdr": {"nota_final": 75, "feedback_geral": "Ok"},
+            "avaliacao_criterio": [],
+            "crm": {"acao": "retorno com data combinado", "resumo": "Ok"},
+        }
+
+        inserir_analise(cur, "audio_recente.wav", dados_nova_ligacao)
+        queries = [call[0][0] for call in cur.execute.call_args_list]
+        update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
+        # Como está recente (< 30 dias), a proteção de hierarquia anti-regressão impede rebaixamento
+        self.assertFalse(any("status_comercial =" in q for q in update_empresa_queries))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -204,7 +204,7 @@ class PipelineRunner:
                             done_cum,
                             total,
                             "transcribing",
-                            f"[INFO] [{i}/{total}] {rotulo}: {pct}% {msg or 'NVIDIA Nemotron processando...'}",
+                            f"[INFO] [{i}/{total}] {rotulo}: {pct}% {msg or 'Faster-Whisper processando...'}",
                             caminho.name,
                         )
 

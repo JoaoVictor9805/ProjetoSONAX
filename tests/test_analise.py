@@ -477,11 +477,9 @@ class TestAnaliseFinalAI(unittest.TestCase):
 
         res = calcular_e_sanitizar_analise(dados)
 
-        # SDR continua não avaliável (proteção Power BI)
-        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
-        self.assertIsNone(res["avaliacao_sdr"]["codigo_oportunidade"])
-        for crit in res["avaliacao_criterio"]:
-            self.assertIsNone(crit["nota_criterio"])
+        # Toda chamada relevante DEVE gerar avaliação do SDR
+        self.assertIsNotNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertIsNotNone(res["avaliacao_sdr"]["codigo_oportunidade"])
 
         # CRM e status comercial devem preservar o avanço
         self.assertEqual(res["crm"]["acao"], "retorno com data combinado")
@@ -497,7 +495,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
                 "resultado_frase": "Secretária solicitou apresentação comercial por e-mail.",
             },
             "avaliacao_sdr": {
-                "feedback_geral": "Não avaliável: Conversa apenas com secretária.",
+                "feedback_geral": "Conversa com secretária, solicitou material.",
                 "nota_final": None,
             },
             "avaliacao_criterio": [],
@@ -510,7 +508,8 @@ class TestAnaliseFinalAI(unittest.TestCase):
 
         res = calcular_e_sanitizar_analise(dados)
 
-        self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertIsNotNone(res["avaliacao_sdr"]["nota_final"])
+        self.assertIsNotNone(res["avaliacao_sdr"]["codigo_oportunidade"])
         self.assertEqual(res["crm"]["acao"], "envio de material solicitado")
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
         self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "s")
