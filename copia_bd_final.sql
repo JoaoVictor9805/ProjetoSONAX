@@ -251,54 +251,50 @@ ON CONFLICT (codigo) DO NOTHING;
 
 INSERT INTO dim_oportunidade_treinamento (codigo, fase_venda, descricao) VALUES
 -- 1. Abertura e Relevância
-('OP_ABERT_01', '1. Abertura e Relevância', 'Apresentar-se e situar a empresa com objetividade: Dizer nome e empresa de forma clara e rápida, sem monólogos institucionais, partindo direto para a razão da chamada.'),
-('OP_ABERT_02', '1. Abertura e Relevância', 'Utilizar a oportunidade de crédito mapeada como gancho: Usar o dado/tese tributária ou o segmento da empresa já presente no sistema para justificar o motivo do contato logo nos primeiros segundos.'),
-('OP_ABERT_03', '1. Abertura e Relevância', 'Expor o benefício da oportunidade sem sobrecarga técnica: Apresentar a proposta de crédito tributário com foco no ganho para a empresa (recuperação de valores, fôlego de caixa), evitando juridiquês ou detalhes fiscais complexos logo na largada.'),
-('OP_ABERT_04', '1. Abertura e Relevância', 'Confirmar o alinhamento com o interlocutor antes de aprofundar: Checar se a pessoa na linha é quem lida com a área fiscal/financeira ou captar a atenção dela antes de detalhar o cenário.'),
-('OP_ABERT_05', '1. Abertura e Relevância', 'Direcionar o contato para o responsável fiscal, tributário ou financeiro: Identificar a área do interlocutor e, caso o contato esteja retido na recepção ou em setor não correlato, buscar a transferência ou dados diretos do decisor competente.'),
-('OP_ABERT_06', '1. Abertura e Relevância', 'Evitar promessas de valores ou garantia de créditos: Tratar o benefício fiscal como hipótese comercial a ser avaliada tecnicamente, sem afirmar créditos certos, valores recuperáveis garantidos ou emitir conclusões jurídicas na chamada.'),
-
+('OP_ABERT_01', '1. Abertura e Relevância', 'Apresentar-se com clareza e dizer o motivo da ligação nos primeiros segundos'),
+('OP_ABERT_02', '1. Abertura e Relevância', 'Usar a oportunidade de crédito tributário como gancho inicial nos primeiros segundos'),
+('OP_ABERT_03', '1. Abertura e Relevância', 'Expor o benefício de caixa sem sobrecarga técnica ou juridiquês'),
+('OP_ABERT_04', '1. Abertura e Relevância', 'Confirmar se o interlocutor lida com a área fiscal ou financeira antes de aprofundar'),
+('OP_ABERT_05', '1. Abertura e Relevância', 'Superar a recepção e direcionar o contato para o responsável financeiro ou fiscal'),
+('OP_ABERT_06', '1. Abertura e Relevância', 'Tratar o crédito como hipótese comercial sem prometer valores certos ou garantidos'),
 
 -- 2. Descoberta SPIN
-('OP_SPIN_01', '2. Descoberta SPIN', 'Mapear o cenário inicial com perguntas rápidas e indispensáveis: Coletar apenas os dados de situação estritamente necessários para direcionar a conversa, mantendo a abordagem dinâmica e focada na oportunidade.'),
-('OP_SPIN_02', '2. Descoberta SPIN', 'Mapear atritos fiscais ou lacunas na rotina da empresa: Identificar se a contabilidade atual não tem braço para revisar tributos ou se a empresa tem receio/dúvidas sobre créditos acumulados.'),
-('OP_SPIN_03', '2. Descoberta SPIN', 'Destacar implicações simples e tangíveis (como a prescrição de créditos): Evidenciar o impacto prático de não revisar o cenário fiscal, focando no risco iminente de prescrição (perda da janela de 5 anos) ou dinheiro parado sem render para a operação.'),
-('OP_SPIN_04', '2. Descoberta SPIN', 'Conectar a solução à dor e checar a viabilidade de avanço: Posicionar a oportunidade de crédito como a solução direta para a lacuna mapeada e checar se faz sentido para o lead avaliar esse resgate de caixa.'),
-('OP_SPIN_05', '2. Descoberta SPIN', 'Diferenciar dor reconhecida pelo lead de argumentos do SDR: Estimular o interlocutor a admitir expressamente a lacuna ou interesse na revisão fiscal, evitando assumir teses do SDR como dores já confirmadas pela empresa.'),
-
+('OP_SPIN_01', '2. Descoberta SPIN', 'Fazer perguntas rápidas para mapear o cenário atual sem prolongar a chamada'),
+('OP_SPIN_02', '2. Descoberta SPIN', 'Investigar atritos fiscais ou limitações da rotina contábil da empresa'),
+('OP_SPIN_03', '2. Descoberta SPIN', 'Destacar o risco de prescrição da janela de 5 anos e dinheiro parado'),
+('OP_SPIN_04', '2. Descoberta SPIN', 'Conectar a recuperação tributária à dor do lead e checar o interesse em resgatar caixa'),
+('OP_SPIN_05', '2. Descoberta SPIN', 'Estimular o interlocutor a admitir a dor em vez de assumir teses próprias do SDR'),
 
 -- 3. Investigação de Perfil Técnico (Crucial)
-('OP_PERF_01', '3. Investigação de Perfil Técnico', 'Investigar o regime tributário da empresa: Confirmar ativamente se a empresa opera no regime de Lucro Real, que é o critério eliminatório da campanha, sem fazer deduções baseadas no porte do lead.'),
-('OP_PERF_02', '3. Investigação de Perfil Técnico', 'Confirmar o faturamento mínimo: Garantir que a empresa possui faturamento igual ou superior a R$ 1 milhão mensal (ou média anual correspondente), diferenciando dados confirmados pelo interlocutor de meras suposições.'),
-('OP_PERF_03', '3. Investigação de Perfil Técnico', 'Mapear o segmento de atuação: Identificar se a empresa pertence ao setor industrial (segmento preferencial) ou registrar claramente caso pertença a outro setor, sem descartá-la automaticamente se cumprir faturamento e regime tributário.'),
-('OP_PERF_04', '3. Investigação de Perfil Técnico', 'Garantir a confirmação ativa dos dados: Avaliar se o SDR formulou as perguntas de maneira que o próprio interlocutor declare ou valide as informações, penalizando abordagens em que o SDR apenas joga a afirmação no ar sem obter o "sim" do cliente.'),
-
+('OP_PERF_01', '3. Investigação de Perfil Técnico', 'Confirmar ativamente se a empresa opera no regime de Lucro Real'),
+('OP_PERF_02', '3. Investigação de Perfil Técnico', 'Confirmar faturamento mínimo mensal igual ou superior a R$ 1 milhão'),
+('OP_PERF_03', '3. Investigação de Perfil Técnico', 'Identificar se o segmento é industrial ou registrar outro setor confirmado'),
+('OP_PERF_04', '3. Investigação de Perfil Técnico', 'Formular perguntas para que o próprio interlocutor declare e valide as informações'),
 
 -- 4. Investigação BANT (Budget, Authority, Need, Timeline)
-('OP_BANT_01', '4. Investigação BANT', 'Budget (Viabilidade Comercial): Avaliar se o SDR sondou sutilmente o processo interno de aprovação ou a viabilidade de contratação futura, utilizando a gratuidade do diagnóstico inicial de forma estratégica para desarmar objeções de orçamento.'),
-('OP_BANT_02', '4. Investigação BANT', 'Authority (Autoridade): Avaliar se o SDR investigou ativamente o papel do interlocutor na tomada de decisão (se ele decide, influencia ou apenas repassa recados) e se perguntou quem mais precisaria estar envolvido para o negócio avançar.'),
-('OP_BANT_03', '4. Investigação BANT', 'Need (Necessidade): Observar se o SDR fez as perguntas certas para estimular o próprio lead a verbalizar um interesse ou problema real, penalizando a postura de apenas apresentar o pitch comercial e assumir que o cliente "comprou" a ideia.'),
-('OP_BANT_04', '4. Investigação BANT', 'Timeline (Prazo): Verificar se o SDR tentou mapear uma prioridade, um evento motivador ou um prazo ideal para a empresa resolver a questão fiscal, buscando gerar senso de urgência para o próximo passo.'),
-
+('OP_BANT_01', '4. Investigação BANT', 'Sondar a viabilidade de contratação e reforçar que o diagnóstico inicial é sem custo'),
+('OP_BANT_02', '4. Investigação BANT', 'Mapear o papel do interlocutor na decisão e descobrir quem mais precisa participar'),
+('OP_BANT_03', '4. Investigação BANT', 'Fazer perguntas para o lead verbalizar a necessidade em vez de apenas empurrar o pitch'),
+('OP_BANT_04', '4. Investigação BANT', 'Mapear prazo ou evento motivador para criar senso de urgência no próximo passo'),
 
 -- 5. Escuta e Objeções
-('OP_ESC_01', '5. Escuta e Objeções', 'Posicionar o trabalho como complementar à contabilidade atual: Ao ouvir que a empresa já tem contador/escritório, esclarecer de forma respeitosa que o projeto não substitui a contabilidade de rotina, funcionando como um suporte técnico especializado para teses específicas.'),
-('OP_ESC_02', '5. Escuta e Objeções', 'Retomar e espelhar termos utilizados pelo lead: Demonstrar escuta ativa citando fatos ou palavras que o próprio cliente acabou de mencionar antes de contra-argumentar, evitando parecer uma leitura de script pronta.'),
-('OP_ESC_03', '5. Escuta e Objeções', 'Tratar com empatia o receio de riscos ou fiscalização: Quando o lead demonstrar desconfiança ou medo de atrito com o Fisco, acolher a dúvida e esclarecer a segurança do processo administrativo com dados concretos, sem confrontar ou desmerecer o receio do cliente.'),
-('OP_ESC_04', '5. Escuta e Objeções', 'Evitar interrupções e sobreposição de falas no fluxo da conversa: Esperar a conclusão do raciocínio do interlocutor antes de intervir, mantendo a postura consultiva mesmo diante de resistências.'),
-('OP_ESC_05', '5. Escuta e Objeções', 'Investigar o motivo do desinteresse para direcionar a melhor saída: Diante de recusas genéricas como "não temos interesse", questionar respeitosamente a razão desse posicionamento para identificar a real objeção e conduzir com a solução mais adequada ao cenário do cliente (ex.: flexibilizar formato, esclarecer o modelo de risco zero ou focar em outra tese).'),
-
+('OP_ESC_01', '5. Escuta e Objeções', 'Posicionar o projeto como suporte complementar e técnico, sem confrontar a contabilidade atual'),
+('OP_ESC_02', '5. Escuta e Objeções', 'Praticar escuta ativa espelhando palavras do lead antes de contra-argumentar'),
+('OP_ESC_03', '5. Escuta e Objeções', 'Acolher com segurança o receio de riscos ou fiscalização, explicando o processo técnico'),
+('OP_ESC_04', '5. Escuta e Objeções', 'Evitar interrupções e sobreposição de falas no fluxo da conversa'),
+('OP_ESC_05', '5. Escuta e Objeções', 'Investigar a razão de desinteresses genéricos para identificar e contornar a objeção real'),
 
 -- 6. Próximo Passo e Compromisso
-('OP_PROX_01', '6. Próximo Passo e Compromisso', 'Propor opções objetivas de data e horário (técnica de dupla escolha): Sugerir dias e horários concretos (ex.: "amanhã às 14h ou quinta pela manhã fica melhor para você?") em vez de perguntas genéricas e abertas como "quando podemos conversar?".'),
-('OP_PROX_02', '6. Próximo Passo e Compromisso', 'Alinhar formalmente a modalidade escolhida (online ou presencial): Confirmar com clareza o formato preferido pelo lead — se por link de videoconferência ou visita do executivo na sede da empresa — coletando o endereço ou e-mail correto conforme o caso.'),
-('OP_PROX_03', '6. Próximo Passo e Compromisso', 'Contornar o pedido passivo de envio de material: Diante de respostas evasivas como "mande por e-mail" ou "vamos conversando", reancorar o valor da conversa técnica para buscar um compromisso com data e horário definidos.'),
-('OP_PROX_04', '6. Próximo Passo e Compromisso', 'Definir responsável e data concreta para retornos agendados: Quando a reunião imediata não for viável, estabelecer com precisão quem realizará o próximo contato e fixar dia e horário para a retomada.'),
-
+('OP_PROX_01', '6. Próximo Passo e Compromisso', 'Sugerir dias e horários concretos usando dupla escolha em vez de perguntas abertas'),
+('OP_PROX_02', '6. Próximo Passo e Compromisso', 'Confirmar claramente o formato da reunião (online ou presencial) e obter o contato correto'),
+('OP_PROX_03', '6. Próximo Passo e Compromisso', 'Reancorar o valor da reunião técnica ao contornar pedidos de envio por e-mail'),
+('OP_PROX_04', '6. Próximo Passo e Compromisso', 'Fixar com precisão o responsável, dia e horário quando o retorno for necessário'),
 
 -- 7. Direcionamento Final e Resolução da Chamada
-('OP_DIR_01', '7. Direcionamento Final e Resolução da Chamada', 'Direcionamento assertivo com base no perfil: Avaliar se o SDR identificou corretamente quando uma empresa estava fora do perfil (ex: Simples Nacional ou faturamento baixo) e encerrou a conversa de forma polida e adequada, sem forçar avanço em leads desqualificados.'),
-('OP_DIR_02', '7. Direcionamento Final e Resolução da Chamada', 'Condução para uma conversa substantiva: Observar se o vendedor teve a habilidade de transpor a barreira inicial (recepção, desinteresse inicial) para gerar uma conversa real com o decisor, em vez de aceitar recusas passivas nos primeiros segundos.'),
-('OP_DIR_03', '7. Direcionamento Final e Resolução da Chamada', 'Consolidação de um status claro: Verificar se o SDR conduziu a ligação até um desfecho conclusivo (perfil confirmado, perfil pendente com próximo passo ou descarte claro), evitando encerrar a chamada deixando o status da empresa como uma "área cinzenta" de dados insuficientes por falta de perguntas.')
-ON CONFLICT (codigo) DO NOTHING;
+('OP_DIR_01', '7. Direcionamento Final e Resolução da Chamada', 'Encerrar o contato com polidez e objetividade ao constatar empresa fora do perfil'),
+('OP_DIR_02', '7. Direcionamento Final e Resolução da Chamada', 'Superar a barreira da recepção para falar com quem decide'),
+('OP_DIR_03', '7. Direcionamento Final e Resolução da Chamada', 'Conduzir a chamada até um status comercial conclusivo, evitando indefinição')
+ON CONFLICT (codigo) DO UPDATE SET 
+    fase_venda = EXCLUDED.fase_venda,
+    descricao = EXCLUDED.descricao;
 

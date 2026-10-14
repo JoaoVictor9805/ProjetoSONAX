@@ -272,11 +272,17 @@ class AvaliacaoSDRModel(BaseModel):
         description="Feedback estruturado da atuação do SDR. Se não avaliável: 'Não avaliável: [motivo]'"
     )
     acertos: str | None = Field(default=None, description="Até 2 acertos observáveis na atuação do SDR")
-    melhorias: str | None = Field(default=None, description="Até 2 oportunidades pontuais de melhoria para o SDR")
+    melhorias: str | None = Field(
+        default=None,
+        description=(
+            "Demais oportunidades de melhoria em texto aberto/descritivo (pontos secundários de atenção "
+            "que não foram selecionados como o código principal), ou 'Não se aplica'"
+        ),
+    )
     frase_alternativa: str | None = Field(default=None, description="Uma frase ou pergunta concreta sugerida")
     codigos_oportunidade: list[str] = Field(
         default_factory=list,
-        description="Lista de até 3 códigos de dim_oportunidade_treinamento (ex: ['OP_SPIN_03', 'OP_PERF_01']), ou lista vazia se não avaliável",
+        description="Lista com 1 código principal de dim_oportunidade_treinamento (ex: ['OP_SPIN_03']), ou lista vazia se não avaliável",
     )
     codigo_oportunidade: str | None = Field(
         default=None,
