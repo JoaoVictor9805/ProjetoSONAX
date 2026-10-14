@@ -49,7 +49,7 @@ Arquivos WAV / ZIP / RAR
 2. Cópia Segura para Pasta Temporária de Trabalho
           │
           ▼
-3. Transcrição ASR (NVIDIA Nemotron via OpenRouter / AssemblyAI)
+3. Transcrição ASR (Faster-Whisper local com fallback OpenRouter)
           │ Persistência em `registro_chamadas`
           ▼
 4. Coleta RPA Google (Triangulação de Dados)

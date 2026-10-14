@@ -1,39 +1,36 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Serviço de Transcrição de Áudio via OpenRouter (NVIDIA Nemotron ASR).
+Serviço de Transcrição de Áudio Local via Faster-Whisper (CTranslate2).
 ============================================================================
 
-Utiliza o modelo:
-    nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b
-
 Recursos:
-    - Reconhecimento de fala (ASR) de alta velocidade e precisão
-    - Integração direta com a API do OpenRouter
-    - Fallback com suporte a multipart/form-data e base64
-    - Controle de cancelamento imediato via threading.Event
-    - Cálculo de progresso contínuo para a UI do SONAX
+    - Transcrição 100% local e offline utilizando o modelo 'small' (CTranslate2)
+    - Carregamento lazy singleton do modelo com fallback inteligente de aceleração (CUDA/CPU)
+    - Filtro VAD (Silero) para ignorar silêncios e ruídos de fundo
+    - Controle de cancelamento imediato via threading.Event durante o streaming de segmentos
+    - Coleta de métricas acústicas reais (avg_logprob, compression_ratio, no_speech_prob)
+    - Cálculo contínuo de progresso para a UI do SONAX
+    - Suporte retrocompatível com OpenRouter ASR caso configurado no ambiente
+============================================================================
 """
 
-import os
-import time
-import wave
+from __future__ import annotations
+
 import base64
+import os
 import threading
+import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import requests
 from dotenv import load_dotenv
 
+from app.services.audio_inspector import obter_duracao_wav
+
 load_dotenv()
-
-
-MODELO_PADRAO = os.getenv(
-    "TRANSCRICAO_MODEL",
-    "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
-)
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
 
 class TranscricaoErro(Exception):
@@ -46,12 +43,171 @@ class ChaveOpenRouterNaoConfigurada(TranscricaoErro):
     pass
 
 
+class ChaveAssemblyAINaoConfigurada(TranscricaoErro):
+    """Lançada quando a chave ASSEMBLY_API_KEY não foi configurada (compatibilidade)."""
+    pass
+
+
 class TranscricaoCancelada(TranscricaoErro):
     """Lançada quando a operação de transcrição é cancelada pelo usuário."""
     pass
 
 
-def obter_api_key() -> str:
+calcular_duracao_wav = obter_duracao_wav
+
+
+@lru_cache(maxsize=1)
+def obter_modelo_whisper(
+    nome: str = "small",
+    device: str = "auto",
+    compute_type: str = "auto",
+) -> Any:
+    """Carrega o modelo Faster-Whisper uma única vez por processo (singleton em cache)."""
+    from faster_whisper import WhisperModel
+    try:
+        return WhisperModel(nome, device=device, compute_type=compute_type)
+    except Exception:
+        # Fallback para execução segura em CPU
+        try:
+            return WhisperModel(nome, device="cpu", compute_type="int8")
+        except Exception:
+            return WhisperModel(nome, device="cpu", compute_type="float32")
+
+
+def transcrever_audio_faster_whisper(
+    caminho: Path | str,
+    *,
+    cancel: Optional[threading.Event] = None,
+    on_progress: Optional[Callable[[float, str], None]] = None,
+    timeout: Optional[int] = None,
+    language: str = "pt",
+    beam_size: int = 5,
+    vad_filter: bool = True,
+    modelo: Any = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Transcreve um arquivo de áudio utilizando Faster-Whisper (modelo small local).
+
+    Parâmetros:
+        caminho: Caminho local do arquivo de áudio (.wav).
+        cancel: Flag de cancelamento threading.Event para abortar a inferência.
+        on_progress: Callback de progresso f(frac, mensagem) para a UI.
+        timeout: Não aplicável diretamente na inferência local, mantido por compatibilidade.
+        language: Idioma para transcrição (padrão 'pt').
+        beam_size: Tamanho do feixe de busca para decodificação (padrão 5).
+        vad_filter: Ativação de VAD Silero para remover ruído/silêncio.
+        modelo: Instância opcional de WhisperModel para testes ou injeção direta.
+
+    Retorno:
+        dict contendo:
+            - texto: texto completo contínuo da transcrição
+            - texto_formatado: texto formatado
+            - texto_simples: texto simples
+            - duracao_segundos: duração calculada do áudio
+            - confidence: confiança estimada baseada no logprob médio
+            - metricas: dict com logprob_media, taxa_compressao_media, probabilidade_media_sem_fala
+            - turnos: []
+            - speakers: []
+    """
+    caminho_path = Path(caminho)
+    if not caminho_path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {caminho_path}")
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado antes do início da transcrição.")
+
+    duracao_segundos = 0.0
+    try:
+        duracao_segundos = calcular_duracao_wav(caminho_path)
+    except Exception:
+        duracao_segundos = 0.0
+
+    if on_progress:
+        on_progress(0.05, "Preparando modelo Faster-Whisper (small)...")
+
+    if modelo is None:
+        nome_modelo = os.getenv("WHISPER_MODEL", "small")
+        modelo = obter_modelo_whisper(nome=nome_modelo)
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado antes da inferência.")
+
+    if on_progress:
+        on_progress(0.15, "Transcrevendo áudio via Faster-Whisper local...")
+
+    try:
+        segments, info = modelo.transcribe(
+            str(caminho_path),
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+        )
+    except Exception as exc:
+        raise TranscricaoErro(f"Erro durante inferência do Faster-Whisper: {exc}") from exc
+
+    duracao_info = getattr(info, "duration", 0.0) or duracao_segundos or 0.0
+    partes: list[str] = []
+    logprobs: list[float] = []
+    taxas_compressao: list[float] = []
+    sem_falas: list[float] = []
+    ultimo_pct_relatado = -1
+
+    for segment in segments:
+        if cancel is not None and cancel.is_set():
+            raise TranscricaoCancelada("Cancelamento solicitado durante a transcrição.")
+
+        texto_seg = (segment.text or "").strip()
+        if texto_seg:
+            partes.append(texto_seg)
+
+        if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
+            logprobs.append(float(segment.avg_logprob))
+        if hasattr(segment, "compression_ratio") and segment.compression_ratio is not None:
+            taxas_compressao.append(float(segment.compression_ratio))
+        if hasattr(segment, "no_speech_prob") and segment.no_speech_prob is not None:
+            sem_falas.append(float(segment.no_speech_prob))
+
+        if on_progress and duracao_info > 0:
+            frac = min(segment.end / duracao_info, 0.95)
+            pct = round(frac * 100)
+            if pct != ultimo_pct_relatado:
+                ultimo_pct_relatado = pct
+                on_progress(frac, f"Transcrevendo áudio via Faster-Whisper ({pct}%)...")
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado após transcrição.")
+
+    texto_transcrito = " ".join(partes).strip()
+
+    # Cálculo das métricas acústicas consolidadas
+    logprob_media = sum(logprobs) / len(logprobs) if logprobs else -0.10
+    taxa_compressao_media = sum(taxas_compressao) / len(taxas_compressao) if taxas_compressao else 1.0
+    probabilidade_media_sem_fala = sum(sem_falas) / len(sem_falas) if sem_falas else 0.0
+
+    # Confiança normalizada no intervalo [0.1, 1.0]
+    confidence = round(max(0.1, min(1.0, 1.0 + (logprob_media / 2.0))), 2)
+
+    if on_progress:
+        on_progress(1.0, "Transcrição Faster-Whisper concluída com sucesso.")
+
+    return {
+        "texto": texto_transcrito,
+        "texto_formatado": texto_transcrito,
+        "texto_simples": texto_transcrito,
+        "duracao_segundos": duracao_info or duracao_segundos,
+        "confidence": confidence,
+        "metricas": {
+            "confidence": confidence,
+            "logprob_media": round(logprob_media, 4),
+            "taxa_compressao_media": round(taxa_compressao_media, 4),
+            "probabilidade_media_sem_fala": round(probabilidade_media_sem_fala, 4),
+        },
+        "turnos": [],
+        "speakers": [],
+    }
+
+
+def obter_api_key_openrouter() -> str:
     """Retorna a chave do OpenRouter definida no ambiente."""
     chave = os.getenv("OPENROUTER_API_KEY")
     if not chave or not chave.strip():
@@ -59,11 +215,6 @@ def obter_api_key() -> str:
             "Chave 'OPENROUTER_API_KEY' não configurada no arquivo .env."
         )
     return chave.strip()
-
-
-from app.services.audio_inspector import obter_duracao_wav
-
-calcular_duracao_wav = obter_duracao_wav
 
 
 def transcrever_audio_openrouter(
@@ -74,23 +225,7 @@ def transcrever_audio_openrouter(
     timeout: int = 90,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Transcreve um arquivo de áudio utilizando o modelo NVIDIA Nemotron via OpenRouter.
-    
-    Parâmetros:
-        caminho: Caminho local do arquivo de áudio (.wav).
-        cancel: Flag de cancelamento threading.Event para abortar a requisição.
-        on_progress: Callback de progresso f(frac, mensagem) para a UI.
-        timeout: Tempo limite da requisição HTTP em segundos (padrão 90s).
-        
-    Retorno:
-        dict contendo:
-            - texto: texto completo contínuo da transcrição
-            - duracao_segundos: duração calculada do áudio
-            - confidence: 0.95
-            - metricas: dict com logprob e métricas de qualidade
-            - turnos: [] (diarização realizada na etapa de revisão)
-            - speakers: []
-    """
+    """Transcreve um arquivo de áudio utilizando a API do OpenRouter."""
     caminho_path = Path(caminho)
     if not caminho_path.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {caminho_path}")
@@ -98,33 +233,33 @@ def transcrever_audio_openrouter(
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado antes do envio.")
 
-    api_key = obter_api_key()
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-    }
-
+    api_key = obter_api_key_openrouter()
+    modelo_padrao = os.getenv(
+        "TRANSCRICAO_MODEL",
+        "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+    )
+    base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    headers = {"Authorization": f"Bearer {api_key}"}
     duracao_segundos = calcular_duracao_wav(caminho_path)
 
     if on_progress:
-        on_progress(0.15, "Preparando áudio para NVIDIA Nemotron...")
+        on_progress(0.15, "Preparando áudio para OpenRouter...")
 
     texto_transcrito = ""
-    inicio_req = time.time()
 
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado.")
 
-    # Tentativa 1: Endpoint oficial de áudio do OpenRouter (/audio/transcriptions)
     try:
         if on_progress:
-            on_progress(0.35, "Enviando áudio para OpenRouter (Nemotron ASR)...")
+            on_progress(0.35, "Enviando áudio para OpenRouter...")
 
         with open(caminho_path, "rb") as f:
             files = {"file": (caminho_path.name, f, "audio/wav")}
-            data = {"model": MODELO_PADRAO}
-            
+            data = {"model": modelo_padrao}
+
             resp = requests.post(
-                f"{BASE_URL}/audio/transcriptions",
+                f"{base_url}/audio/transcriptions",
                 files=files,
                 data=data,
                 headers=headers,
@@ -136,11 +271,9 @@ def transcrever_audio_openrouter(
             texto_transcrito = resultado_json.get("text", "") or ""
         elif resp.status_code == 402:
             raise TranscricaoErro(
-                "Saldo insuficiente no OpenRouter para processar áudio "
-                "(requer ao menos $0.50 em https://openrouter.ai/settings/credits)."
+                "Saldo insuficiente no OpenRouter para processar áudio."
             )
         else:
-            # Se a rota /audio/transcriptions não retornar 200, tenta via chat/completions (base64)
             erro_msg = resp.text
             if on_progress:
                 on_progress(0.50, "Tentando rota alternativa de áudio via OpenRouter...")
@@ -149,7 +282,7 @@ def transcrever_audio_openrouter(
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
 
             payload = {
-                "model": MODELO_PADRAO,
+                "model": modelo_padrao,
                 "messages": [
                     {
                         "role": "user",
@@ -164,7 +297,7 @@ def transcrever_audio_openrouter(
             }
 
             resp_chat = requests.post(
-                f"{BASE_URL}/chat/completions",
+                f"{base_url}/chat/completions",
                 json=payload,
                 headers=headers,
                 timeout=timeout,
@@ -188,7 +321,7 @@ def transcrever_audio_openrouter(
     texto_transcrito = (texto_transcrito or "").strip()
 
     if on_progress:
-        on_progress(1.0, "Transcrição Nemotron concluída com sucesso.")
+        on_progress(1.0, "Transcrição OpenRouter concluída com sucesso.")
 
     return {
         "texto": texto_transcrito,
@@ -207,5 +340,36 @@ def transcrever_audio_openrouter(
     }
 
 
-# Alias para retrocompatibilidade
-transcrever_audio = transcrever_audio_openrouter
+# Provedor padrão: Faster-Whisper local (small)
+def transcrever_audio(
+    caminho: Path | str,
+    *,
+    cancel: Optional[threading.Event] = None,
+    on_progress: Optional[Callable[[float, str], None]] = None,
+    timeout: Optional[int] = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Encaminha para o provedor de transcrição configurado (padrão: faster_whisper local)."""
+    provedor = os.getenv("TRANSCRICAO_PROVIDER", "faster_whisper").lower().strip()
+    if provedor == "openrouter":
+        return transcrever_audio_openrouter(
+            caminho,
+            cancel=cancel,
+            on_progress=on_progress,
+            timeout=timeout or 90,
+            **kwargs,
+        )
+    return transcrever_audio_faster_whisper(
+        caminho,
+        cancel=cancel,
+        on_progress=on_progress,
+        timeout=timeout,
+        **kwargs,
+    )
+
+
+# Aliases para compatibilidade total entre módulos e branches
+transcrever_audio_faster = transcrever_audio_faster_whisper
+transcrever_audio_openrouter_alias = transcrever_audio_openrouter
+transcrever_audio_assembly = transcrever_audio
+transcrever_audio_assemblyai = transcrever_audio
