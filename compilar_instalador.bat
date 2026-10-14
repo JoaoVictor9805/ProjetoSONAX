@@ -61,6 +61,8 @@ pyinstaller --noconsole --onedir --name "SONAX" ^
     --collect-all langchain_google_genai ^
     --collect-all assemblyai ^
     --collect-all requests ^
+    --collect-all faster_whisper ^
+    --collect-all ctranslate2 ^
     --exclude-module torch ^
     --exclude-module torchvision ^
     --exclude-module torchaudio ^

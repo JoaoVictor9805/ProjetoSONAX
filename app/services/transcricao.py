@@ -1,30 +1,31 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-Serviço de Transcrição de Áudio via AssemblyAI.
+Serviço de Transcrição de Áudio Local via Faster-Whisper (CTranslate2).
 ============================================================================
 
 Recursos:
-    - Reconhecimento de fala (ASR) via AssemblyAI
-    - Foco exclusivo em transcrição pura de áudio (SOMENTE transcrição, sem diarização)
-    - Suporte a idioma padrão pt (Português)
-    - Controle de cancelamento imediato via threading.Event
-    - Cálculo de progresso contínuo para a UI do SONAX
-    - Limpeza automática de áudios/transcrições temporárias na nuvem
+    - Transcrição 100% local e offline utilizando o modelo 'small' (CTranslate2)
+    - Carregamento lazy singleton do modelo com fallback inteligente de aceleração (CUDA/CPU)
+    - Filtro VAD (Silero) para ignorar silêncios e ruídos de fundo
+    - Controle de cancelamento imediato via threading.Event durante o streaming de segmentos
+    - Coleta de métricas acústicas reais (avg_logprob, compression_ratio, no_speech_prob)
+    - Cálculo contínuo de progresso para a UI do SONAX
+    - Suporte retrocompatível com OpenRouter ASR caso configurado no ambiente
 ============================================================================
 """
 
 from __future__ import annotations
 
-import math
+import base64
 import os
-import sys
 import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-import assemblyai as aai
+import requests
 from dotenv import load_dotenv
 
 from app.services.audio_inspector import obter_duracao_wav
@@ -32,22 +33,18 @@ from app.services.audio_inspector import obter_duracao_wav
 load_dotenv()
 
 
-MODELO_PADRAO = os.getenv("ASSEMBLY_MODEL", "")
-IDIOMA_PADRAO = os.getenv("ASSEMBLY_LANGUAGE_CODE", "pt")
-
-
 class TranscricaoErro(Exception):
     """Exceção base para erros do serviço de transcrição."""
     pass
 
 
-class ChaveAssemblyAINaoConfigurada(TranscricaoErro):
-    """Lançada quando a chave ASSEMBLY_API_KEY não foi configurada."""
+class ChaveOpenRouterNaoConfigurada(TranscricaoErro):
+    """Lançada quando a chave OPENROUTER_API_KEY não foi configurada."""
     pass
 
 
-class ChaveOpenRouterNaoConfigurada(TranscricaoErro):
-    """Alias mantido para compatibilidade retroativa."""
+class ChaveAssemblyAINaoConfigurada(TranscricaoErro):
+    """Lançada quando a chave ASSEMBLY_API_KEY não foi configurada (compatibilidade)."""
     pass
 
 
@@ -56,55 +53,60 @@ class TranscricaoCancelada(TranscricaoErro):
     pass
 
 
-def obter_api_key() -> str:
-    """Retorna a chave da AssemblyAI definida no ambiente."""
-    chave = (
-        os.getenv("ASSEMBLY_API_KEY")
-        or os.getenv("ASSEMBLYAI_API_KEY")
-    )
-    if not chave or not chave.strip():
-        raise ChaveAssemblyAINaoConfigurada(
-            "Chave 'ASSEMBLY_API_KEY' não configurada no arquivo .env."
-        )
-    return chave.strip()
-
-
-def configurar_cliente(api_key: Optional[str] = None) -> None:
-    """Configura credenciais globais da SDK AssemblyAI."""
-    chave = api_key or obter_api_key()
-    aai.settings.api_key = chave
-
-
 calcular_duracao_wav = obter_duracao_wav
 
 
-def transcrever_audio_assemblyai(
+@lru_cache(maxsize=1)
+def obter_modelo_whisper(
+    nome: str = "small",
+    device: str = "auto",
+    compute_type: str = "auto",
+) -> Any:
+    """Carrega o modelo Faster-Whisper uma única vez por processo (singleton em cache)."""
+    from faster_whisper import WhisperModel
+    try:
+        return WhisperModel(nome, device=device, compute_type=compute_type)
+    except Exception:
+        # Fallback para execução segura em CPU
+        try:
+            return WhisperModel(nome, device="cpu", compute_type="int8")
+        except Exception:
+            return WhisperModel(nome, device="cpu", compute_type="float32")
+
+
+def transcrever_audio_faster_whisper(
     caminho: Path | str,
     *,
     cancel: Optional[threading.Event] = None,
     on_progress: Optional[Callable[[float, str], None]] = None,
-    timeout: int = 120,
-    deletar_apos_transcricao: bool = True,
+    timeout: Optional[int] = None,
+    language: str = "pt",
+    beam_size: int = 5,
+    vad_filter: bool = True,
+    modelo: Any = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Transcreve um arquivo de áudio utilizando a AssemblyAI (SOMENTE transcrição pura).
+    """Transcreve um arquivo de áudio utilizando Faster-Whisper (modelo small local).
 
     Parâmetros:
         caminho: Caminho local do arquivo de áudio (.wav).
-        cancel: Flag de cancelamento threading.Event para abortar a requisição.
+        cancel: Flag de cancelamento threading.Event para abortar a inferência.
         on_progress: Callback de progresso f(frac, mensagem) para a UI.
-        timeout: Tempo limite máximo de espera em segundos.
-        deletar_apos_transcricao: Se True, remove o áudio/transcrição na nuvem ao concluir.
+        timeout: Não aplicável diretamente na inferência local, mantido por compatibilidade.
+        language: Idioma para transcrição (padrão 'pt').
+        beam_size: Tamanho do feixe de busca para decodificação (padrão 5).
+        vad_filter: Ativação de VAD Silero para remover ruído/silêncio.
+        modelo: Instância opcional de WhisperModel para testes ou injeção direta.
 
     Retorno:
         dict contendo:
             - texto: texto completo contínuo da transcrição
-            - texto_formatado: texto completo
-            - texto_simples: texto completo
+            - texto_formatado: texto formatado
+            - texto_simples: texto simples
             - duracao_segundos: duração calculada do áudio
-            - confidence: nível de confiança do ASR (0.0 a 1.0)
-            - metricas: dict com logprob e métricas de qualidade
-            - turnos: [] (diarização realizada na etapa posterior de revisão)
+            - confidence: confiança estimada baseada no logprob médio
+            - metricas: dict com logprob_media, taxa_compressao_media, probabilidade_media_sem_fala
+            - turnos: []
             - speakers: []
     """
     caminho_path = Path(caminho)
@@ -112,115 +114,224 @@ def transcrever_audio_assemblyai(
         raise FileNotFoundError(f"Arquivo não encontrado: {caminho_path}")
 
     if cancel is not None and cancel.is_set():
-        raise TranscricaoCancelada("Cancelamento solicitado antes do envio.")
+        raise TranscricaoCancelada("Cancelamento solicitado antes do início da transcrição.")
 
-    configurar_cliente()
-
-    duracao_segundos = calcular_duracao_wav(caminho_path)
+    duracao_segundos = 0.0
+    try:
+        duracao_segundos = calcular_duracao_wav(caminho_path)
+    except Exception:
+        duracao_segundos = 0.0
 
     if on_progress:
-        on_progress(0.10, "Enviando áudio para AssemblyAI...")
+        on_progress(0.05, "Preparando modelo Faster-Whisper (small)...")
 
-    # Configuração estrita de SOMENTE transcrição (sem speaker_labels / diarização)
-    config_args: dict[str, Any] = {
-        "language_code": IDIOMA_PADRAO,
-        "speaker_labels": False,
-        "punctuate": True,
-        "format_text": True,
-    }
+    if modelo is None:
+        nome_modelo = os.getenv("WHISPER_MODEL", "small")
+        modelo = obter_modelo_whisper(nome=nome_modelo)
 
-    if MODELO_PADRAO:
-        config_args["speech_model"] = MODELO_PADRAO
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado antes da inferência.")
 
-    config = aai.TranscriptionConfig(**config_args)
-    transcriber = aai.Transcriber()
+    if on_progress:
+        on_progress(0.15, "Transcrevendo áudio via Faster-Whisper local...")
 
     try:
-        transcript_init = transcriber.submit(str(caminho_path), config=config)
+        segments, info = modelo.transcribe(
+            str(caminho_path),
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+        )
     except Exception as exc:
-        if cancel is not None and cancel.is_set():
-            raise TranscricaoCancelada("Cancelamento solicitado durante envio.") from exc
-        raise TranscricaoErro(f"Falha ao enviar áudio para AssemblyAI: {exc}") from exc
+        raise TranscricaoErro(f"Erro durante inferência do Faster-Whisper: {exc}") from exc
 
-    transcript_id = transcript_init.id
+    duracao_info = getattr(info, "duration", 0.0) or duracao_segundos or 0.0
+    partes: list[str] = []
+    logprobs: list[float] = []
+    taxas_compressao: list[float] = []
+    sem_falas: list[float] = []
+    ultimo_pct_relatado = -1
+
+    for segment in segments:
+        if cancel is not None and cancel.is_set():
+            raise TranscricaoCancelada("Cancelamento solicitado durante a transcrição.")
+
+        texto_seg = (segment.text or "").strip()
+        if texto_seg:
+            partes.append(texto_seg)
+
+        if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
+            logprobs.append(float(segment.avg_logprob))
+        if hasattr(segment, "compression_ratio") and segment.compression_ratio is not None:
+            taxas_compressao.append(float(segment.compression_ratio))
+        if hasattr(segment, "no_speech_prob") and segment.no_speech_prob is not None:
+            sem_falas.append(float(segment.no_speech_prob))
+
+        if on_progress and duracao_info > 0:
+            frac = min(segment.end / duracao_info, 0.95)
+            pct = round(frac * 100)
+            if pct != ultimo_pct_relatado:
+                ultimo_pct_relatado = pct
+                on_progress(frac, f"Transcrevendo áudio via Faster-Whisper ({pct}%)...")
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado após transcrição.")
+
+    texto_transcrito = " ".join(partes).strip()
+
+    # Cálculo das métricas acústicas consolidadas
+    logprob_media = sum(logprobs) / len(logprobs) if logprobs else -0.10
+    taxa_compressao_media = sum(taxas_compressao) / len(taxas_compressao) if taxas_compressao else 1.0
+    probabilidade_media_sem_fala = sum(sem_falas) / len(sem_falas) if sem_falas else 0.0
+
+    # Confiança normalizada no intervalo [0.1, 1.0]
+    confidence = round(max(0.1, min(1.0, 1.0 + (logprob_media / 2.0))), 2)
 
     if on_progress:
-        on_progress(0.25, "Áudio enviado. Transcrevendo na AssemblyAI...")
-
-    inicio_polling = time.time()
-    transcript = None
-
-    while True:
-        if cancel is not None and cancel.is_set():
-            if deletar_apos_transcricao:
-                try:
-                    aai.Transcript.delete_by_id(transcript_id)
-                except Exception:
-                    pass
-            raise TranscricaoCancelada("Cancelamento solicitado pelo usuário.")
-
-        if (time.time() - inicio_polling) > timeout:
-            if deletar_apos_transcricao:
-                try:
-                    aai.Transcript.delete_by_id(transcript_id)
-                except Exception:
-                    pass
-            raise TranscricaoErro(f"Tempo limite ({timeout}s) excedido na transcrição AssemblyAI.")
-
-        try:
-            status_obj = aai.Transcript.get_by_id(transcript_id)
-        except Exception as exc:
-            if cancel is not None and cancel.is_set():
-                raise TranscricaoCancelada("Cancelamento solicitado.") from exc
-            raise TranscricaoErro(f"Erro ao consultar status da transcrição AssemblyAI: {exc}") from exc
-
-        if status_obj.status == aai.TranscriptStatus.completed:
-            transcript = status_obj
-            break
-        elif status_obj.status == aai.TranscriptStatus.error:
-            msg_erro = status_obj.error or "Erro desconhecido retornado pela AssemblyAI"
-            raise TranscricaoErro(f"Erro na transcrição da AssemblyAI: {msg_erro}")
-
-        # Atualização proporcional de progresso estimado
-        tempo_decorrido = time.time() - inicio_polling
-        frac_progresso = min(0.92, 0.25 + (tempo_decorrido * 0.03))
-        status_nome = "Fila" if status_obj.status == aai.TranscriptStatus.queued else "Processando"
-        if on_progress:
-            on_progress(frac_progresso, f"AssemblyAI ({status_nome}): transcrevendo áudio...")
-
-        if cancel is not None and cancel.wait(1.5):
-            if deletar_apos_transcricao:
-                try:
-                    aai.Transcript.delete_by_id(transcript_id)
-                except Exception:
-                    pass
-            raise TranscricaoCancelada("Cancelamento solicitado durante o processamento.")
-        elif cancel is None:
-            time.sleep(1.5)
-
-    texto_transcrito = (transcript.text or "").strip()
-    duracao_retornada = transcript.audio_duration or duracao_segundos
-    confidence = transcript.confidence if transcript.confidence is not None else 0.95
-    logprob_media = math.log(max(confidence, 0.001))
-
-    if deletar_apos_transcricao:
-        try:
-            aai.Transcript.delete_by_id(transcript_id)
-        except Exception:
-            pass
-
-    if on_progress:
-        on_progress(1.0, "Transcrição AssemblyAI concluída com sucesso.")
+        on_progress(1.0, "Transcrição Faster-Whisper concluída com sucesso.")
 
     return {
         "texto": texto_transcrito,
         "texto_formatado": texto_transcrito,
         "texto_simples": texto_transcrito,
-        "duracao_segundos": duracao_retornada,
+        "duracao_segundos": duracao_info or duracao_segundos,
         "confidence": confidence,
         "metricas": {
             "confidence": confidence,
             "logprob_media": round(logprob_media, 4),
+            "taxa_compressao_media": round(taxa_compressao_media, 4),
+            "probabilidade_media_sem_fala": round(probabilidade_media_sem_fala, 4),
+        },
+        "turnos": [],
+        "speakers": [],
+    }
+
+
+def obter_api_key_openrouter() -> str:
+    """Retorna a chave do OpenRouter definida no ambiente."""
+    chave = os.getenv("OPENROUTER_API_KEY")
+    if not chave or not chave.strip():
+        raise ChaveOpenRouterNaoConfigurada(
+            "Chave 'OPENROUTER_API_KEY' não configurada no arquivo .env."
+        )
+    return chave.strip()
+
+
+def transcrever_audio_openrouter(
+    caminho: Path | str,
+    *,
+    cancel: Optional[threading.Event] = None,
+    on_progress: Optional[Callable[[float, str], None]] = None,
+    timeout: int = 90,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Transcreve um arquivo de áudio utilizando a API do OpenRouter."""
+    caminho_path = Path(caminho)
+    if not caminho_path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {caminho_path}")
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado antes do envio.")
+
+    api_key = obter_api_key_openrouter()
+    modelo_padrao = os.getenv(
+        "TRANSCRICAO_MODEL",
+        "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+    )
+    base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    duracao_segundos = calcular_duracao_wav(caminho_path)
+
+    if on_progress:
+        on_progress(0.15, "Preparando áudio para OpenRouter...")
+
+    texto_transcrito = ""
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado.")
+
+    try:
+        if on_progress:
+            on_progress(0.35, "Enviando áudio para OpenRouter...")
+
+        with open(caminho_path, "rb") as f:
+            files = {"file": (caminho_path.name, f, "audio/wav")}
+            data = {"model": modelo_padrao}
+
+            resp = requests.post(
+                f"{base_url}/audio/transcriptions",
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+            )
+
+        if resp.status_code == 200:
+            resultado_json = resp.json()
+            texto_transcrito = resultado_json.get("text", "") or ""
+        elif resp.status_code == 402:
+            raise TranscricaoErro(
+                "Saldo insuficiente no OpenRouter para processar áudio."
+            )
+        else:
+            erro_msg = resp.text
+            if on_progress:
+                on_progress(0.50, "Tentando rota alternativa de áudio via OpenRouter...")
+
+            with open(caminho_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            payload = {
+                "model": modelo_padrao,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "audio_url",
+                                "audio_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
+                            }
+                        ],
+                    }
+                ],
+            }
+
+            resp_chat = requests.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=timeout,
+            )
+
+            if resp_chat.status_code == 200:
+                texto_transcrito = resp_chat.json()["choices"][0]["message"]["content"]
+            else:
+                raise TranscricaoErro(
+                    f"Falha na transcrição OpenRouter (HTTP {resp.status_code}): {erro_msg}"
+                )
+
+    except requests.exceptions.RequestException as exc:
+        if cancel is not None and cancel.is_set():
+            raise TranscricaoCancelada("Cancelamento solicitado durante a transmissão.")
+        raise TranscricaoErro(f"Erro de rede ao conectar com OpenRouter: {exc}") from exc
+
+    if cancel is not None and cancel.is_set():
+        raise TranscricaoCancelada("Cancelamento solicitado após recebimento da transcrição.")
+
+    texto_transcrito = (texto_transcrito or "").strip()
+
+    if on_progress:
+        on_progress(1.0, "Transcrição OpenRouter concluída com sucesso.")
+
+    return {
+        "texto": texto_transcrito,
+        "texto_formatado": texto_transcrito,
+        "texto_simples": texto_transcrito,
+        "duracao_segundos": duracao_segundos,
+        "confidence": 0.95,
+        "metricas": {
+            "confidence": 0.95,
+            "logprob_media": -0.05,
             "taxa_compressao_media": 1.0,
             "probabilidade_media_sem_fala": 0.0,
         },
@@ -229,7 +340,36 @@ def transcrever_audio_assemblyai(
     }
 
 
-# Aliases para compatibilidade total
-transcrever_audio = transcrever_audio_assemblyai
-transcrever_audio_assembly = transcrever_audio_assemblyai
-transcrever_audio_openrouter = transcrever_audio_assemblyai
+# Provedor padrão: Faster-Whisper local (small)
+def transcrever_audio(
+    caminho: Path | str,
+    *,
+    cancel: Optional[threading.Event] = None,
+    on_progress: Optional[Callable[[float, str], None]] = None,
+    timeout: Optional[int] = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Encaminha para o provedor de transcrição configurado (padrão: faster_whisper local)."""
+    provedor = os.getenv("TRANSCRICAO_PROVIDER", "faster_whisper").lower().strip()
+    if provedor == "openrouter":
+        return transcrever_audio_openrouter(
+            caminho,
+            cancel=cancel,
+            on_progress=on_progress,
+            timeout=timeout or 90,
+            **kwargs,
+        )
+    return transcrever_audio_faster_whisper(
+        caminho,
+        cancel=cancel,
+        on_progress=on_progress,
+        timeout=timeout,
+        **kwargs,
+    )
+
+
+# Aliases para compatibilidade total entre módulos e branches
+transcrever_audio_faster = transcrever_audio_faster_whisper
+transcrever_audio_openrouter_alias = transcrever_audio_openrouter
+transcrever_audio_assembly = transcrever_audio
+transcrever_audio_assemblyai = transcrever_audio
