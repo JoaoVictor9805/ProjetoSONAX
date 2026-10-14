@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migração 007: Adicionar data_status_comercial TIMESTAMP em empresa
+-- Migração 008: Adicionar data_status_comercial TIMESTAMP em empresa
 -- Armazena a data âncora em que o status comercial foi estabelecido:
 -- 1ª prioridade: data de agenda (crm.prazo_data para reuniões e retornos)
 -- 2ª prioridade (fallback): data de realização da chamada (chamadas.dt_inicio)

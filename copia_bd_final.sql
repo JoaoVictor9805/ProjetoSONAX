@@ -191,6 +191,8 @@ CREATE TABLE IF NOT EXISTS crm (
     FOREIGN KEY (log) REFERENCES avaliacao_ia(log)
 );
 
+CREATE INDEX IF NOT EXISTS idx_crm_prazo_data ON crm(prazo_data);
+
 
 CREATE TABLE IF NOT EXISTS analise_perfil (
     log VARCHAR(255) PRIMARY KEY NOT NULL,
