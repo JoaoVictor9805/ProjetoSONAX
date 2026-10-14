@@ -6,9 +6,11 @@ from unittest.mock import MagicMock
 from app.database.chamadas_dao import (
     buscar_chamada_valida,
     buscar_identificacao_cliente,
+    buscar_logs_com_revisao,
     inserir_analise,
     inserir_empresa,
     inserir_revisao,
+    verificar_coluna_revisao,
     verificar_tabela_analise,
 )
 
@@ -566,6 +568,34 @@ class TestChamadasDao(unittest.TestCase):
         update_empresa_queries = [q for q in queries if "UPDATE empresa" in q]
         # Como está recente (< 30 dias), a proteção de hierarquia anti-regressão impede rebaixamento
         self.assertFalse(any("status_comercial =" in q for q in update_empresa_queries))
+
+    def test_verificar_coluna_revisao_com_revisao_preenchida(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = ("[Agente]: Bom dia",)
+        self.assertTrue(verificar_coluna_revisao(cur, "audio.wav"))
+
+    def test_verificar_coluna_revisao_com_revisao_nula_ou_vazia(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = (None,)
+        self.assertFalse(verificar_coluna_revisao(cur, "audio.wav"))
+
+        cur.fetchone.return_value = ("",)
+        self.assertFalse(verificar_coluna_revisao(cur, "audio.wav"))
+
+        cur.fetchone.return_value = None
+        self.assertFalse(verificar_coluna_revisao(cur, "audio.wav"))
+
+    def test_buscar_logs_com_revisao(self):
+        cur = MagicMock()
+        cur.fetchall.return_value = [("audio1.wav",), ("audio3.wav",)]
+        res = buscar_logs_com_revisao(cur, ["audio1.wav", "audio2.wav", "audio3.wav"])
+        self.assertEqual(res, {"audio1.wav", "audio3.wav"})
+
+    def test_buscar_logs_com_revisao_vazio(self):
+        cur = MagicMock()
+        res = buscar_logs_com_revisao(cur, [])
+        self.assertEqual(res, set())
+        self.assertFalse(cur.execute.called)
 
 
 if __name__ == "__main__":

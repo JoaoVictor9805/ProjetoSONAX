@@ -276,7 +276,7 @@ def buscar_transcricao(
 def verificar_coluna_revisao(
     cur: psycopg.Cursor,
     log: str
-) -> bool | None:
+) -> bool:
     """Verifica se a coluna de revisão está preenchida no BD."""
     cur.execute(
         """
@@ -287,7 +287,24 @@ def verificar_coluna_revisao(
         (log,)
     )
     resultado = cur.fetchone()
-    return resultado[0] if resultado else None
+    return bool(resultado and resultado[0] and str(resultado[0]).strip())
+
+
+def buscar_logs_com_revisao(
+    cur: psycopg.Cursor,
+    logs: list[str]
+) -> set[str]:
+    """Retorna o conjunto de logs que já possuem a coluna revisao preenchida no BD."""
+    if not logs:
+        return set()
+    cur.execute(
+        """
+        SELECT log FROM registro_chamadas 
+        WHERE log = ANY(%s) AND revisao IS NOT NULL AND TRIM(revisao) != '';
+        """,
+        (list(logs),),
+    )
+    return {row[0] for row in cur.fetchall()}
 
 
 def inserir_revisao(

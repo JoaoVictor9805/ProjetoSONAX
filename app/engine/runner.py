@@ -283,55 +283,82 @@ class PipelineRunner:
                     obter_caminho_chrome_instalado,
                 )
 
-                telefones_para_busca: dict[str, str | None] = {}
-                for arq_name, dados_audio in mapa_diarizacao.items():
-                    num = dados_audio.get("numero")
-                    if not num or not str(num).strip():
-                        id_cli = dados_audio.get("identificacao_cliente")
-                        if id_cli:
-                            num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
-                    if not num or not str(num).strip():
-                        from app.services.parses import parse_nome_arquivo
-                        info_arq = parse_nome_arquivo(Path(arq_name))
-                        num = info_arq.get("telefone")
+                # Verifica se a revisão da ligação já está no banco antes de acionar o robô RPA
+                revisoes_existentes = self.ingestor.verificar_revisoes_existentes(list(mapa_diarizacao.keys()))
+                arquivos_pendentes = [arq for arq in mapa_diarizacao if arq not in revisoes_existentes]
 
-                    ddd = dados_audio.get("estado_ddd")
-                    telefones_para_busca[arq_name] = formatar_telefone_busca(num, ddd)
-
-                telefones_validos = [t for t in set(telefones_para_busca.values()) if t]
                 textos_google: dict[str, str] = {}
+                telefones_para_busca: dict[str, str | None] = {}
 
-                if telefones_validos:
-                    chrome_exec = obter_caminho_chrome_instalado()
-                    if chrome_exec:
-                        self.on_log(f"[INFO] Google Chrome detectado: {chrome_exec}", "out", True, None)
-                    else:
-                        self.on_log("[INFO] Usando navegador padrão do sistema para pesquisa.", "out", True, None)
-
-                    self.on_log(
-                        f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_validos)} telefone(s)...",
-                        "out", False, None,
+                if not arquivos_pendentes and mapa_diarizacao:
+                    msg_pulo = (
+                        "[INFO] Revisão da ligação já está no banco de dados. Etapa de coleta RPA no Google pulada."
+                        if len(mapa_diarizacao) == 1
+                        else f"[INFO] Todas as {len(mapa_diarizacao)} ligações já possuem revisão no banco de dados. Etapa de coleta RPA no Google pulada."
                     )
-                    self.on_log(
-                        "  [ATENÇÃO] O robô de consulta abrirá o navegador. Solte mouse e teclado.",
-                        "out", False, None,
-                    )
-
-                    def _on_rpa_progress(idx: int, tot: int, tel: str) -> None:
-                        msg = f"[INFO] [{idx}/{tot}] Consultando Google (RPA): {tel} ..."
-                        self.on_progress(idx - 1, tot, "searching", msg, None)
-
-                    textos_google = coletar_textos_google_lote(
-                        telefones_para_busca,
-                        cancel=self.cancel_event,
-                        tempo_espera_pagina=6.0,
-                        on_progress=_on_rpa_progress,
-                    )
-                    self.on_progress(len(telefones_validos), len(telefones_validos), "searching", "[INFO] Coleta RPA no Google concluída.", None)
-                    self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_validos)} telefone(s) consultado(s)).", "out", False, None)
+                    self.on_progress(1, 1, "searching", msg_pulo, None)
+                    self.on_log(msg_pulo, "out", False, None)
+                    textos_google = {k: "Não encontrado" for k in mapa_diarizacao}
                 else:
-                    self.on_log("[INFO] Nenhum telefone válido para consulta RPA no Google (etapa pulada).", "out", False, None)
-                    textos_google = {k: "Não encontrado" for k in telefones_para_busca}
+                    if revisoes_existentes:
+                        msg_existentes = (
+                            "[INFO] 1 ligação já possui revisão no banco de dados e não será consultada via RPA."
+                            if len(revisoes_existentes) == 1
+                            else f"[INFO] {len(revisoes_existentes)} ligações já possuem revisão no banco de dados e não serão consultadas via RPA."
+                        )
+                        self.on_log(msg_existentes, "out", False, None)
+
+                    for arq_name in arquivos_pendentes:
+                        dados_audio = mapa_diarizacao.get(arq_name, {})
+                        num = dados_audio.get("numero")
+                        if not num or not str(num).strip():
+                            id_cli = dados_audio.get("identificacao_cliente")
+                            if id_cli:
+                                num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
+                        if not num or not str(num).strip():
+                            from app.services.parses import parse_nome_arquivo
+                            info_arq = parse_nome_arquivo(Path(arq_name))
+                            num = info_arq.get("telefone")
+
+                        ddd = dados_audio.get("estado_ddd")
+                        telefones_para_busca[arq_name] = formatar_telefone_busca(num, ddd)
+
+                    telefones_validos = [t for t in set(telefones_para_busca.values()) if t]
+
+                    if telefones_validos:
+                        chrome_exec = obter_caminho_chrome_instalado()
+                        if chrome_exec:
+                            self.on_log(f"[INFO] Google Chrome detectado: {chrome_exec}", "out", True, None)
+                        else:
+                            self.on_log("[INFO] Usando navegador padrão do sistema para pesquisa.", "out", True, None)
+
+                        self.on_log(
+                            f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_validos)} telefone(s)...",
+                            "out", False, None,
+                        )
+                        self.on_log(
+                            "  [ATENÇÃO] O robô de consulta abrirá o navegador. Solte mouse e teclado.",
+                            "out", False, None,
+                        )
+
+                        def _on_rpa_progress(idx: int, tot: int, tel: str) -> None:
+                            msg = f"[INFO] [{idx}/{tot}] Consultando Google (RPA): {tel} ..."
+                            self.on_progress(idx - 1, tot, "searching", msg, None)
+
+                        textos_google = coletar_textos_google_lote(
+                            telefones_para_busca,
+                            cancel=self.cancel_event,
+                            tempo_espera_pagina=6.0,
+                            on_progress=_on_rpa_progress,
+                        )
+                        self.on_progress(len(telefones_validos), len(telefones_validos), "searching", "[INFO] Coleta RPA no Google concluída.", None)
+                        self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_validos)} telefone(s) consultado(s)).", "out", False, None)
+                    else:
+                        self.on_log("[INFO] Nenhum telefone válido para consulta RPA no Google (etapa pulada).", "out", False, None)
+                        textos_google = {k: "Não encontrado" for k in telefones_para_busca}
+
+                    for arq in revisoes_existentes:
+                        textos_google.setdefault(arq, "Não encontrado")
 
                 if self.cancel_event.is_set():
                     self._limpar_temporarios()
@@ -354,6 +381,17 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
+
+                    if caminho.name in revisoes_existentes:
+                        self.on_progress(
+                            idx,
+                            total_copiados,
+                            "reviewing",
+                            f"[AVISO] [{idx}/{total_copiados}] {rotulo_audio} - Revisão já registrada no banco (pulado)",
+                            caminho.name,
+                        )
+                        continue
+
                     msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando (Llama 3.1 8B): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 

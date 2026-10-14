@@ -27,6 +27,7 @@ from app.logs import log_dev_exc
 from app.database.chamadas_dao import (
     buscar_chamada_valida,
     buscar_identificacao_cliente,
+    buscar_logs_com_revisao,
     buscar_revisao,
     buscar_transcricao,
     inserir_analise,
@@ -254,6 +255,26 @@ class ChamadaIngestor:
     # ------------------------------------------------------------------------
     # Fase 2: Diarização e Revisão com IA (Llama 3.1 8B)
     # ------------------------------------------------------------------------
+
+    def verificar_revisao_existente(self, log_arquivo: str) -> bool:
+        """Verifica se a ligação já possui revisão preenchida no banco de dados."""
+        try:
+            with conectar() as cur:
+                return bool(verificar_coluna_revisao(cur, log_arquivo))
+        except Exception:
+            log_dev_exc()
+            return False
+
+    def verificar_revisoes_existentes(self, logs: list[str]) -> set[str]:
+        """Retorna o conjunto de logs que já possuem revisão preenchida no banco de dados."""
+        if not logs:
+            return set()
+        try:
+            with conectar() as cur:
+                return buscar_logs_com_revisao(cur, logs)
+        except Exception:
+            log_dev_exc()
+            return set()
 
     def revisar_transcricao(
         self,

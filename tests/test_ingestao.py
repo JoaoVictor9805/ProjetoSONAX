@@ -251,6 +251,24 @@ class TestChamadaIngestor(unittest.TestCase):
         self.assertEqual(len(self.fake_ia.chamadas_analisar), 1)
         mock_inserir_analise.assert_called_once()
 
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.verificar_coluna_revisao")
+    def test_verificar_revisao_existente(self, mock_verificar, mock_conectar):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_verificar.return_value = True
+        self.assertTrue(self.ingestor.verificar_revisao_existente("audio1.wav"))
+
+        mock_verificar.return_value = False
+        self.assertFalse(self.ingestor.verificar_revisao_existente("audio2.wav"))
+
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.buscar_logs_com_revisao")
+    def test_verificar_revisoes_existentes(self, mock_buscar, mock_conectar):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_buscar.return_value = {"audio1.wav"}
+        res = self.ingestor.verificar_revisoes_existentes(["audio1.wav", "audio2.wav"])
+        self.assertEqual(res, {"audio1.wav"})
+
 
 if __name__ == "__main__":
     unittest.main()
