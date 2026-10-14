@@ -353,7 +353,7 @@ class ChamadaIngestor:
                     )
                     from app.logs import log_dev
                     if fonte_dados:
-                        log_dev(f"[{nome_exibicao}] Triangulação de dados:\n{fonte_dados}")
+                        log_dev(f"[{nome_exibicao}] Fonte de dados da empresa: {fonte_dados}")
                     log_dev(f"[{nome_exibicao}] Prévia da revisão ({len(revisao_texto)} caracteres):\n{revisao_texto[:250]}...")
                 break
             except Exception:

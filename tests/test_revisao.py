@@ -44,14 +44,27 @@ class TestRevisao(unittest.TestCase):
         self.assertIn("Cliente: Bom dia", revisao)
 
     def test_montar_fonte_dados_combinada(self):
-        fonte = montar_fonte_dados("Texto Google da busca", "Padaria do João")
-        self.assertIn("[GOOGLE]\nTexto Google da busca", fonte)
-        self.assertIn("[DIARIZAÇÃO]\nPadaria do João", fonte)
+        revisao = "Agente (Carlos): Bom dia!\nCliente (Padaria do João): Olá, tudo bem?"
+        fonte = montar_fonte_dados(revisao, "Padaria do João")
+        self.assertEqual(fonte, "Interlocutor / Agente")
+
+    def test_montar_fonte_dados_apenas_cliente(self):
+        revisao = "Cliente (Padaria do João): Padaria do João, bom dia."
+        fonte = montar_fonte_dados(revisao, "Padaria do João")
+        self.assertEqual(fonte, "Interlocutor")
+
+    def test_montar_fonte_dados_apenas_agente(self):
+        revisao = "Agente (Carlos): Alô, alguém na linha?"
+        fonte = montar_fonte_dados(revisao, None)
+        self.assertEqual(fonte, "Agente")
 
     def test_montar_fonte_dados_vazia(self):
         fonte = montar_fonte_dados(None, None)
-        self.assertIn("[GOOGLE]\nNão encontrado", fonte)
-        self.assertIn("[DIARIZAÇÃO]\nNão identificado no diálogo", fonte)
+        self.assertEqual(fonte, "Não identificado")
+
+    def test_montar_fonte_dados_parametros_explicitos(self):
+        fonte = montar_fonte_dados(tem_interlocutor=True, tem_agente=False)
+        self.assertEqual(fonte, "Interlocutor")
 
 
 if __name__ == "__main__":

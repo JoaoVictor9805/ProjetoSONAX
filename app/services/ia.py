@@ -148,9 +148,7 @@ class FakeProvedorIA:
             "Cliente (Empresa): Olá, pode falar comigo."
         )
         self.empresa_padrao = empresa_padrao or "Empresa Teste"
-        self.fonte_dados_padrao = fonte_dados_padrao or (
-            "[GOOGLE]\nTexto Google Teste\n\n[DIARIZAÇÃO]\nEmpresa Teste"
-        )
+        self.fonte_dados_padrao = fonte_dados_padrao or "Interlocutor / Agente"
         self.analise_padrao = analise_padrao or {
             "avaliacao_ia": {
                 "protocolo": 123456789,
