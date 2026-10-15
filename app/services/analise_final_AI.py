@@ -830,21 +830,40 @@ def derivar_data_confirmada(acao: Any, prazo: Any, prazo_data: Any = None) -> st
     return "s" if not vazio else "n"
 
 
-_CARGOS_DECISORES = (
-    "sócio", "socio", "proprietário", "proprietario", "dono", "dona",
-    "diretor", "diretora", "ceo", "cfo", "coo", "presidente",
-    "superintendente", "vice-presidente", "head", "fundador", "fundadora",
+# Cargos padrão com autonomia intrínseca para avaliar/marcar reunião e níveis superiores:
+_CARGOS_DECISORES_E_ACIMA = (
+    # Sócios, Proprietários e Alta Cúpula
+    "sócio", "socio", "sócia", "socia", "proprietário", "proprietario",
+    "proprietária", "proprietaria", "dono", "dona", "acionista", "fundador",
+    "fundadora", "titular",
+    # C-Level e Presidência
+    "ceo", "cfo", "coo", "cro", "cto", "cmo", "presidente", "vice-presidente", "vice presidente",
+    # Diretoria e Superintendência
+    "diretor", "diretora", "superintendente", "head",
+    # Gestão, Controladoria e Contabilidade Oficial
+    "controller", "gerente", "gerência", "gerencia",
+    "contador", "contadora", "auditor", "auditora",
+    # Coordenação e Supervisão (patamar padrão de autonomia técnica/agenda)
+    "coordenador", "coordenadora", "coordena",
+    "supervisor", "supervisora", "supervis",
+    # Líderes e Responsáveis de setor
+    "líder", "lider", "responsável", "responsavel",
+    # Especialistas jurídicos/tributários com autoridade
+    "tributarista", "advogado", "advogada",
+    "consultor tributár", "consultor fiscal", "consultora tributár", "consultora fiscal",
+    "consultor financeiro", "consultora financeira",
 )
 
-_CARGOS_INFLUENCIADORES = (
-    "controller", "gerente", "contador", "contadora",
-    "coordenador", "coordenadora", "supervisor", "supervisora",
-    "auditor", "consultor tributár", "consultor fiscal",
-)
-
-_CARGOS_GATEKEEPERS = (
+# Cargos abaixo do patamar padrão (subordinados, operacionais e gatekeepers):
+# Pela regra de negócio, esses cargos APENAS são considerados decisores CASO marquem reunião na chamada.
+_CARGOS_ABAIXO_PADRAO = (
+    # Subordinados e Operacionais
+    "analista", "assistente", "auxiliar", "estagiár", "estagiar", "aprendiz", "trainee",
+    "operador", "operadora", "técnico", "tecnico", "técnica", "tecnica",
+    "faturamento", "contas a pagar", "contas a receber", "caixa", "escriturári", "escriturari",
+    # Gatekeepers (Recepção e Telefonia)
     "secretária", "secretaria", "recepcionista", "atendente", "telefonista",
-    "portaria", "estagiár", "estagiar", "porteiro", "telefonista",
+    "portaria", "porteiro",
 )
 
 
@@ -856,17 +875,20 @@ def derivar_conversa_decisor(
     reuniao_confirmada: bool = False,
 ) -> str:
     """
-    Deriva deterministicamente se houve conversa com decisor ou influenciador ('s' ou 'n'):
-    - 's': se uma reunião técnica foi confirmada/agendada na chamada (autoridade exercida);
-           se o interlocutor é decisor (Diretoria, Sócios, C-Level) ou influenciador com autonomia
-           (Gerência, Controladoria, Coordenação Fiscal/Financeira, Contabilidade).
-    - 'n': para gatekeepers (secretária, recepção) sem reunião confirmada, contatos meramente operacionais sem autoridade,
-           ou ligações não avaliáveis (quedas, URA, recusas imediatas).
+    Deriva deterministicamente se houve conversa com decisor ('s' ou 'n'):
+    - 's': se o interlocutor possui cargo padrão com autonomia para marcar/avaliar reunião
+           ou nível acima (Diretoria, Sócios, C-Level, Gerência, Controladoria, Coordenação,
+           Supervisão, Contabilidade Oficial);
+           OU se o interlocutor (mesmo em cargo abaixo/operacional ou gatekeeper) marcou/confirmou
+           uma reunião na chamada (exerceu autoridade na prática).
+    - 'n': para cargos abaixo do padrão (analistas, assistentes, auxiliares, operacionais,
+           gatekeepers como secretária/recepção) que NÃO marcaram reunião, contatos sem cargo,
+           ou ligações não avaliáveis (quedas, URA).
     """
     if eh_nao_avaliavel:
         return "n"
 
-    # Se a reunião técnica foi marcada/confirmada na chamada, quem confirmou exerceu autoridade de decisão
+    # Regra 1: Qualquer cargo abaixo ou interlocutor que confirmou reunião exerceu autoridade de decisão
     if reuniao_confirmada:
         return "s"
 
@@ -874,19 +896,18 @@ def derivar_conversa_decisor(
     if not cargo_str or cargo_str in ("não se aplica", "nao se aplica", "não informado", "nao informado"):
         return "n"
 
-    # Gatekeepers nunca são decisores de reunião (quando não há reunião confirmada)
-    if any(g in cargo_str for g in _CARGOS_GATEKEEPERS):
+    # Regra 2: Cargos abaixo do padrão (subordinados, operacionais e gatekeepers)
+    # Ex: Assistente de Diretoria, Analista Fiscal, Secretária, Recepcionista, Auxiliar.
+    # Eles APENAS são decisores se marcarem reunião (já tratado acima). Se não marcaram, são sempre 'n'.
+    if any(sub in cargo_str for sub in _CARGOS_ABAIXO_PADRAO):
         return "n"
 
-    # Decisores ou influenciadores diretos
-    if any(d in cargo_str for d in _CARGOS_DECISORES) or any(i in cargo_str for i in _CARGOS_INFLUENCIADORES):
+    # Regra 3: Cargos no patamar padrão de autonomia ou acima (Coordenação, Supervisão, Gerência, C-Level, Diretoria, Sócios)
+    # Esses cargos têm por função a prerrogativa de avaliar e marcar reuniões, sendo sempre decisores.
+    if any(dec in cargo_str for dec in _CARGOS_DECISORES_E_ACIMA):
         return "s"
 
-    # Se a IA sugeriu 's' e a autoridade BANT não foi negada/não informada
-    raw_sugestao = str(conversa_decisor_raw or "").strip().lower()
-    if raw_sugestao == "s" and str(authority_classificacao or "").strip().lower() in ("confirmado", "indício", "indicio"):
-        return "s"
-
+    # Se não se enquadra nos cargos com autoridade padrão e não marcou reunião:
     return "n"
 
 

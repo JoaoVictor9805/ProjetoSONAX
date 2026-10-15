@@ -938,7 +938,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(len(modelo.avaliacao_criterio), 6)
 
     def test_derivar_conversa_decisor_decisores_e_influenciadores(self):
-        """Valida que Diretor, Sócio, Controller, Gerente Fiscal e Contador viram conversa_decisor='s'."""
+        """Valida que cargos padrão de autonomia (Coordenação, Supervisão, Gerência, Contabilidade, C-Level, Sócios) viram conversa_decisor='s'."""
         self.assertEqual(derivar_conversa_decisor("Diretor Financeiro"), "s")
         self.assertEqual(derivar_conversa_decisor("Sócio Proprietário"), "s")
         self.assertEqual(derivar_conversa_decisor("CEO"), "s")
@@ -946,9 +946,18 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(derivar_conversa_decisor("Gerente Fiscal e Tributário"), "s")
         self.assertEqual(derivar_conversa_decisor("Contador"), "s")
         self.assertEqual(derivar_conversa_decisor("Coordenadora Financeira"), "s")
+        self.assertEqual(derivar_conversa_decisor("Supervisor Fiscal"), "s")
+        self.assertEqual(derivar_conversa_decisor("Líder do Setor Contábil"), "s")
+        self.assertEqual(derivar_conversa_decisor("Responsável pelo Financeiro"), "s")
 
-    def test_derivar_conversa_decisor_gatekeepers_e_vazios(self):
-        """Valida que Secretária, Recepção, Atendente e cargos vazios viram conversa_decisor='n'."""
+    def test_derivar_conversa_decisor_cargos_abaixo_padrao_sem_reuniao(self):
+        """Valida que cargos abaixo do padrão (Analistas, Assistentes, Auxiliares, Gatekeepers) viram conversa_decisor='n' sem reunião."""
+        self.assertEqual(derivar_conversa_decisor("Analista Fiscal"), "n")
+        self.assertEqual(derivar_conversa_decisor("Analista Financeiro Pleno"), "n")
+        self.assertEqual(derivar_conversa_decisor("Assistente de Controladoria"), "n")
+        self.assertEqual(derivar_conversa_decisor("Assistente de Diretoria"), "n")
+        self.assertEqual(derivar_conversa_decisor("Auxiliar Contábil"), "n")
+        self.assertEqual(derivar_conversa_decisor("Operador de Faturamento"), "n")
         self.assertEqual(derivar_conversa_decisor("Secretária"), "n")
         self.assertEqual(derivar_conversa_decisor("Recepcionista"), "n")
         self.assertEqual(derivar_conversa_decisor("Telefonista"), "n")
@@ -956,15 +965,18 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(derivar_conversa_decisor("Não se aplica"), "n")
         self.assertEqual(derivar_conversa_decisor(None), "n")
 
-    def test_derivar_conversa_decisor_com_reuniao_confirmada(self):
-        """Valida que quando uma reunião é confirmada, o interlocutor é considerado decisor ('s')."""
-        # Se reunião técnica foi confirmada, quem agendou teve autoridade de decisão
+    def test_derivar_conversa_decisor_cargos_abaixo_com_reuniao_confirmada(self):
+        """Valida que cargos abaixo do padrão viram conversa_decisor='s' APENAS quando confirmam reunião."""
+        # Se reunião técnica foi confirmada, exerceram autoridade de agenda
+        self.assertEqual(derivar_conversa_decisor("Analista Fiscal", reuniao_confirmada=True), "s")
+        self.assertEqual(derivar_conversa_decisor("Assistente de Diretoria", reuniao_confirmada=True), "s")
         self.assertEqual(derivar_conversa_decisor("Secretária", reuniao_confirmada=True), "s")
         self.assertEqual(derivar_conversa_decisor("Recepcionista", reuniao_confirmada=True), "s")
         self.assertEqual(derivar_conversa_decisor("Não se aplica", reuniao_confirmada=True), "s")
         self.assertEqual(derivar_conversa_decisor(None, reuniao_confirmada=True), "s")
         self.assertEqual(derivar_conversa_decisor("Auxiliar Administrativo", reuniao_confirmada=True), "s")
-        # Sem reunião confirmada, gatekeepers continuam 'n'
+        # Sem reunião confirmada, continuam 'n'
+        self.assertEqual(derivar_conversa_decisor("Analista Fiscal", reuniao_confirmada=False), "n")
         self.assertEqual(derivar_conversa_decisor("Secretária", reuniao_confirmada=False), "n")
 
     def test_chamada_transferida_recepcao_para_diretor_marca_conversa_decisor_s(self):
