@@ -956,6 +956,17 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(derivar_conversa_decisor("Não se aplica"), "n")
         self.assertEqual(derivar_conversa_decisor(None), "n")
 
+    def test_derivar_conversa_decisor_com_reuniao_confirmada(self):
+        """Valida que quando uma reunião é confirmada, o interlocutor é considerado decisor ('s')."""
+        # Se reunião técnica foi confirmada, quem agendou teve autoridade de decisão
+        self.assertEqual(derivar_conversa_decisor("Secretária", reuniao_confirmada=True), "s")
+        self.assertEqual(derivar_conversa_decisor("Recepcionista", reuniao_confirmada=True), "s")
+        self.assertEqual(derivar_conversa_decisor("Não se aplica", reuniao_confirmada=True), "s")
+        self.assertEqual(derivar_conversa_decisor(None, reuniao_confirmada=True), "s")
+        self.assertEqual(derivar_conversa_decisor("Auxiliar Administrativo", reuniao_confirmada=True), "s")
+        # Sem reunião confirmada, gatekeepers continuam 'n'
+        self.assertEqual(derivar_conversa_decisor("Secretária", reuniao_confirmada=False), "n")
+
     def test_chamada_transferida_recepcao_para_diretor_marca_conversa_decisor_s(self):
         """Chamada que capturou cargo mais alto (Diretor Financeiro) marca conversa_decisor='s'."""
         dados = {
@@ -974,6 +985,25 @@ class TestAnaliseFinalAI(unittest.TestCase):
             "crm": {"acao": "reunião confirmada", "prazo": "Amanhã às 14h", "resumo": "Ok"},
         }
         res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["conversa_decisor"], "s")
+
+    def test_chamada_com_reuniao_confirmada_marca_conversa_decisor_s(self):
+        """Chamada com reunião confirmada marca conversa_decisor='s' mesmo se cargo for secretária/operacional."""
+        dados = {
+            "avaliacao_ia": {
+                "interlocutor": "Ana Paula",
+                "cargo": "Secretária Executiva",
+                "resultado": "Reunião agendada",
+                "ligacao_relevante": "s",
+                "reuniao_confirmada": "s",
+            },
+            "avaliacao_sdr": {"nota_final": 90, "feedback_geral": "Reunião confirmada com sucesso."},
+            "avaliacao_criterio": [],
+            "analise_bant": {"authority_classificacao": "confirmado"},
+            "crm": {"acao": "reunião confirmada", "prazo": "Segunda às 15h", "resumo": "Agendado."},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "s")
         self.assertEqual(res["avaliacao_ia"]["conversa_decisor"], "s")
 
     def test_chamada_retida_recepcao_com_retorno_marca_conversa_decisor_n(self):

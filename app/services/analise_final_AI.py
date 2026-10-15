@@ -853,22 +853,28 @@ def derivar_conversa_decisor(
     conversa_decisor_raw: Any = None,
     authority_classificacao: Any = None,
     eh_nao_avaliavel: bool = False,
+    reuniao_confirmada: bool = False,
 ) -> str:
     """
     Deriva deterministicamente se houve conversa com decisor ou influenciador ('s' ou 'n'):
-    - 's': se o interlocutor é decisor (Diretoria, Sócios, C-Level) ou influenciador com autonomia
+    - 's': se uma reunião técnica foi confirmada/agendada na chamada (autoridade exercida);
+           se o interlocutor é decisor (Diretoria, Sócios, C-Level) ou influenciador com autonomia
            (Gerência, Controladoria, Coordenação Fiscal/Financeira, Contabilidade).
-    - 'n': para gatekeepers (secretária, recepção), contatos meramente operacionais sem autoridade,
+    - 'n': para gatekeepers (secretária, recepção) sem reunião confirmada, contatos meramente operacionais sem autoridade,
            ou ligações não avaliáveis (quedas, URA, recusas imediatas).
     """
     if eh_nao_avaliavel:
         return "n"
 
+    # Se a reunião técnica foi marcada/confirmada na chamada, quem confirmou exerceu autoridade de decisão
+    if reuniao_confirmada:
+        return "s"
+
     cargo_str = str(cargo or "").strip().lower()
     if not cargo_str or cargo_str in ("não se aplica", "nao se aplica", "não informado", "nao informado"):
         return "n"
 
-    # Gatekeepers nunca são decisores de reunião
+    # Gatekeepers nunca são decisores de reunião (quando não há reunião confirmada)
     if any(g in cargo_str for g in _CARGOS_GATEKEEPERS):
         return "n"
 
@@ -1237,11 +1243,13 @@ def calcular_e_sanitizar_analise(
             av_ia["reuniao_confirmada"] = "s" if str(av_ia.get("reuniao_confirmada", "n")).lower() == "s" else "n"
 
         av_ia["data_confirmada"] = derivar_data_confirmada(crm.get("acao"), crm.get("prazo"), crm.get("prazo_data"))
+        reuniao_foi_confirmada = (av_ia["reuniao_confirmada"] == "s") or (crm.get("acao") == "reunião confirmada")
         av_ia["conversa_decisor"] = derivar_conversa_decisor(
             av_ia.get("cargo"),
             conversa_decisor_raw=av_ia.get("conversa_decisor"),
             authority_classificacao=bant.get("authority_classificacao"),
             eh_nao_avaliavel=False,
+            reuniao_confirmada=reuniao_foi_confirmada,
         )
 
         regime_str = str(perfil.get("regime_tributario") or "").strip().lower()
