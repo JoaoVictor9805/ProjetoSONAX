@@ -372,8 +372,9 @@ class PipelineRunner:
 
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
+                from app.services.revisao import MODELO_REVISAO
                 self.on_log(
-                    f"[INFO] Iniciando diarização e revisão com IA (Llama 3.1 8B Instruct) de {total_copiados} chamada(s) ...",
+                    f"[INFO] Iniciando diarização e revisão com IA ({MODELO_REVISAO}) de {total_copiados} chamada(s) ...",
                     "out", False, None,
                 )
                 for idx, caminho in enumerate(copiados, 1):
@@ -392,7 +393,7 @@ class PipelineRunner:
                         )
                         continue
 
-                    msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando (Llama 3.1 8B): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando ({MODELO_REVISAO}): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 
                     dados_audio = mapa_diarizacao.get(caminho.name, {})
@@ -439,8 +440,9 @@ class PipelineRunner:
                 )
 
                 # 4.75) Análise com IA (ChamadaIngestor)
+                from app.services.analise_final_AI import MODELO_ANALISE
                 self.on_log(
-                    f"[INFO] Iniciando avaliação de critérios comerciais (Llama 3.1 8B) de {total_copiados} chamada(s) ...",
+                    f"[INFO] Iniciando avaliação de critérios comerciais ({MODELO_ANALISE}) de {total_copiados} chamada(s) ...",
                     "out", False, None,
                 )
                 for idx, caminho in enumerate(copiados, 1):
@@ -448,7 +450,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial SPIN/BANT/SDR (Llama 3.1 8B): {rotulo_audio} ..."
+                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial via {MODELO_ANALISE} (SPIN/BANT/SDR): {rotulo_audio} ..."
                     self.on_progress(idx - 1, total_copiados, "analyzing", msg, caminho.name)
 
                     self.ingestor.analisar_chamada(

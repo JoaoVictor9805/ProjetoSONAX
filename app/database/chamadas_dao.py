@@ -605,7 +605,7 @@ def inserir_analise(
         (
             log,
             dt_av,
-            str(av_ia.get("modelo_ia", "gpt-4o-mini"))[:50],
+            str(av_ia.get("modelo_ia", "meta-llama/llama-3.1-8b-instruct"))[:50],
             (av_ia.get("interlocutor") or None)[:100] if av_ia.get("interlocutor") else None,
             (av_ia.get("cargo") or None)[:100] if av_ia.get("cargo") else None,
             empresa_id,

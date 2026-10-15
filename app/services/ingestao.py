@@ -314,7 +314,8 @@ class ChamadaIngestor:
         if not texto_diarizado or not texto_diarizado.strip():
             return None
 
-        print(f"  [INFO] Diarizando e revisando {nome_exibicao} (Llama 3.1 8B Instruct)...")
+        from app.services.revisao import MODELO_REVISAO
+        print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({MODELO_REVISAO})...")
 
         resultado_ia = None
         for tentativa in range(1, 4):
@@ -471,7 +472,8 @@ class ChamadaIngestor:
             dia_extenso = dias_semana[dt_chamada_ref.weekday()]
             data_referencia_str = f"{dt_chamada_ref.strftime('%Y-%m-%d %H:%M:%S')} ({dia_extenso})"
 
-        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} (SPIN/BANT/SDR - Llama 3.1 8B)...")
+        from app.services.analise_final_AI import MODELO_ANALISE
+        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} ({MODELO_ANALISE}) (SPIN/BANT/SDR)...")
         analise_ia = None
         for tentativa in range(1, 4):
             try:
@@ -522,6 +524,19 @@ class ChamadaIngestor:
                             )
                             if crit_resumo:
                                 print(f"    • Critérios: {crit_resumo}")
+
+                            # Alerta se algum critério ficou sem oportunidade (None) no diálogo
+                            criterios_sem_oportunidade = [
+                                c.get("codigo_criterio", "").replace("CRIT_", "")
+                                for c in crit_lista
+                                if isinstance(c, dict) and c.get("codigo_criterio") and c.get("nota_criterio") is None
+                            ]
+                            if criterios_sem_oportunidade:
+                                print(
+                                    f"    • [AVISO] Critérios em aberto por ausência de oportunidade no diálogo: "
+                                    f"{', '.join(criterios_sem_oportunidade)} (nota recalculada proporcionalmente)"
+                                )
+
                             print(
                                 f"    • Lead: {av_ia.get('resultado', 'N/A')} | "
                                 f"Reunião confirmada: {str(av_ia.get('reuniao_confirmada', 'n')).upper()} | "
@@ -531,8 +546,14 @@ class ChamadaIngestor:
                                 prazo_txt = f" ({crm_dados.get('prazo')})" if crm_dados.get("prazo") else ""
                                 print(f"    • Próximo Passo CRM: {crm_dados.get('acao')}{prazo_txt}")
                         else:
-                            print(f"  [AVISO] {nome_exibicao}: Algumas notas acabaram em aberto e alguns aspectos não puderam ser avaliados")
-                            print(f"    • Motivo: {av_sdr.get('feedback_geral', 'Chamada sem conteúdo avaliável')}")
+                            motivo_sdr = str(av_sdr.get("feedback_geral") or "Chamada sem conteúdo avaliável para o SDR").strip()
+                            if motivo_sdr.lower().startswith("não avaliável:"):
+                                motivo_sdr = motivo_sdr[len("não avaliável:"):].strip()
+                            elif motivo_sdr.lower().startswith("nao avaliavel:"):
+                                motivo_sdr = motivo_sdr[len("nao avaliavel:"):].strip()
+
+                            print(f"  [AVISO] {nome_exibicao}: Chamada não avaliável para o SDR (ligação não relevante / sem avanço comercial)")
+                            print(f"    • Motivo: {motivo_sdr}")
                             print(f"    • Status comercial: {av_ia.get('resultado', 'N/A')}")
                             if crm_dados.get("acao"):
                                 prazo_txt = f" ({crm_dados.get('prazo')})" if crm_dados.get("prazo") else ""

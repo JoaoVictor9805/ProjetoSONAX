@@ -133,7 +133,7 @@ def transcrever_audio_faster_whisper(
         raise TranscricaoCancelada("Cancelamento solicitado antes da inferência.")
 
     if on_progress:
-        on_progress(0.15, "Transcrevendo áudio via Faster-Whisper local...")
+        on_progress(0.15, "Transcrevendo áudio via Faster-Whisper local (small)...")
 
     try:
         segments, info = modelo.transcribe(
@@ -172,7 +172,7 @@ def transcrever_audio_faster_whisper(
             pct = round(frac * 100)
             if pct != ultimo_pct_relatado:
                 ultimo_pct_relatado = pct
-                on_progress(frac, f"Transcrevendo áudio via Faster-Whisper ({pct}%)...")
+                on_progress(frac, f"Transcrevendo áudio via Faster-Whisper local (small) ({pct}%)...")
 
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado após transcrição.")
