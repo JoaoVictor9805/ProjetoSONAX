@@ -290,7 +290,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
   "avaliacao_ia": {
     "protocolo": 123456789,
     "data_avaliacao": "2026-09-30",
-    "modelo_ia": "meta-llama/llama-3.1-8b-instruct",
+    "modelo_ia": "minimax/minimax-m3.1-flash:free",
     "interlocutor": "Carlos Silva",
     "cargo": "Diretor Financeiro",
     "empresa_contatada": null,

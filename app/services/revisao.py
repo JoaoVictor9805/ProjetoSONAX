@@ -10,7 +10,7 @@ Responsabilidades:
     3. Preservação estrita do conteúdo e vocabulário original da chamada
        (sem alucinar diálogos nem remover termos de negócio).
     4. Limpeza de artefatos, tags especiais de parada e rótulos órfãos pós-processamento.
-    5. Integração com modelo LLM via LangChain (Llama 3.1 8B Instruct via OpenRouter).
+    5. Integração com modelo LLM via LangChain (MiniMax M3.1 Flash via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -20,25 +20,15 @@ import os
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from app.config.prompts import prompt_revisao
 
 load_dotenv()
 
-"""
-client = ChatGoogleGenerativeAI (
-    model="gemini-3.1-flash-lite",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
-    max_output_tokens=4096,
-    max_retries=3
-)
-"""
-
 MODELO_REVISAO = os.getenv(
     "REVISAO_MODEL",
-    "meta-llama/llama-3.1-8b-instruct",
+    "minimax/minimax-m3.1-flash:free",
 )
 
 client = ChatOpenAI(

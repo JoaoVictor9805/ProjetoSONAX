@@ -9,7 +9,7 @@ Responsabilidades:
     3. Avaliação de qualidade do texto transcrito.
     4. Parsing de metadados do nome do arquivo (ramal, data, hora).
     5. Associação do atendente e persistência em `registro_chamadas`.
-    6. Diarização e revisão com IA (Llama 3.1 8B Instruct).
+    6. Diarização e revisão com IA (MiniMax M3.1 Flash).
     7. Análise de qualidade comercial com IA (SPIN/BANT/SDR).
 ============================================================================
 """
@@ -253,7 +253,7 @@ class ChamadaIngestor:
         )
 
     # ------------------------------------------------------------------------
-    # Fase 2: Diarização e Revisão com IA (Llama 3.1 8B)
+    # Fase 2: Diarização e Revisão com IA (MiniMax M3.1 Flash)
     # ------------------------------------------------------------------------
 
     def verificar_revisao_existente(self, log_arquivo: str) -> bool:
@@ -395,7 +395,7 @@ class ChamadaIngestor:
         }
 
     # ------------------------------------------------------------------------
-    # Fase 3: Análise de Critérios com IA (Llama 3.1 8B)
+    # Fase 3: Análise de Critérios com IA (MiniMax M3.1 Flash)
     # ------------------------------------------------------------------------
 
     def analisar_chamada(
