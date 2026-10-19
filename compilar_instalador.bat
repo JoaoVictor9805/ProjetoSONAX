@@ -74,10 +74,6 @@ if errorlevel 1 (
 )
 
 :: 5. Copia arquivos auxiliares para dentro de dist\SONAX
-if exist "instalar.bat" (
-    copy /y "instalar.bat" "dist\SONAX\instalar.bat" >nul 2>&1
-    copy /y "instalar.bat" "dist\Instalar_SONAX.bat" >nul 2>&1
-)
 if exist ".env" (
     copy /y ".env" "dist\SONAX\.env" >nul 2>&1
 )
@@ -110,8 +106,8 @@ if exist "dist\Instalador_SONAX.exe" (
     echo    3. Atalhos sao criados na Area de Trabalho e Menu Iniciar.
     echo    4. O SONAX abrira instantaneamente a partir de entao!
 ) else (
-    echo  - Pasta do aplicativo: dist\SONAX
-    echo  - Instalador script:   dist\Instalar_SONAX.bat
+    echo  - Pasta do aplicativo compilada: dist\SONAX
+    echo  - Execute dist\SONAX\SONAX.exe diretamente ou instale o Inno Setup para gerar o instalador unico.
 )
 echo.
 pause

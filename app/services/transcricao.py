@@ -172,7 +172,7 @@ def transcrever_audio_faster_whisper(
             pct = round(frac * 100)
             if pct != ultimo_pct_relatado:
                 ultimo_pct_relatado = pct
-                on_progress(frac, f"Transcrevendo áudio via Faster-Whisper local (small) ({pct}%)...")
+                on_progress(frac, "Transcrevendo áudio via Faster-Whisper local (small)...")
 
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado após transcrição.")
