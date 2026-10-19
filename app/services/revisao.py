@@ -36,7 +36,8 @@ client = ChatOpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
     model=MODELO_REVISAO,
     temperature=0.0,  # Zero para evitar criação de diálogos falsos
-    max_tokens=4096,  # Margem segura para devolver a transcrição inteira
+    max_tokens=16384,  # Margem segura para raciocínio e devolução da transcrição inteira
+    extra_body={"reasoning": {"effort": "low"}},
     max_retries=3,
 )
 
@@ -102,6 +103,21 @@ def montar_fonte_dados(
     return "Não identificado"
 
 
+def corrigir_mojibake(texto: str) -> str:
+    """Detecta e recupera textos UTF-8 corrompidos por interpretação em Latin-1/CP1252 (Mojibake)."""
+    if not texto or ("Ã" not in texto and "Â" not in texto):
+        return texto
+    try:
+        return texto.encode("latin1").decode("utf-8")
+    except Exception:
+        def _desfazer(m):
+            try:
+                return m.group(0).encode("latin1").decode("utf-8")
+            except Exception:
+                return m.group(0)
+        return re.sub(r"[\xc2-\xf4][\x80-\xbf]+", _desfazer, texto)
+
+
 def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
     """Faz o parse seguro do JSON retornado pelo modelo de revisão.
 
@@ -126,7 +142,7 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
     revisao = ""
 
     try:
-        dados = json.loads(texto_json)
+        dados = json.loads(texto_json, strict=False)
         if isinstance(dados, list):
             for item in dados:
                 if isinstance(item, dict):
@@ -149,7 +165,10 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
 
         match_rev = re.search(r'"Revisao"\s*:\s*"([\s\S]+?)"\s*\}', texto, re.IGNORECASE)
         if match_rev:
-            revisao = match_rev.group(1).encode().decode("unicode_escape", errors="ignore").strip()
+            raw_rev = match_rev.group(1)
+            raw_rev = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), raw_rev)
+            mapa_escapes = {'n': '\n', 'r': '\r', 't': '\t', '"': '"', '\\': '\\', '/': '/'}
+            revisao = re.sub(r'\\([nrt"\\/])', lambda m: mapa_escapes.get(m.group(1), m.group(0)), raw_rev).strip()
         else:
             # Caso extremo: o modelo devolveu o texto diretamente sem JSON
             revisao = texto
@@ -169,6 +188,9 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
         revisao_final,
         flags=re.IGNORECASE,
     ).strip()
+
+    empresa = corrigir_mojibake(empresa)
+    revisao_final = corrigir_mojibake(revisao_final)
 
     return empresa, revisao_final
 
@@ -198,6 +220,10 @@ def revisar_texto(
     })
 
     empresa, revisao = parsear_resposta_revisao(resultado_raw)
+    if not revisao or not revisao.strip():
+        raise ValueError(
+            f"Modelo de IA devolveu revisão vazia (resultado_raw={repr(resultado_raw[:200])})."
+        )
 
     # Tenta extrair menção ao nome da empresa rotulada nos turnos do Cliente
     nome_diarizado = None

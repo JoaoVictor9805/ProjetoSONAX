@@ -1288,6 +1288,22 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertIsNone(m_vazio.prazo)
         self.assertIsNone(m_vazio.prazo_data)
 
+    def test_avaliacao_ia_model_tolera_string_em_empresa_contatada_e_protocolo(self):
+        """Garante que se a IA devolver o nome da empresa como string em empresa_contatada, não quebra validação."""
+        from app.services.analise_final_AI import AvaliacaoIAModel
+        m = AvaliacaoIAModel(
+            protocolo="27988821266",
+            empresa_contatada="Fazzimm Transportes",
+            resultado="Perfil pendente",
+            ligacao_relevante="s",
+            reuniao_confirmada="n",
+            data_confirmada="n",
+            conversa_decisor="n",
+            resultado_frase="Contato com atendente.",
+        )
+        self.assertEqual(m.protocolo, 27988821266)
+        self.assertIsNone(m.empresa_contatada)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -149,6 +149,32 @@ class AvaliacaoIAModel(BaseModel):
         description="Resultado em uma frase: o que aconteceu e qual compromisso foi obtido"
     )
 
+    @field_validator("empresa_contatada", mode="before")
+    @classmethod
+    def validar_empresa_contatada(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            v_strip = v.strip()
+            if v_strip.isdigit():
+                return int(v_strip)
+        return None
+
+    @field_validator("protocolo", mode="before")
+    @classmethod
+    def validar_protocolo(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            digits = re.sub(r"\D", "", v)
+            if digits:
+                return int(digits)
+        return None
+
 
 class AnalisePerfilModel(BaseModel):
     setor: Literal[
@@ -412,7 +438,8 @@ client = ChatOpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
     model=MODELO_ANALISE,
     temperature=0.0,
-    max_tokens=4096,
+    max_tokens=16384,
+    extra_body={"reasoning": {"effort": "low"}},
     max_retries=3,
 )
 

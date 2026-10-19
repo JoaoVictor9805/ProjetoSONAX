@@ -450,8 +450,7 @@ class PipelineRunner:
                         break
 
                     rotulo_audio = self._rotular(idx)
-                    msg = f"[INFO] [{idx}/{total_copiados}] Analisando qualidade comercial via {MODELO_ANALISE} (SPIN/BANT/SDR): {rotulo_audio} ..."
-                    self.on_progress(idx - 1, total_copiados, "analyzing", msg, caminho.name)
+                    self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
 
                     self.ingestor.analisar_chamada(
                         caminho.name,

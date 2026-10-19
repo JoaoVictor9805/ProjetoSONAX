@@ -5,37 +5,30 @@ echo ======================================================================
 echo       Compilando Instalador Unico do SONAX (Inno Setup)
 echo ======================================================================
 echo.
-echo [INFO] Este processo compila o SONAX no modo pasta permanente (--onedir)
-echo [INFO] e gera um instalador executavel unico (dist\Instalador_SONAX.exe).
+echo [INFO] Este processo compila o SONAX no modo pasta permanente [--onedir]
+echo [INFO] e gera um instalador executavel unico [dist\Instalador_SONAX.exe].
 echo [INFO] A instalacao e feita uma unica vez e o app abrira instantaneamente!
 echo.
 
 :: 1. Ativa o ambiente virtual
-call .\.venv\Scripts\activate.bat
-if errorlevel 1 (
+if not exist ".\.venv\Scripts\activate.bat" (
     echo [ERRO] Ambiente virtual .venv nao encontrado!
+    echo Verifique se a pasta .venv existe neste diretorio.
     pause
     exit /b 1
 )
+call .\.venv\Scripts\activate.bat
 
 :: 2. Detecta o compilador do Inno Setup (ISCC.exe)
 set "ISCC="
-if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" (
-    set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
-) else if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
-    set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
-) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
-    set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
-) else (
-    where iscc >nul 2>&1
-    if not errorlevel 1 (
-        set "ISCC=iscc"
-    )
-)
+if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC for /f "delims=" %%I in ('where iscc 2^>nul') do set "ISCC=%%I"
 
-if "%ISCC%"=="" (
-    echo [AVISO] Compilador Inno Setup (ISCC.exe) nao foi encontrado!
-    echo [INFO] Para gerar o instalador executavel unico (Instalador_SONAX.exe),
+if not defined ISCC (
+    echo [AVISO] Compilador Inno Setup ISCC.exe nao foi encontrado!
+    echo [INFO] Para gerar o instalador executavel unico Instalador_SONAX.exe,
     echo        instale o Inno Setup executando no terminal:
     echo        winget install JRSoftware.InnoSetup
     echo.
@@ -46,12 +39,12 @@ if exist "build" rmdir /s /q "build"
 if exist "dist\SONAX" rmdir /s /q "dist\SONAX"
 if exist "dist\Instalador_SONAX.exe" del /f /q "dist\Instalador_SONAX.exe"
 
-echo [1/2] Empacotando aplicacao com PyInstaller (--onedir)...
+echo [1/2] Empacotando aplicacao com PyInstaller [--onedir]...
 echo Isso levara cerca de 1 a 2 minutos...
 echo.
 
 :: 4. Executa o PyInstaller no modo --onedir e excluindo modulos pesados nao utilizados
-pyinstaller --noconsole --onedir --name "SONAX" ^
+pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX" ^
     --add-data ".env;." ^
     --add-binary "bin/UnRAR.exe;bin" ^
     --collect-all customtkinter ^
@@ -79,9 +72,9 @@ if exist ".env" (
 )
 
 :: 6. Gera o Instalador com Inno Setup (se disponivel)
-if not "%ISCC%"=="" (
+if defined ISCC (
     echo.
-    echo [2/2] Gerando instalador unico (.exe) com Inno Setup...
+    echo [2/2] Gerando instalador unico .exe com Inno Setup...
     "%ISCC%" inno_setup.iss
     if errorlevel 1 (
         echo.
