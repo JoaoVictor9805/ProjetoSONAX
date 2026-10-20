@@ -40,7 +40,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='SONAX',
+    name='SONAX_gratuito',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -59,5 +59,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='SONAX',
+    name='SONAX_gratuito',
 )

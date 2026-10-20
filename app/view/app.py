@@ -43,7 +43,7 @@ class App(ctk.CTk):
         # ----- Configuração da janela -----
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.title("SONAX — Transcrição de Chamadas")
+        self.title("SONAX Gratuito — Transcrição de Chamadas")
         self.geometry("720x620")
         self.minsize(460, 360)
 
@@ -73,7 +73,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="SONAX - Transcrição de Chamadas",
+            text="SONAX Gratuito - Transcrição de Chamadas",
             font=ctk.CTkFont(size=22, weight="bold"),
         ).pack(anchor="w")
 

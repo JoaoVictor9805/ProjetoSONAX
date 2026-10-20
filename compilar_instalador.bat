@@ -2,12 +2,12 @@
 cd /d "%~dp0"
 
 echo ======================================================================
-echo       Compilando Instalador Unico do SONAX (Inno Setup)
+echo       Compilando Instalador Unico do SONAX Gratuito (Inno Setup)
 echo ======================================================================
 echo.
-echo [INFO] Este processo compila o SONAX no modo pasta permanente [--onedir]
-echo [INFO] e gera um instalador executavel unico [dist\Instalador_SONAX.exe].
-echo [INFO] A instalacao e feita uma unica vez e o app abrira instantaneamente!
+echo [INFO] Este processo compila o SONAX Gratuito no modo pasta permanente [--onedir]
+echo [INFO] e gera um instalador executavel unico [dist\Instalador_SONAX_gratuito.exe].
+echo [INFO] A instalacao e feita em: %%LOCALAPPDATA%%\Programs\SONAX_gratuito
 echo.
 
 :: 1. Ativa o ambiente virtual
@@ -28,7 +28,7 @@ if not defined ISCC for /f "delims=" %%I in ('where iscc 2^>nul') do set "ISCC=%
 
 if not defined ISCC (
     echo [AVISO] Compilador Inno Setup ISCC.exe nao foi encontrado!
-    echo [INFO] Para gerar o instalador executavel unico Instalador_SONAX.exe,
+    echo [INFO] Para gerar o instalador executavel unico Instalador_SONAX_gratuito.exe,
     echo        instale o Inno Setup executando no terminal:
     echo        winget install JRSoftware.InnoSetup
     echo.
@@ -36,15 +36,15 @@ if not defined ISCC (
 
 :: 3. Limpa builds anteriores
 if exist "build" rmdir /s /q "build"
-if exist "dist\SONAX" rmdir /s /q "dist\SONAX"
-if exist "dist\Instalador_SONAX.exe" del /f /q "dist\Instalador_SONAX.exe"
+if exist "dist\SONAX_gratuito" rmdir /s /q "dist\SONAX_gratuito"
+if exist "dist\Instalador_SONAX_gratuito.exe" del /f /q "dist\Instalador_SONAX_gratuito.exe"
 
 echo [1/2] Empacotando aplicacao com PyInstaller [--onedir]...
 echo Isso levara cerca de 1 a 2 minutos...
 echo.
 
 :: 4. Executa o PyInstaller no modo --onedir e excluindo modulos pesados nao utilizados
-pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX" ^
+pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX_gratuito" ^
     --add-data ".env;." ^
     --add-binary "bin/UnRAR.exe;bin" ^
     --collect-all customtkinter ^
@@ -66,9 +66,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: 5. Copia arquivos auxiliares para dentro de dist\SONAX
+:: 5. Copia arquivos auxiliares para dentro de dist\SONAX_gratuito
 if exist ".env" (
-    copy /y ".env" "dist\SONAX\.env" >nul 2>&1
+    copy /y ".env" "dist\SONAX_gratuito\.env" >nul 2>&1
 )
 
 :: 6. Gera o Instalador com Inno Setup (se disponivel)
@@ -89,18 +89,18 @@ echo ======================================================================
 echo               Compilacao Concluida com Sucesso!
 echo ======================================================================
 echo.
-if exist "dist\Instalador_SONAX.exe" (
+if exist "dist\Instalador_SONAX_gratuito.exe" (
     echo  [PRODUTO FINAL PRONTO PARA DISTRIBUICAO]
-    echo  - Instalador gerado: dist\Instalador_SONAX.exe
+    echo  - Instalador gerado: dist\Instalador_SONAX_gratuito.exe
     echo.
     echo  Como enviar para os usuarios:
-    echo    1. Envie apenas o arquivo "dist\Instalador_SONAX.exe" para o outro computador.
-    echo    2. O usuario da 2 cliques e instala em segundos.
-    echo    3. Atalhos sao criados na Area de Trabalho e Menu Iniciar.
-    echo    4. O SONAX abrira instantaneamente a partir de entao!
+    echo    1. Envie apenas o arquivo "dist\Instalador_SONAX_gratuito.exe" para o outro computador.
+    echo    2. O usuario da 2 cliques e instala em: %%LOCALAPPDATA%%\Programs\SONAX_gratuito
+    echo    3. Atalhos sao criados na Area de Trabalho e Menu Iniciar como "SONAX Gratuito".
+    echo    4. O SONAX Gratuito abrira instantaneamente a partir de entao!
 ) else (
-    echo  - Pasta do aplicativo compilada: dist\SONAX
-    echo  - Execute dist\SONAX\SONAX.exe diretamente ou instale o Inno Setup para gerar o instalador unico.
+    echo  - Pasta do aplicativo compilada: dist\SONAX_gratuito
+    echo  - Execute dist\SONAX_gratuito\SONAX_gratuito.exe diretamente ou instale o Inno Setup para gerar o instalador unico.
 )
 echo.
 pause

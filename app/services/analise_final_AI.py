@@ -431,7 +431,7 @@ class AnaliseCompletaModel(BaseModel):
 # CLIENTE E CHAIN LANGCHAIN (MiniMax M3.1 Flash via OpenRouter)
 # ==========================================================
 
-MODELO_ANALISE = os.getenv("ANALISE_MODEL", "minimax/minimax-m3.1-flash:free")
+MODELO_ANALISE = os.getenv("MINIMAX_MODEL", "minimax/minimax-m3.1-flash:free")
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",

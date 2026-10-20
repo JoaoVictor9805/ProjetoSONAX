@@ -27,7 +27,7 @@ from app.config.prompts import prompt_revisao
 load_dotenv()
 
 MODELO_REVISAO = os.getenv(
-    "REVISAO_MODEL",
+    "MINIMAX_MODEL",
     "minimax/minimax-m3.1-flash:free",
 )
 
