@@ -176,7 +176,7 @@ class PipelineRunner:
                     aprovados, self.destino, cancel=self.cancel_event, on_progress=on_copy_progress,
                 )
                 self.on_log(f"[INFO] {len(copiados)} arquivo(s) copiado(s) para: {self.destino}", "out", False, None)
-                self.on_progress(len(copiados), len(copiados), "copying", f"[INFO] {len(copiados)} arquivo(s) copiado(s) com sucesso.", None)
+                self.on_progress(len(copiados), len(copiados), "copying", None, None)
 
                 if self.cancel_event.is_set():
                     self._limpar_temporarios()
@@ -296,7 +296,7 @@ class PipelineRunner:
                         if len(mapa_diarizacao) == 1
                         else f"[INFO] Todas as {len(mapa_diarizacao)} ligações já possuem revisão no banco de dados. Etapa de coleta RPA no Google pulada."
                     )
-                    self.on_progress(1, 1, "searching", msg_pulo, None)
+                    self.on_progress(1, 1, "searching", None, None)
                     self.on_log(msg_pulo, "out", False, None)
                     textos_google = {k: "Não encontrado" for k in mapa_diarizacao}
                 else:
@@ -351,7 +351,7 @@ class PipelineRunner:
                             tempo_espera_pagina=6.0,
                             on_progress=_on_rpa_progress,
                         )
-                        self.on_progress(len(telefones_validos), len(telefones_validos), "searching", "[INFO] Coleta RPA no Google concluída.", None)
+                        self.on_progress(len(telefones_validos), len(telefones_validos), "searching", None, None)
                         self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_validos)} telefone(s) consultado(s)).", "out", False, None)
                     else:
                         self.on_log("[INFO] Nenhum telefone válido para consulta RPA no Google (etapa pulada).", "out", False, None)
@@ -432,7 +432,7 @@ class PipelineRunner:
 
                 self.on_progress(
                     total_copiados, total_copiados, "reviewing",
-                    "[INFO] Diarização e revisão das transcrições finalizada.", None,
+                    None, None,
                 )
                 self.on_log(
                     f"[INFO] Diarização e revisão finalizada com sucesso para {total_copiados} chamada(s).",
@@ -472,7 +472,7 @@ class PipelineRunner:
 
                 self.on_progress(
                     total_copiados, total_copiados, "analyzing",
-                    "[INFO] Análise das ligações finalizada.", None,
+                    None, None,
                 )
                 self.on_log(
                     f"[INFO] Avaliação comercial concluída com sucesso para {total_copiados} chamada(s).",
