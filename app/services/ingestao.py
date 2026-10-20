@@ -315,7 +315,8 @@ class ChamadaIngestor:
             return None
 
         from app.services.revisao import MODELO_REVISAO
-        print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({MODELO_REVISAO})...")
+        if not rotulo_audio:
+            print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({MODELO_REVISAO})...")
 
         resultado_ia = None
         for tentativa in range(1, 4):

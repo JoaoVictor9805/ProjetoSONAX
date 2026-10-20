@@ -342,8 +342,8 @@ def coletar_textos_google_lote(
 
         if on_progress is not None:
             on_progress(idx, total_unicos, tel)
-
-        print(f"  [INFO] [{idx}/{total_unicos}] Robô Google (RPA): Consultando telefone {tel} ...")
+        else:
+            print(f"  [INFO] [{idx}/{total_unicos}] Robô Google (RPA): Consultando telefone {tel} ...")
 
         texto = coletar_texto_google_telefone(
             tel,
