@@ -10,7 +10,7 @@ Responsabilidades:
     3. Preservação estrita do conteúdo e vocabulário original da chamada
        (sem alucinar diálogos nem remover termos de negócio).
     4. Limpeza de artefatos, tags especiais de parada e rótulos órfãos pós-processamento.
-    5. Integração com modelo LLM via LangChain (MiniMax M3.1 Flash via OpenRouter).
+    5. Integração com modelo LLM via LangChain (DeepSeek V4 Flash via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ load_dotenv()
 
 MODELO_REVISAO = os.getenv(
     "REVISAO_MODEL",
-    "minimax/minimax-m3.1-flash:free",
+    "deepseek/deepseek-v4-flash-0731",
 )
 
 client = ChatOpenAI(

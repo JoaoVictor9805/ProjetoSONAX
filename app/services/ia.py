@@ -153,7 +153,7 @@ class FakeProvedorIA:
             "avaliacao_ia": {
                 "protocolo": 123456789,
                 "data_avaliacao": "2026-09-30",
-                "modelo_ia": "minimax/minimax-m3.1-flash:free",
+                "modelo_ia": "deepseek/deepseek-v4-flash-0731",
                 "interlocutor": "Carlos Silva",
                 "cargo": "Diretor Financeiro",
                 "empresa_contatada": 1,

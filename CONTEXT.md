@@ -21,8 +21,8 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Triangulação de Dados**: Comparação contextual no prompt de IA entre os dados coletados pelo robô Google e a transcrição da chamada para identificar a entidade comercial correta.
 - **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no banco.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
-- **Revisão e Diarização Textual**: Etapa conduzida por LLM (`minimax/minimax-m3.1-flash:free`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
-- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`minimax/minimax-m3.1-flash:free`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
+- **Revisão e Diarização Textual**: Etapa conduzida por LLM (`deepseek/deepseek-v4-flash-0731`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
+- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`deepseek/deepseek-v4-flash-0731`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
 - **Critérios Oficiais (`dim_criterio_avaliacao`)**: Seis dimensões com pontuação máxima total de 100 pontos:
   - `CRIT_ABERTURA` (10 pts)
   - `CRIT_SPIN` (30 pts)
@@ -55,11 +55,11 @@ Arquivos WAV / ZIP / RAR
 4. Coleta RPA Google (Triangulação de Dados)
           │ Pywinauto + Navegador local + Cache por telefone
           ▼
-5. Revisão & Diarização com IA (MiniMax M3.1 Flash)
+5. Revisão & Diarização com IA (DeepSeek V4 Flash)
           │ Identificação de empresa -> Tabela `empresa`
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼
-6. Análise de Qualidade Comercial (MiniMax M3.1 Flash)
+6. Análise de Qualidade Comercial (DeepSeek V4 Flash)
           │ Persistência atômica nas 7 tabelas normalizadas:
           │   - avaliacao_ia
           │   - avaliacao_sdr

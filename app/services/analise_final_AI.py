@@ -14,7 +14,7 @@ Responsabilidades:
     7. Validação determinística estrita da qualificação técnica da empresa (resultado).
     8. Tratamento de ligações não avaliáveis (URA, queda, recusa imediata) com NULL numérico
        para integridade em agregações no Power BI.
-    9. Estruturação tipada com Pydantic e chamada com Structured Output (MiniMax M3.1 Flash via OpenRouter).
+    9. Estruturação tipada com Pydantic e chamada com Structured Output (DeepSeek V4 Flash via OpenRouter).
 ============================================================================
 """
 from __future__ import annotations
@@ -428,10 +428,10 @@ class AnaliseCompletaModel(BaseModel):
 
 
 # ==========================================================
-# CLIENTE E CHAIN LANGCHAIN (MiniMax M3.1 Flash via OpenRouter)
+# CLIENTE E CHAIN LANGCHAIN (DeepSeek V4 Flash via OpenRouter)
 # ==========================================================
 
-MODELO_ANALISE = os.getenv("ANALISE_MODEL", "minimax/minimax-m3.1-flash:free")
+MODELO_ANALISE = os.getenv("ANALISE_MODEL", "deepseek/deepseek-v4-flash-0731")
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -1332,7 +1332,7 @@ def analisar_ligacao(
     data_referencia: str | None = None,
 ) -> dict[str, Any]:
     """
-    Submete a transcrição revisada ao MiniMax M3.1 Flash e devolve o dicionário
+    Submete a transcrição revisada ao DeepSeek V4 Flash e devolve o dicionário
     completo com as 8 chaves relacionais padronizadas.
     """
     inputs = {
