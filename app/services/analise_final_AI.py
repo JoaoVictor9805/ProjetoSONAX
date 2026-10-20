@@ -1129,20 +1129,14 @@ def calcular_e_sanitizar_analise(
         soma_tetos = sum(tetos_avaliados)
         soma_obtida = sum(notas_clamped)
 
-        # Para ligações relevantes, SEMPRE gera nota_final!
-        if soma_tetos >= 50:
-            av_sdr["nota_final"] = max(0, min(100, int(round((soma_obtida / soma_tetos) * 100))))
-        elif av_sdr.get("nota_final") is not None:
-            try:
-                av_sdr["nota_final"] = max(0, min(100, int(round(float(av_sdr["nota_final"])))))
-            except (ValueError, TypeError):
-                av_sdr["nota_final"] = None
-        elif soma_tetos > 0 and tem_proximo_passo:
+        # Para ligações relevantes, SEMPRE gera nota_final calculada deterministicamente a partir dos critérios!
+        if soma_tetos >= 50 or (soma_tetos > 0 and tem_proximo_passo):
             av_sdr["nota_final"] = max(0, min(100, int(round((soma_obtida / soma_tetos) * 100))))
         elif tem_proximo_passo:
             av_sdr["nota_final"] = 70
         else:
             av_sdr["nota_final"] = None
+
 
         # Validação dos códigos de oportunidade contra a dimensão (OP_ESC_04 ou inválido descartado)
         codigos_candidatos = av_sdr.get("codigos_oportunidade", [])

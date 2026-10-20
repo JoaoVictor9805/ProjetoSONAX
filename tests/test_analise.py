@@ -805,6 +805,23 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(crit_map["CRIT_ABERTURA"], 9)
         self.assertEqual(crit_map["CRIT_ESCUTA"], 8)
 
+    def test_normalizacao_proporcional_abaixo_piso_com_proximo_passo(self):
+        """Chamada avaliável com soma de tetos < 50 mas COM próximo passo DEVE normalizar proporcionalmente (ignora alucinação do LLM)."""
+        dados = {
+            "avaliacao_ia": {"resultado": "Perfil pendente", "ligacao_relevante": "s"},
+            "avaliacao_sdr": {"nota_final": 72, "feedback_geral": "Retorno agendado rápido."},
+            "avaliacao_criterio": [
+                {"codigo_criterio": "CRIT_ABERTURA", "nota_criterio": 4},   # teto 10
+                {"codigo_criterio": "CRIT_ESCUTA", "nota_criterio": 8},     # teto 10
+                {"codigo_criterio": "CRIT_PROX_PASSO", "nota_criterio": 6}, # teto 10 -> soma_tetos = 30, soma_obtida = 18
+            ],
+            "crm": {"acao": "retorno com data combinado", "prazo": "amanhã às 14h", "resumo": "Ok"},
+        }
+        res = calcular_e_sanitizar_analise(dados)
+        # 18 / 30 * 100 = 60 (não deve aceitar a nota 72 alucinada pelo LLM)
+        self.assertEqual(res["avaliacao_sdr"]["nota_final"], 60)
+
+
     def test_codigo_oportunidade_op_esc_04_e_invalido_vira_none(self):
         """OP_ESC_04 ou código inexistente vira None (sem código inventado)."""
         dados1 = {
