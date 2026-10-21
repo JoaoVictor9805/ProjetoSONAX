@@ -23,6 +23,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from app.config.prompts import prompt_revisao
+from app.services.sanitizador import sanitizar_texto_estrangeiro
 
 load_dotenv()
 
@@ -189,8 +190,8 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
         flags=re.IGNORECASE,
     ).strip()
 
-    empresa = corrigir_mojibake(empresa)
-    revisao_final = corrigir_mojibake(revisao_final)
+    empresa = sanitizar_texto_estrangeiro(empresa)
+    revisao_final = sanitizar_texto_estrangeiro(revisao_final)
 
     return empresa, revisao_final
 
