@@ -32,6 +32,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.prompts import prompt_analise
+from app.services.sanitizador import sanitizar_estrutura_analise
 
 load_dotenv()
 
@@ -981,6 +982,7 @@ def calcular_e_sanitizar_analise(
 ) -> dict[str, Any]:
     """
     Aplica regras determinísticas de negócio:
+        - Higieniza caracteres estrangeiros (CJK, árabe, cirílico) e pontuação oriental.
         - Ajusta protocolo e ID de empresa contatada.
         - Identifica chamadas não avaliáveis (URA, queda, recusa) e força nota_final = null
           e nota_criterio = null para proteção do Power BI.
@@ -991,6 +993,9 @@ def calcular_e_sanitizar_analise(
         - Aplica validação determinística estrita da qualificação comercial (status_comercial).
         - Padroniza campos textuais sem ocorrência para 'Não se aplica'.
     """
+    # 0. Higienização de caracteres estrangeiros e pontuação oriental
+    resultado = sanitizar_estrutura_analise(resultado)
+
     # 1. Metadados de avaliacao_ia
     av_ia = resultado.setdefault("avaliacao_ia", {})
     if protocolo is not None:
