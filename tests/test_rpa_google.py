@@ -80,6 +80,44 @@ class TestRpaGoogle(unittest.TestCase):
         self.assertEqual(resultados["Audio_03.wav"], "Texto Simulado Google")
         self.assertEqual(resultados["Audio_04.wav"], "Não encontrado")
 
+    @patch("app.services.rpa_google.coletar_texto_google_telefone")
+    def test_coletar_textos_google_lote_com_cache_existente_e_callback(self, mock_coletar_individual):
+        mock_coletar_individual.return_value = "Texto Novo Raspado"
+        itens_salvos = []
+
+        def salvar_cb(tel, txt):
+            itens_salvos.append((tel, txt))
+
+        telefones_map = {
+            "Audio_01.wav": "(41) 3310-1010",  # Já em cache preexistente
+            "Audio_02.wav": "0800 591 2117",   # Não em cache: deve raspar
+        }
+        cache_previo = {"(41) 3310-1010": "Texto Preexistente no Banco"}
+
+        resultados = coletar_textos_google_lote(
+            telefones_map,
+            tempo_espera_pagina=0.01,
+            cache_existente=cache_previo,
+            on_item_coletado=salvar_cb,
+        )
+
+        # Deve ter raspado APENAS o 0800
+        self.assertEqual(mock_coletar_individual.call_count, 1)
+        mock_coletar_individual.assert_called_once_with(
+            "0800 591 2117",
+            cancel=None,
+            tempo_espera_pagina=0.01,
+            caminho_navegador=None,
+        )
+
+        # Deve ter chamado o callback salvar apenas para o novo número
+        self.assertEqual(len(itens_salvos), 1)
+        self.assertEqual(itens_salvos[0], ("0800 591 2117", "Texto Novo Raspado"))
+
+        # Resultados devem conter tanto o preexistente quanto o novo
+        self.assertEqual(resultados["Audio_01.wav"], "Texto Preexistente no Banco")
+        self.assertEqual(resultados["Audio_02.wav"], "Texto Novo Raspado")
+
     def test_listar_caminhos_google_chrome_multiplas_versoes(self):
         caminhos = listar_caminhos_google_chrome()
         self.assertIsInstance(caminhos, list)

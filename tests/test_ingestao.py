@@ -227,6 +227,36 @@ class TestChamadaIngestor(unittest.TestCase):
         mock_inserir_emp.assert_called_once()
         mock_inserir_rev.assert_called_once()
 
+    @patch("app.services.ingestao.time.sleep")
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.verificar_coluna_revisao")
+    @patch("app.services.ingestao.inserir_empresa")
+    @patch("app.services.ingestao.inserir_revisao")
+    def test_revisar_transcricao_degradacao_graciosa(
+        self, mock_inserir_rev, mock_inserir_emp, mock_verificar_rev, mock_conectar, mock_sleep
+    ):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_verificar_rev.return_value = False
+        mock_inserir_emp.return_value = 99
+        mock_inserir_rev.return_value = "URA / Transcrição Bruta (Revisão indisponível):\nOlá mundo"
+
+        # Simula erro da IA em todas as tentativas
+        self.fake_ia.revisar = MagicMock(side_effect=ValueError("Modelo de IA devolveu revisão vazia (resultado_raw='')."))
+
+        res = self.ingestor.revisar_transcricao(
+            log_arquivo="audio_falha.wav",
+            texto_diarizado="Olá mundo",
+            agente_nome="Lucas",
+            rotulo_audio="Audio Falha",
+        )
+
+        self.assertIsInstance(res, dict)
+        self.assertEqual(res["empresa"], "Não encontrado")
+        self.assertIn("Transcrição Bruta", res["revisao"])
+        self.assertEqual(res["fonte_dados"], "Não identificado")
+        mock_inserir_rev.assert_called_once()
+        self.assertEqual(mock_sleep.call_count, 2)
+
     @patch("app.services.ingestao.conectar")
     @patch("app.services.ingestao.verificar_coluna_revisao")
     @patch("app.services.ingestao.buscar_revisao")
@@ -269,7 +299,31 @@ class TestChamadaIngestor(unittest.TestCase):
         res = self.ingestor.verificar_revisoes_existentes(["audio1.wav", "audio2.wav"])
         self.assertEqual(res, {"audio1.wav"})
 
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.buscar_cache_rpa_google")
+    def test_obter_cache_rpa(self, mock_buscar_cache, mock_conectar):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_buscar_cache.return_value = {"(41) 3310-1010": "Texto Google"}
+        res = self.ingestor.obter_cache_rpa(["(41) 3310-1010"])
+        self.assertEqual(res, {"(41) 3310-1010": "Texto Google"})
+
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.salvar_cache_rpa_google")
+    def test_salvar_cache_rpa(self, mock_salvar_cache, mock_conectar):
+        mock_cur = MagicMock()
+        mock_conectar.return_value.__enter__.return_value = mock_cur
+        self.ingestor.salvar_cache_rpa("(41) 3310-1010", "Texto Google")
+        mock_salvar_cache.assert_called_once_with(mock_cur, "(41) 3310-1010", "Texto Google")
+
+    def test_salvar_cache_rpa_ignora_vazio_ou_nao_encontrado(self):
+        with patch("app.services.ingestao.conectar") as mock_conectar:
+            self.ingestor.salvar_cache_rpa("", "Texto")
+            self.ingestor.salvar_cache_rpa("(41) 3310-1010", "")
+            self.ingestor.salvar_cache_rpa("(41) 3310-1010", "Não encontrado")
+            mock_conectar.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

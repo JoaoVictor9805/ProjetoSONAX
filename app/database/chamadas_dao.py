@@ -985,3 +985,87 @@ def inserir_analise(
             )
 
     return log
+
+
+# ----------------------------
+# Cache de Coleta RPA Google
+# ----------------------------
+
+def buscar_cache_rpa_google(
+    cur: psycopg.Cursor,
+    telefones: list[str],
+    max_dias: int | None = None,
+) -> dict[str, str]:
+    """Busca textos do Google em cache para uma lista de telefones formatados.
+
+    Retorna um dicionário {telefone: texto_google}.
+    Caso a tabela ainda não exista (migration pendente), degrada graciosamente retornando {}.
+    """
+    if not telefones:
+        return {}
+
+    telefones_validos = [str(t).strip() for t in telefones if t and str(t).strip()]
+    if not telefones_validos:
+        return {}
+
+    try:
+        if max_dias is not None and max_dias > 0:
+            cur.execute(
+                """
+                SELECT telefone, texto_google 
+                FROM cache_rpa_google 
+                WHERE telefone = ANY(%s) 
+                  AND atualizado_em >= CURRENT_TIMESTAMP - (%s || ' days')::INTERVAL;
+                """,
+                (telefones_validos, str(max_dias)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT telefone, texto_google 
+                FROM cache_rpa_google 
+                WHERE telefone = ANY(%s);
+                """,
+                (telefones_validos,),
+            )
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows if r[1] and str(r[1]).strip() and r[1] != "Não encontrado"}
+    except psycopg.errors.UndefinedTable:
+        cur.connection.rollback()
+        return {}
+    except Exception as exc:
+        print(f"  [AVISO] Falha ao consultar cache_rpa_google: {exc}")
+        return {}
+
+
+def salvar_cache_rpa_google(
+    cur: psycopg.Cursor,
+    telefone: str,
+    texto_google: str,
+) -> None:
+    """Insere ou atualiza o cache do texto coletado pelo RPA Google para um telefone.
+
+    Apenas textos válidos (diferentes de 'Não encontrado' e não vazios) são persistidos.
+    """
+    if not telefone or not str(telefone).strip():
+        return
+    texto_limpo = str(texto_google).strip() if texto_google else ""
+    if not texto_limpo or texto_limpo == "Não encontrado":
+        return
+
+    try:
+        cur.execute(
+            """
+            INSERT INTO cache_rpa_google (telefone, texto_google, atualizado_em)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (telefone) DO UPDATE
+            SET texto_google = EXCLUDED.texto_google,
+                atualizado_em = CURRENT_TIMESTAMP;
+            """,
+            (str(telefone).strip(), texto_limpo),
+        )
+    except psycopg.errors.UndefinedTable:
+        cur.connection.rollback()
+    except Exception as exc:
+        print(f"  [AVISO] Falha ao salvar no cache_rpa_google para '{telefone}': {exc}")
+

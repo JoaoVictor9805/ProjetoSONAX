@@ -325,7 +325,31 @@ class PipelineRunner:
 
                     telefones_validos = [t for t in set(telefones_para_busca.values()) if t]
 
-                    if telefones_validos:
+                    cache_banco: dict[str, str] = {}
+                    if telefones_validos and hasattr(self.ingestor, "obter_cache_rpa"):
+                        try:
+                            res_cache = self.ingestor.obter_cache_rpa(telefones_validos)
+                            if isinstance(res_cache, dict):
+                                cache_banco = res_cache
+                        except Exception as exc:
+                            self.on_log(f"  [AVISO] Falha ao consultar cache RPA no banco: {exc}", "out", True, None)
+
+                    telefones_a_consultar = [t for t in telefones_validos if t not in cache_banco]
+
+                    if cache_banco:
+                        qtd_cache = len(cache_banco)
+                        if qtd_cache == len(telefones_validos):
+                            self.on_log(
+                                f"[INFO] Cache RPA Google: Todos os {len(telefones_validos)} telefone(s) já possuem dados no banco de dados. Etapa do navegador pulada com sucesso!",
+                                "out", False, None,
+                            )
+                        else:
+                            self.on_log(
+                                f"[INFO] Cache RPA Google: {qtd_cache} de {len(telefones_validos)} telefone(s) recuperados do banco de dados. Apenas {len(telefones_a_consultar)} precisará(ão) de consulta no navegador.",
+                                "out", False, None,
+                            )
+
+                    if telefones_a_consultar:
                         chrome_exec = obter_caminho_chrome_instalado()
                         if chrome_exec:
                             self.on_log(f"[INFO] Google Chrome detectado: {chrome_exec}", "out", True, None)
@@ -333,7 +357,7 @@ class PipelineRunner:
                             self.on_log("[INFO] Usando navegador padrão do sistema para pesquisa.", "out", True, None)
 
                         self.on_log(
-                            f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_validos)} telefone(s)...",
+                            f"[INFO] Iniciando coleta de dados no Google via RPA para {len(telefones_a_consultar)} telefone(s)...",
                             "out", False, None,
                         )
                         self.on_log(
@@ -345,14 +369,27 @@ class PipelineRunner:
                             msg = f"[INFO] [{idx}/{tot}] Consultando Google (RPA): {tel} ..."
                             self.on_progress(idx - 1, tot, "searching", msg, None)
 
+                        def _on_rpa_salvar(tel: str, txt: str) -> None:
+                            if hasattr(self.ingestor, "salvar_cache_rpa"):
+                                try:
+                                    self.ingestor.salvar_cache_rpa(tel, txt)
+                                except Exception as exc:
+                                    self.on_log(f"  [AVISO] Erro ao salvar cache RPA de '{tel}': {exc}", "out", True, None)
+
                         textos_google = coletar_textos_google_lote(
                             telefones_para_busca,
                             cancel=self.cancel_event,
                             tempo_espera_pagina=6.0,
                             on_progress=_on_rpa_progress,
+                            on_item_coletado=_on_rpa_salvar,
+                            cache_existente=cache_banco,
                         )
-                        self.on_progress(len(telefones_validos), len(telefones_validos), "searching", None, None)
-                        self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_validos)} telefone(s) consultado(s)).", "out", False, None)
+                        self.on_progress(len(telefones_a_consultar), len(telefones_a_consultar), "searching", None, None)
+                        self.on_log(f"[INFO] Coleta RPA no Google concluída ({len(telefones_a_consultar)} telefone(s) consultado(s)).", "out", False, None)
+                    elif telefones_validos:
+                        msg_pulo_cache = f"[INFO] Dados do Google de todos os {len(telefones_validos)} telefone(s) recuperados do cache (navegador pulado)."
+                        self.on_progress(len(telefones_validos), len(telefones_validos), "searching", msg_pulo_cache, None)
+                        textos_google = {k: cache_banco.get(tel, "Não encontrado") for k, tel in telefones_para_busca.items()}
                     else:
                         self.on_log("[INFO] Nenhum telefone válido para consulta RPA no Google (etapa pulada).", "out", False, None)
                         textos_google = {k: "Não encontrado" for k in telefones_para_busca}

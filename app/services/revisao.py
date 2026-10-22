@@ -20,6 +20,7 @@ import os
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from app.config.prompts import prompt_revisao
@@ -31,15 +32,40 @@ MODELO_REVISAO = os.getenv(
     "REVISAO_MODEL",
     "deepseek/deepseek-v4-flash-0731",
 )
+MODELO_REVISAO_FALLBACK_1 = os.getenv(
+    "REVISAO_MODEL_FALLBACK_1",
+    "deepseek/deepseek-v4.1-flash",
+)
+MODELO_REVISAO_FALLBACK_2 = os.getenv(
+    "REVISAO_MODEL_FALLBACK_2",
+    "gemini-3.1-flash-lite",
+)
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
     model=MODELO_REVISAO,
     temperature=0.0,  # Zero para evitar criação de diálogos falsos
-    max_tokens=16384,  # Margem segura para raciocínio e devolução da transcrição inteira
+    max_tokens=8192,
     extra_body={"reasoning": {"effort": "low"}},
-    max_retries=3,
+    max_retries=2,
+)
+
+client_fallback_1 = ChatOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
+    model=MODELO_REVISAO_FALLBACK_1,
+    temperature=0.0,
+    max_tokens=8192,
+    extra_body={"reasoning": {"effort": "low"}},
+    max_retries=2,
+)
+
+client_fallback_2 = ChatGoogleGenerativeAI(
+    model=MODELO_REVISAO_FALLBACK_2,
+    google_api_key=os.getenv("GEMINI_API_KEY") or "sk-dummy-key",
+    temperature=0.0,
+    max_output_tokens=8192,
 )
 
 
@@ -214,11 +240,48 @@ def revisar_texto(
     atendente_str = nome_atendente.strip() if nome_atendente and nome_atendente.strip() else "Não informado"
     google_str = texto_copiado_google.strip() if texto_copiado_google and texto_copiado_google.strip() else "Não encontrado"
 
-    resultado_raw = chain.invoke({
+    inputs = {
         "texto_copiado_google": google_str,
         "transcricao_bruta": transcricao,
         "nome_agente": atendente_str,
-    })
+    }
+
+    resultado_raw = ""
+    ultimo_erro = None
+
+    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto (sem OpenRouter)
+    for cl in (client, client_fallback_1, client_fallback_2):
+        try:
+            mensagens = prompt.format_messages(**inputs)
+            resposta = cl.invoke(mensagens)
+            raw_c = resposta.content if hasattr(resposta, "content") else resposta
+            if isinstance(raw_c, list):
+                conteudo = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in raw_c).strip()
+            else:
+                conteudo = str(raw_c or "").strip()
+
+            # Se content vier vazio, resgata do canal de raciocínio se o provedor colocou o texto lá
+            if not conteudo and hasattr(resposta, "additional_kwargs"):
+                raciocinio = (
+                    resposta.additional_kwargs.get("reasoning_content")
+                    or resposta.additional_kwargs.get("reasoning")
+                    or ""
+                )
+                if isinstance(raciocinio, str) and raciocinio.strip():
+                    conteudo = raciocinio.strip()
+
+            if conteudo:
+                emp_temp, rev_temp = parsear_resposta_revisao(conteudo)
+                if rev_temp and rev_temp.strip():
+                    resultado_raw = conteudo
+                    break
+        except Exception as exc:
+            ultimo_erro = exc
+
+    if not resultado_raw:
+        if ultimo_erro:
+            raise ultimo_erro
+        raise ValueError("Modelo de IA devolveu revisão vazia (resultado_raw='').")
 
     empresa, revisao = parsear_resposta_revisao(resultado_raw)
     if not revisao or not revisao.strip():

@@ -318,20 +318,25 @@ def coletar_textos_google_lote(
     tempo_espera_pagina: float = 6.0,
     caminho_navegador: str | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
+    on_item_coletado: Callable[[str, str], None] | None = None,
+    cache_existente: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Coleta o texto do Google para um dicionário de chaves -> telefones.
 
     Aplica cache por telefone para evitar abrir o navegador mais de uma vez
-    para o mesmo número de telefone no mesmo lote.
+    para o mesmo número de telefone no mesmo lote, além de suportar cache persistente
+    preexistente (ex.: vindo do banco de dados) e persistência imediata item a item
+    via callback `on_item_coletado`.
     """
     resultado_por_chave: dict[str, str] = {}
-    cache_por_telefone: dict[str, str] = {}
+    cache_por_telefone: dict[str, str] = dict(cache_existente) if cache_existente else {}
 
-    # Filtra telefones únicos válidos
+    # Filtra telefones únicos válidos que ainda NÃO estão em cache
     telefones_unicos: list[str] = []
     for tel in telefones_por_chave.values():
-        if tel and tel.strip() and tel not in telefones_unicos:
-            telefones_unicos.append(tel)
+        if tel and tel.strip():
+            if tel not in cache_por_telefone and tel not in telefones_unicos:
+                telefones_unicos.append(tel)
 
     total_unicos = len(telefones_unicos)
     from app.logs import log_dev
@@ -357,6 +362,11 @@ def coletar_textos_google_lote(
             print(f"  [INFO] Robô Google: Dados capturados com sucesso para {tel}")
             preview = texto[:200].replace("\n", " ").strip()
             log_dev(f"Google RPA ({tel}) conteúdo capturado ({len(texto)} chars): {preview}...")
+            if on_item_coletado is not None:
+                try:
+                    on_item_coletado(tel, texto)
+                except Exception as exc:
+                    print(f"  [AVISO] Falha ao persistir item no cache para {tel}: {exc}")
         else:
             print(f"  [AVISO] Robô Google: Conteúdo não localizado para {tel} (fallback ativado)")
             log_dev(f"Google RPA ({tel}): Busca finalizada sem retorno útil.")

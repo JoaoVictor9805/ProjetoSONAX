@@ -167,6 +167,154 @@ class TestRunnerRpaSkip(unittest.TestCase):
         runner.ingestor.revisar_transcricao.assert_called_once()
         self.assertEqual(runner.ingestor.revisar_transcricao.call_args[0][0], p2.name)
 
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.services.rpa_google.coletar_textos_google_lote")
+    def test_runner_rpa_todos_em_cache_banco_pula_navegador(
+        self,
+        mock_coletar_rpa,
+        mock_deletar,
+        mock_inspector_cls,
+        mock_copiar,
+        mock_coletar_wavs,
+    ):
+        p1 = Path("temp/call_333333_ramal_103.wav")
+        mock_coletar_wavs.return_value = [p1]
+        mock_copiar.return_value = [p1]
+
+        mock_inspector = MagicMock()
+        mock_inspecao = MagicMock()
+        mock_inspecao.longos = [p1]
+        mock_inspecao.curtos = []
+        mock_inspecao.invalidos = []
+        mock_inspector.classificar_lote.return_value = mock_inspecao
+        mock_inspector.filtrar_qualidade_acustica.return_value = ([p1], [])
+        mock_inspector_cls.return_value = mock_inspector
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+        )
+
+        runner.ingestor = MagicMock()
+        mock_item_res = MagicMock()
+        mock_item_res.sucesso = True
+        mock_item_res.ja_existente = False
+        mock_item_res.texto_transcricao = "transcricao ok"
+        mock_item_res.agente_nome = "Carlos"
+        mock_item_res.numero = "33101010"
+        mock_item_res.estado_ddd = "41"
+        mock_item_res.identificacao_cliente = None
+        runner.ingestor.transcrever_e_inserir.return_value = mock_item_res
+
+        # Sem revisão existente ainda
+        runner.ingestor.verificar_revisoes_existentes.return_value = set()
+
+        # Telefone JÁ ESTÁ em cache no banco!
+        runner.ingestor.obter_cache_rpa.return_value = {
+            "(41) 3310-1010": "Texto da Empresa Modelo no Banco"
+        }
+
+        runner.run()
+
+        # Robô não deve abrir navegador / chamar coletar_textos_google_lote
+        mock_coletar_rpa.assert_not_called()
+
+        # Log deve registrar que estava em cache
+        textos_log = [c[0] for c in self.log_calls]
+        self.assertTrue(
+            any("Etapa do navegador pulada" in t for t in textos_log),
+            f"Log esperado de pulo do navegador não encontrado em: {textos_log}",
+        )
+
+        # Mas a revisão DEVE receber o texto do cache!
+        runner.ingestor.revisar_transcricao.assert_called_once()
+        _, kwargs_rev = runner.ingestor.revisar_transcricao.call_args
+        self.assertEqual(kwargs_rev.get("texto_google"), "Texto da Empresa Modelo no Banco")
+
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.services.rpa_google.coletar_textos_google_lote")
+    def test_runner_rpa_cache_parcial_consulta_apenas_restantes(
+        self,
+        mock_coletar_rpa,
+        mock_deletar,
+        mock_inspector_cls,
+        mock_copiar,
+        mock_coletar_wavs,
+    ):
+        p1 = Path("temp/call_111111_ramal_101.wav")
+        p2 = Path("temp/call_222222_ramal_102.wav")
+        mock_coletar_wavs.return_value = [p1, p2]
+        mock_copiar.return_value = [p1, p2]
+
+        mock_inspector = MagicMock()
+        mock_inspecao = MagicMock()
+        mock_inspecao.longos = [p1, p2]
+        mock_inspecao.curtos = []
+        mock_inspecao.invalidos = []
+        mock_inspector.classificar_lote.return_value = mock_inspecao
+        mock_inspector.filtrar_qualidade_acustica.return_value = ([p1, p2], [])
+        mock_inspector_cls.return_value = mock_inspector
+
+        mock_coletar_rpa.return_value = {
+            p1.name: "Texto Cache 1",
+            p2.name: "Texto Raspado Agora",
+        }
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+        )
+
+        runner.ingestor = MagicMock()
+        def mock_transcrever(caminho, **kwargs):
+            res = MagicMock()
+            res.sucesso = True
+            res.ja_existente = False
+            res.texto_transcricao = "texto"
+            res.agente_nome = "Agente"
+            res.numero = "33101010" if "111111" in caminho.name else "33202020"
+            res.estado_ddd = "41"
+            res.identificacao_cliente = None
+            return res
+
+        runner.ingestor.transcrever_e_inserir.side_effect = mock_transcrever
+        runner.ingestor.verificar_revisoes_existentes.return_value = set()
+
+        # Telefone do p1 já está em cache, p2 precisa consultar
+        runner.ingestor.obter_cache_rpa.return_value = {
+            "(41) 3310-1010": "Texto Cache 1"
+        }
+
+        runner.run()
+
+        # Log deve registrar 1 recuperado e 1 que precisará de consulta
+        textos_log = [c[0] for c in self.log_calls]
+        self.assertTrue(
+            any("1 de 2 telefone(s) recuperados do banco" in t for t in textos_log),
+            f"Log de cache parcial não encontrado em: {textos_log}",
+        )
+        self.assertTrue(
+            any("Iniciando coleta de dados no Google via RPA para 1 telefone(s)" in t for t in textos_log),
+            f"Log de consulta parcial não encontrado em: {textos_log}",
+        )
+        mock_coletar_rpa.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

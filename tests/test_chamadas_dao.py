@@ -4,12 +4,14 @@ import unittest
 from unittest.mock import MagicMock
 
 from app.database.chamadas_dao import (
+    buscar_cache_rpa_google,
     buscar_chamada_valida,
     buscar_identificacao_cliente,
     buscar_logs_com_revisao,
     inserir_analise,
     inserir_empresa,
     inserir_revisao,
+    salvar_cache_rpa_google,
     verificar_coluna_revisao,
     verificar_tabela_analise,
 )
@@ -591,10 +593,38 @@ class TestChamadasDao(unittest.TestCase):
         res = buscar_logs_com_revisao(cur, ["audio1.wav", "audio2.wav", "audio3.wav"])
         self.assertEqual(res, {"audio1.wav", "audio3.wav"})
 
-    def test_buscar_logs_com_revisao_vazio(self):
+    def test_buscar_cache_rpa_google_sucesso(self):
         cur = MagicMock()
-        res = buscar_logs_com_revisao(cur, [])
-        self.assertEqual(res, set())
+        cur.fetchall.return_value = [
+            ("(41) 3310-1010", "Texto Google Empresa 1"),
+            ("0800 591 2117", "Texto Google 0800"),
+        ]
+        res = buscar_cache_rpa_google(cur, ["(41) 3310-1010", "0800 591 2117"])
+        self.assertEqual(res, {
+            "(41) 3310-1010": "Texto Google Empresa 1",
+            "0800 591 2117": "Texto Google 0800",
+        })
+
+    def test_buscar_cache_rpa_google_vazio(self):
+        cur = MagicMock()
+        self.assertEqual(buscar_cache_rpa_google(cur, []), {})
+        self.assertEqual(buscar_cache_rpa_google(cur, ["", None]), {})
+        self.assertFalse(cur.execute.called)
+
+    def test_salvar_cache_rpa_google_sucesso(self):
+        cur = MagicMock()
+        salvar_cache_rpa_google(cur, "(41) 3310-1010", "Texto Google Capturado")
+        self.assertTrue(cur.execute.called)
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("INSERT INTO cache_rpa_google", sql)
+        self.assertIn("ON CONFLICT (telefone) DO UPDATE", sql)
+        self.assertEqual(params, ("(41) 3310-1010", "Texto Google Capturado"))
+
+    def test_salvar_cache_rpa_google_ignora_vazio_ou_invalido(self):
+        cur = MagicMock()
+        salvar_cache_rpa_google(cur, "", "Texto")
+        salvar_cache_rpa_google(cur, "(41) 3310-1010", "")
+        salvar_cache_rpa_google(cur, "(41) 3310-1010", "Não encontrado")
         self.assertFalse(cur.execute.called)
 
 

@@ -16,6 +16,7 @@ Responsabilidades:
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from typing import Any
 from app.database.db import conectar
 from app.logs import log_dev_exc
 from app.database.chamadas_dao import (
+    buscar_cache_rpa_google,
     buscar_chamada_valida,
     buscar_identificacao_cliente,
     buscar_logs_com_revisao,
@@ -35,6 +37,7 @@ from app.database.chamadas_dao import (
     inserir_registro_chamada,
     inserir_revisao,
     registro_ja_existe,
+    salvar_cache_rpa_google,
     verificar_coluna_revisao,
     verificar_tabela_analise,
 )
@@ -276,6 +279,27 @@ class ChamadaIngestor:
             log_dev_exc()
             return set()
 
+    def obter_cache_rpa(self, telefones: list[str], max_dias: int | None = None) -> dict[str, str]:
+        """Recupera textos do Google em cache no banco para os telefones informados."""
+        if not telefones:
+            return {}
+        try:
+            with conectar() as cur:
+                return buscar_cache_rpa_google(cur, telefones, max_dias=max_dias)
+        except Exception:
+            log_dev_exc()
+            return {}
+
+    def salvar_cache_rpa(self, telefone: str, texto_google: str) -> None:
+        """Salva no banco o texto coletado pelo RPA Google para um telefone."""
+        if not telefone or not texto_google or texto_google == "Não encontrado":
+            return
+        try:
+            with conectar() as cur:
+                salvar_cache_rpa_google(cur, telefone, texto_google)
+        except Exception:
+            log_dev_exc()
+
     def revisar_transcricao(
         self,
         log_arquivo: str,
@@ -331,10 +355,19 @@ class ChamadaIngestor:
                 print(f"  [ERRO] Falha ao revisar transcrição de {nome_exibicao} (tentativa {tentativa}/3)")
                 log_dev_exc()
                 if tentativa < 3:
-                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+                    tempo_espera = 2 * tentativa
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) em {tempo_espera}s ...")
+                    time.sleep(tempo_espera)
         else:
-            print(f"  [ERRO] Não foi possível revisar {nome_exibicao} após 3 tentativas — próximo arquivo.")
-            return None
+            print(
+                f"  [AVISO] Não foi possível revisar {nome_exibicao} após 3 tentativas via IA. "
+                "Aplicando degradação graciosa (mantendo transcrição bruta para não descartar a chamada)."
+            )
+            resultado_ia = {
+                "empresa": "Não encontrado",
+                "revisao": f"URA / Transcrição Bruta (Revisão indisponível):\n{texto_diarizado}",
+                "fonte_dados": "Não identificado",
+            }
 
         if isinstance(resultado_ia, dict):
             revisao_texto = resultado_ia.get("revisao", "")
@@ -491,7 +524,9 @@ class ChamadaIngestor:
                 print(f"  [ERRO] Falha ao realizar análise final da ligação {nome_exibicao} (tentativa {tentativa}/3)")
                 log_dev_exc()
                 if tentativa < 3:
-                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+                    tempo_espera = 2 * tentativa
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) em {tempo_espera}s ...")
+                    time.sleep(tempo_espera)
         else:
             print(f"  [ERRO] Não foi possível realizar a análise final de {nome_exibicao} após 3 tentativas.")
             return None

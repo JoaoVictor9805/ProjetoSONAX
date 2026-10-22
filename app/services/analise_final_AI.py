@@ -28,6 +28,7 @@ from typing import Any, Literal
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -433,6 +434,8 @@ class AnaliseCompletaModel(BaseModel):
 # ==========================================================
 
 MODELO_ANALISE = os.getenv("ANALISE_MODEL", "deepseek/deepseek-v4-flash-0731")
+MODELO_ANALISE_FALLBACK_1 = os.getenv("ANALISE_MODEL_FALLBACK_1", "deepseek/deepseek-v4.1-flash")
+MODELO_ANALISE_FALLBACK_2 = os.getenv("ANALISE_MODEL_FALLBACK_2", "gemini-3.1-flash-lite")
 
 client = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -441,10 +444,35 @@ client = ChatOpenAI(
     temperature=0.0,
     max_tokens=16384,
     extra_body={"reasoning": {"effort": "low"}},
-    max_retries=3,
+    max_retries=2,
 )
 
 structured_client = client.with_structured_output(
+    AnaliseCompletaModel,
+)
+
+client_fallback_1 = ChatOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY") or "sk-dummy-key",
+    model=MODELO_ANALISE_FALLBACK_1,
+    temperature=0.0,
+    max_tokens=16384,
+    extra_body={"reasoning": {"effort": "low"}},
+    max_retries=2,
+)
+
+structured_client_fallback_1 = client_fallback_1.with_structured_output(
+    AnaliseCompletaModel,
+)
+
+client_fallback_2 = ChatGoogleGenerativeAI(
+    model=MODELO_ANALISE_FALLBACK_2,
+    google_api_key=os.getenv("GEMINI_API_KEY") or "sk-dummy-key",
+    temperature=0.0,
+    max_output_tokens=8192,
+)
+
+structured_client_fallback_2 = client_fallback_2.with_structured_output(
     AnaliseCompletaModel,
 )
 
@@ -469,6 +497,8 @@ prompt = ChatPromptTemplate.from_messages(
 )
 
 chain = prompt | structured_client
+chain_fallback_1 = prompt | structured_client_fallback_1
+chain_fallback_2 = prompt | structured_client_fallback_2
 
 
 # ==========================================================
@@ -1349,7 +1379,19 @@ def analisar_ligacao(
         "nome_sdr": nome_sdr or "Não informado",
     }
 
-    resposta = chain.invoke(inputs)
+    resposta = None
+    ultimo_erro = None
+    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto (sem OpenRouter)
+    for ch in (chain, chain_fallback_1, chain_fallback_2):
+        try:
+            resposta = ch.invoke(inputs)
+            if resposta:
+                break
+        except Exception as exc:
+            ultimo_erro = exc
+    else:
+        if ultimo_erro:
+            raise ultimo_erro
 
     # Conversão Pydantic -> dict
     if isinstance(resposta, BaseModel):

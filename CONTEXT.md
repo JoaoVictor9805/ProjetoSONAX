@@ -17,12 +17,12 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **SDR (Sales Development Representative)**: Pré-vendedor responsável pela prospecção ativa via telefone, qualificação preliminar da empresa e agendamento de reuniões técnicas.
 - **Chamada / Áudio**: Gravação telefônica em formato WAV. Identificada internamente pelo `call_id` (protocolo) e `ramal`.
 - **Origem / Chamadas**: Tabela no banco de dados com metadados brutos das ligações geradas pela central (protocolo, ramal, atendente, número discado, DDD, duração, data/hora).
-- **Robô Google (RPA)**: Serviço de automação (`app/services/rpa_google.py`) que abre o navegador padrão / Google Chrome local, pesquisa o telefone formatado no Google, copia os dados da entidade comercial (Google My Business / cartões locais) e fecha a aba sem custos de API externa.
+- **Robô Google (RPA)**: Serviço de automação (`app/services/rpa_google.py`) que abre o navegador padrão / Google Chrome local, pesquisa o telefone formatado no Google, copia os dados da entidade comercial (Google My Business / cartões locais) e fecha a aba sem custos de API externa. Possui camada de cache relacional (`cache_rpa_google`) com persistência imediata item a item, evitando reconsultas ao navegador em caso de interrupções ou contatos futuros para o mesmo número.
 - **Triangulação de Dados**: Comparação contextual no prompt de IA entre os dados coletados pelo robô Google e a transcrição da chamada para identificar a entidade comercial correta.
-- **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no banco.
+- **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no cadastro de empresas.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
-- **Revisão e Diarização Textual**: Etapa conduzida por LLM (`deepseek/deepseek-v4-flash-0731`) que segmenta os locutores (URA, Agente e Cliente), normaliza a pontuação fonética do ASR e extrai o nome da empresa.
-- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida por LLM (`deepseek/deepseek-v4-flash-0731`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
+- **Revisão e Diarização Textual**: Etapa conduzida primariamente por LLM `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` (OpenRouter) e em seguida `gemini-3.1-flash-lite` (direto via Google API sem OpenRouter), com degradação graciosa final para a transcrição bruta do Whisper em caso de falha total.
+- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida primariamente por `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` e `gemini-3.1-flash-lite` (direto via Google API) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
 - **Critérios Oficiais (`dim_criterio_avaliacao`)**: Seis dimensões com pontuação máxima total de 100 pontos:
   - `CRIT_ABERTURA` (10 pts)
   - `CRIT_SPIN` (30 pts)
@@ -53,13 +53,13 @@ Arquivos WAV / ZIP / RAR
           │ Persistência em `registro_chamadas`
           ▼
 4. Coleta RPA Google (Triangulação de Dados)
-          │ Pywinauto + Navegador local + Cache por telefone
+          │ Cache relacional (`cache_rpa_google`) + Pywinauto / Chrome local
           ▼
-5. Revisão & Diarização com IA (DeepSeek V4 Flash)
+5. Revisão & Diarização com IA (DeepSeek 0731 -> V4.1 -> Gemini 3.1)
           │ Identificação de empresa -> Tabela `empresa`
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼
-6. Análise de Qualidade Comercial (DeepSeek V4 Flash)
+6. Análise de Qualidade Comercial (DeepSeek 0731 -> V4.1 -> Gemini 3.1)
           │ Persistência atômica nas 7 tabelas normalizadas:
           │   - avaliacao_ia
           │   - avaliacao_sdr
