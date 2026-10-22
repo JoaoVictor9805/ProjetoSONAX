@@ -51,6 +51,7 @@ pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX" ^
     --collect-all psycopg ^
     --collect-all langchain ^
     --collect-all langchain_openai ^
+    --collect-all langchain_google_genai ^
     --collect-all requests ^
     --collect-all faster_whisper ^
     --collect-all ctranslate2 ^
@@ -62,7 +63,7 @@ pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX" ^
 if errorlevel 1 (
     echo.
     echo [ERRO] Ocorreu uma falha durante a compilacao do PyInstaller!
-    pause
+    if not "%1"=="--nopause" pause
     exit /b 1
 )
 
@@ -79,7 +80,7 @@ if defined ISCC (
     if errorlevel 1 (
         echo.
         echo [ERRO] Falha ao compilar com Inno Setup!
-        pause
+        if not "%1"=="--nopause" pause
         exit /b 1
     )
 )
@@ -103,4 +104,5 @@ if exist "dist\Instalador_SONAX.exe" (
     echo  - Execute dist\SONAX\SONAX.exe diretamente ou instale o Inno Setup para gerar o instalador unico.
 )
 echo.
-pause
+if not "%1"=="--nopause" pause
+
