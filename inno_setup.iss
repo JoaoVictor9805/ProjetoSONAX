@@ -2,7 +2,7 @@
 ; Script Inno Setup para o SONAX
 ; =====================================================================
 #define MyAppName "SONAX"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Falavinha Next"
 #define MyAppExeName "SONAX.exe"
 

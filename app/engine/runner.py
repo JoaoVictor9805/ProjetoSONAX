@@ -53,6 +53,7 @@ class PipelineRunner:
         on_log: LogCallback,
         on_finished: FinishedCallback,
         provedor_ia: ProvedorIA | None = None,
+        modo_etapa: str = "completo",
     ) -> None:
         self.entrada = entrada
         self.cancel_event = cancel_event
@@ -60,6 +61,7 @@ class PipelineRunner:
         self.on_progress = on_progress
         self.on_log = on_log
         self.on_finished = on_finished
+        self.modo_etapa = modo_etapa
 
         self.inspector = AudioInspector()
         self.ingestor = ChamadaIngestor(provedor_ia=provedor_ia)
@@ -112,6 +114,14 @@ class PipelineRunner:
                 self.on_log(line, stream, dev_only, None)
 
             with redirect_engine_stdio(_log_from_stdio):
+                rotulo_modo = {
+                    "completo": "Fluxo Completo (Transcrição, Revisão e Análise)",
+                    "revisao": "A partir da Revisão (Revisão e Análise)",
+                    "transcricao": "Apenas Transcrição",
+                    "apenas_revisao": "Apenas Revisão",
+                    "analise": "Apenas Análise Comercial (SPIN/BANT/SDR)",
+                }.get(self.modo_etapa, self.modo_etapa)
+                self.on_log(f"[INFO] Modo de execução selecionado: {rotulo_modo}", "out", False, None)
                 self.on_log(f"[INFO] Diretório selecionado: {diretorio}", "out", False, None)
 
                 # 1) Varredura
@@ -130,53 +140,144 @@ class PipelineRunner:
                     self.on_finished(0, "[CANCELADO] Cancelado antes de iniciar classificação.", None, True)
                     return
 
-                # 2) Classificação por duração (AudioInspector)
-                self.on_progress(0, 1, "classifying", "[INFO] Classificando arquivos por duração ...", None)
-                inspecao = self.inspector.classificar_lote(wavs, cancel=self.cancel_event)
-                self.on_log(
-                    f"[INFO] Total: {len(wavs)}  •  >1min: {len(inspecao.longos)}  •  "
-                    f"<=1min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
-                    "out", False, None,
-                )
-                self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1min elegível(is).", None)
+                # Checagem prévia no banco de dados para evitar inspeção acústica e cópia desnecessárias
+                nomes_wavs = [w.name for w in wavs]
+                try:
+                    res_transc = self.ingestor.verificar_transcricoes_existentes(nomes_wavs)
+                    transcricoes_no_banco = set(res_transc) if isinstance(res_transc, (set, list)) else set()
+                except Exception:
+                    transcricoes_no_banco = set()
 
-                if not inspecao.longos:
+                revisoes_no_banco_brutas = set()
+                if self.modo_etapa == "analise":
+                    try:
+                        res_rev = self.ingestor.verificar_revisoes_existentes(nomes_wavs, apenas_validas=False)
+                        revisoes_no_banco_brutas = set(res_rev) if isinstance(res_rev, (set, list)) else set()
+                    except Exception:
+                        revisoes_no_banco_brutas = set()
+
+                # Identifica quais áudios necessitam de processamento acústico (Whisper local)
+                if self.modo_etapa in ("analise", "revisao", "apenas_revisao"):
+                    # Nestes modos derivados, o Faster-Whisper NUNCA deve ser executado.
+                    # Áudios sem registro prévio no banco (ex.: ligações descartadas por <10 palavras) são ignorados.
+                    wavs_para_processamento_acustico = []
+
+                    if self.modo_etapa == "analise":
+                        aptos = [w for w in wavs if w.name in revisoes_no_banco_brutas or w.name in transcricoes_no_banco]
+                        ignorados = [w for w in wavs if w not in aptos]
+                        if ignorados:
+                            self.on_log(
+                                f"[INFO] Modo Análise Comercial: {len(ignorados)} áudio(s) sem dados no banco ignorados (não elegíveis para análise).",
+                                "out", False, None,
+                            )
+                        copiados = aptos
+                    else:  # "revisao" ou "apenas_revisao"
+                        aptos = [w for w in wavs if w.name in transcricoes_no_banco]
+                        ignorados = [w for w in wavs if w not in aptos]
+                        nome_modo = "A partir da Revisão" if self.modo_etapa == "revisao" else "Apenas Revisão"
+                        if ignorados:
+                            self.on_log(
+                                f"[INFO] Modo {nome_modo}: {len(ignorados)} áudio(s) sem transcrição no banco ignorados (não elegíveis para revisão).",
+                                "out", False, None,
+                            )
+                        copiados = aptos
+                else:
+                    # Em "completo" ou "transcricao", apenas os que não têm transcrição no banco passam por Whisper
+                    wavs_para_processamento_acustico = [w for w in wavs if w.name not in transcricoes_no_banco]
+
+                if not wavs_para_processamento_acustico:
+                    if self.modo_etapa == "analise":
+                        self.on_log(
+                            f"[INFO] Todas as {len(copiados)} chamadas elegíveis já possuem dados no banco. Inspeção acústica e cópia puladas!",
+                            "out", False, None,
+                        )
+                    elif self.modo_etapa in ("revisao", "apenas_revisao"):
+                        self.on_log(
+                            f"[INFO] Todas as {len(copiados)} chamadas elegíveis já possuem transcrição no banco. Inspeção acústica e cópia puladas!",
+                            "out", False, None,
+                        )
+                    else:
+                        self.on_log(
+                            f"[INFO] Todas as {len(wavs)} chamadas já possuem transcrição no banco. Inspeção acústica e cópia puladas.",
+                            "out", False, None,
+                        )
+                    self.on_progress(1, 1, "classifying", "[INFO] Inspeção acústica pulada (áudios já no banco).", None)
+                    self.on_progress(1, 1, "copying", "[INFO] Cópia de arquivos pulada (processamento direto via banco).", None)
+                    if self.modo_etapa not in ("analise", "revisao", "apenas_revisao"):
+                        copiados = list(wavs)
+                else:
+                    if len(wavs_para_processamento_acustico) < len(wavs):
+                        self.on_log(
+                            f"[INFO] {len(wavs_para_processamento_acustico)} de {len(wavs)} áudio(s) sem transcrição no banco. Inspecionando apenas faltantes...",
+                            "out", False, None,
+                        )
+
+                    # 2) Classificação por duração (AudioInspector)
+                    self.on_progress(0, 1, "classifying", "[INFO] Classificando arquivos por duração ...", None)
+                    inspecao = self.inspector.classificar_lote(wavs_para_processamento_acustico, cancel=self.cancel_event)
+                    self.on_log(
+                        f"[INFO] Total faltantes: {len(wavs_para_processamento_acustico)}  •  >1min: {len(inspecao.longos)}  •  "
+                        f"<=1min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
+                        "out", False, None,
+                    )
+                    self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1min elegível(is).", None)
+
+                    if not inspecao.longos and len(wavs_para_processamento_acustico) == len(wavs):
+                        self._limpar_temporarios()
+                        self.on_log("[AVISO] Nenhum áudio com mais de 1 minuto encontrado.", "out", False, None)
+                        self.on_finished(0, "[AVISO] Nenhum áudio >1min encontrado.", None, False)
+                        return
+
+                    if self.cancel_event.is_set():
+                        self._limpar_temporarios()
+                        self.on_finished(0, "[CANCELADO] Cancelado antes de iniciar cópia.", None, True)
+                        return
+
+                    # 2.5) Filtragem de qualidade acústica
+                    def on_quality_progress(idx: int, tot: int, p: Path) -> None:
+                        self.on_progress(1, 1, "classifying", None, p.name)
+
+                    aprovados = []
+                    if inspecao.longos:
+                        aprovados, rejeitados = self.inspector.filtrar_qualidade_acustica(
+                            inspecao.longos, cancel=self.cancel_event, on_progress=on_quality_progress,
+                        )
+                        inspecao.invalidos.extend(rejeitados)
+                        if rejeitados:
+                            self.on_log(f"[AVISO] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento.", "out", False, None)
+
+                    # 3) Cópia para a pasta destino (io)
+                    if aprovados:
+                        self.destino = resolver_destino(diretorio)
+                        self.on_log(f"[INFO] Pasta de destino: {self.destino}", "out", False, None)
+                        self.on_progress(0, len(aprovados), "copying", f"[INFO] Copiando {len(aprovados)} arquivo(s) para a pasta de trabalho ...", None)
+
+                        def on_copy_progress(idx: int, tot: int, p: Path) -> None:
+                            rotulo = self._rotular(idx)
+                            msg = f"[INFO] Copiado ({idx}/{tot}): {rotulo}"
+                            self.on_progress(idx, tot, "copying", msg, p.name)
+
+                        copiados_novos = copiar_lote_trabalho(
+                            aprovados, self.destino, cancel=self.cancel_event, on_progress=on_copy_progress,
+                        )
+                        self.on_log(f"[INFO] {len(copiados_novos)} arquivo(s) copiado(s) para: {self.destino}", "out", False, None)
+                        self.on_progress(len(copiados_novos), len(copiados_novos), "copying", None, None)
+                    else:
+                        copiados_novos = []
+
+                    nomes_processados = {w.name for w in wavs_para_processamento_acustico}
+                    mapa_copiados = {c.name: c for c in copiados_novos}
+                    copiados = [
+                        mapa_copiados.get(w.name, w)
+                        for w in wavs
+                        if w.name in mapa_copiados or w.name not in nomes_processados
+                    ]
+
+                if not copiados:
                     self._limpar_temporarios()
-                    self.on_log("[AVISO] Nenhum áudio com mais de 1 minuto encontrado.", "out", False, None)
-                    self.on_finished(0, "[AVISO] Nenhum áudio >1min encontrado.", None, False)
+                    self.on_log("[AVISO] Nenhum áudio elegível para processamento.", "out", False, None)
+                    self.on_finished(0, "[AVISO] Nenhum áudio elegível.", None, False)
                     return
-
-                if self.cancel_event.is_set():
-                    self._limpar_temporarios()
-                    self.on_finished(0, "[CANCELADO] Cancelado antes de iniciar cópia.", None, True)
-                    return
-
-                # 2.5) Filtragem de qualidade acústica
-                def on_quality_progress(idx: int, tot: int, p: Path) -> None:
-                    self.on_progress(1, 1, "classifying", None, p.name)
-
-                aprovados, rejeitados = self.inspector.filtrar_qualidade_acustica(
-                    inspecao.longos, cancel=self.cancel_event, on_progress=on_quality_progress,
-                )
-                inspecao.invalidos.extend(rejeitados)
-                if rejeitados:
-                    self.on_log(f"[AVISO] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento.", "out", False, None)
-
-                # 3) Cópia para a pasta destino (io)
-                self.destino = resolver_destino(diretorio)
-                self.on_log(f"[INFO] Pasta de destino: {self.destino}", "out", False, None)
-                self.on_progress(0, len(aprovados), "copying", f"[INFO] Copiando {len(aprovados)} arquivo(s) para a pasta de trabalho ...", None)
-
-                def on_copy_progress(idx: int, tot: int, p: Path) -> None:
-                    rotulo = self._rotular(idx)
-                    msg = f"[INFO] Copiado ({idx}/{tot}): {rotulo}"
-                    self.on_progress(idx, tot, "copying", msg, p.name)
-
-                copiados = copiar_lote_trabalho(
-                    aprovados, self.destino, cancel=self.cancel_event, on_progress=on_copy_progress,
-                )
-                self.on_log(f"[INFO] {len(copiados)} arquivo(s) copiado(s) para: {self.destino}", "out", False, None)
-                self.on_progress(len(copiados), len(copiados), "copying", None, None)
 
                 if self.cancel_event.is_set():
                     self._limpar_temporarios()
@@ -185,76 +286,154 @@ class PipelineRunner:
 
                 # 4) Transcrição + Insert no banco (ChamadaIngestor)
                 total = len(copiados)
-                self.on_progress(0, total, "transcribing", f"[INFO] Iniciando transcrição (NVIDIA Nemotron) de {total} arquivo(s) ...", None)
-
                 inseridos = 0
                 ja_existentes = 0
                 mapa_diarizacao: dict[str, dict] = {}
 
-                for i, caminho in enumerate(copiados, 1):
-                    if self.cancel_event.is_set():
-                        break
+                # Determina quais arquivos precisam passar pela checagem/execução de transcrição
+                if self.modo_etapa == "analise":
+                    # Na etapa de análise comercial, se o áudio já tem revisão (mesmo que texto bruto),
+                    # a transcrição e revisão prévias não são necessárias.
+                    arquivos_para_transcrever = [c for c in copiados if c.name not in revisoes_no_banco_brutas]
+                    if not arquivos_para_transcrever:
+                        self.on_log(
+                            f"[INFO] Todas as {total} chamadas já possuem revisão no banco de dados. Etapas de transcrição e revisão puladas!",
+                            "out", False, None,
+                        )
+                    else:
+                        faltantes_transc = [c for c in arquivos_para_transcrever if c.name not in transcricoes_no_banco]
+                        if faltantes_transc:
+                            self.on_log(
+                                f"[INFO] Modo Análise Comercial: {len(faltantes_transc)} chamada(s) sem transcrição no banco. Transcrevendo apenas faltantes...",
+                                "out", False, None,
+                            )
+                        else:
+                            self.on_log(
+                                f"[INFO] Modo Análise Comercial: {len(arquivos_para_transcrever)} chamada(s) sem revisão, mas já com transcrição no banco.",
+                                "out", False, None,
+                            )
+                elif self.modo_etapa in ("revisao", "apenas_revisao"):
+                    # Identifica quais chamadas precisam de revisão com IA (vazias ou com texto bruto)
+                    nomes_copiados = [c.name for c in copiados]
+                    try:
+                        res_validas = self.ingestor.verificar_revisoes_existentes(nomes_copiados, apenas_validas=True)
+                        revisoes_validas = set(res_validas) if isinstance(res_validas, (set, list)) else set()
+                    except Exception:
+                        revisoes_validas = set()
 
-                    rotulo = self._rotular(i)
-
-                    def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
-                        pct = int(sub_frac * 100)
-                        done_cum = (i - 1) + (sub_frac * 0.85)
-                        self.on_progress(
-                            done_cum,
-                            total,
-                            "transcribing",
-                            f"[INFO] [{i}/{total}] {rotulo}: {pct}% {msg or 'Faster-Whisper processando...'}",
-                            caminho.name,
+                    precisam_revisao = [c for c in copiados if c.name not in revisoes_validas]
+                    qtd_validas = len(copiados) - len(precisam_revisao)
+                    if qtd_validas > 0:
+                        self.on_log(
+                            f"[INFO] {qtd_validas} de {total} chamada(s) já possuem revisão válida com IA no banco (puladas).",
+                            "out", False, None,
                         )
 
-                    self.on_progress(
-                        i - 1,
-                        total,
-                        "transcribing",
-                        f"[INFO] [{i}/{total}] Transcrevendo {rotulo} via Faster-Whisper local (small)...",
-                        caminho.name,
-                    )
-
-                    res = self.ingestor.transcrever_e_inserir(
-                        caminho,
-                        rotulo_audio=rotulo,
-                        cancel=self.cancel_event,
-                        on_sub_progress=_on_sub_progress,
-                    )
-
-                    if res.ja_existente:
-                        ja_existentes += 1
-                        mapa_diarizacao[caminho.name] = {
-                            "texto_diarizado": res.texto_transcricao,
-                            "agente_nome": res.agente_nome,
-                            "numero": res.numero,
-                            "estado_ddd": res.estado_ddd,
-                            "identificacao_cliente": res.identificacao_cliente,
-                        }
-                        self.on_progress(
-                            i,
-                            total,
-                            "transcribing",
-                            f"[AVISO] [{i}/{total}] {rotulo} - Transcrição já registrada no banco (pulado)",
-                            caminho.name,
+                    if precisam_revisao:
+                        self.on_log(
+                            f"[INFO] {len(precisam_revisao)} chamada(s) pendente(s) de revisão (vazias ou com texto bruto). Carregando dados do banco...",
+                            "out", False, None,
                         )
-                    elif res.sucesso:
-                        inseridos += 1
-                        mapa_diarizacao[caminho.name] = {
-                            "texto_diarizado": res.texto_transcricao,
-                            "agente_nome": res.agente_nome,
-                            "numero": res.numero,
-                            "estado_ddd": res.estado_ddd,
-                            "identificacao_cliente": res.identificacao_cliente,
-                        }
-                        self.on_progress(
-                            i,
-                            total,
-                            "transcribing",
-                            f"[INFO] [{i}/{total}] {rotulo} gravado com sucesso no banco!",
-                            caminho.name,
+                        arquivos_para_transcrever = precisam_revisao
+                    else:
+                        self.on_log(
+                            f"[INFO] Todas as {total} chamadas já possuem revisão válida com IA no banco de dados!",
+                            "out", False, None,
                         )
+                        arquivos_para_transcrever = []
+                else:
+                    faltantes_transc = [c for c in copiados if c.name not in transcricoes_no_banco]
+                    if faltantes_transc:
+                        self.on_log(
+                            f"[INFO] Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s) (total no lote: {total}) ...",
+                            "out", False, None,
+                        )
+                    else:
+                        self.on_log(
+                            f"[INFO] Todas as {total} chamadas já possuem transcrição no banco.",
+                            "out", False, None,
+                        )
+                    arquivos_para_transcrever = copiados
+
+                total_transc = len(arquivos_para_transcrever)
+                if total_transc > 0:
+                    self.on_progress(0, total_transc, "transcribing", f"[INFO] Processando transcrições ({total_transc} arquivo(s)) ...", None)
+
+                    for i, caminho in enumerate(arquivos_para_transcrever, 1):
+                        if self.cancel_event.is_set():
+                            break
+
+                        rotulo = self._rotular(i)
+
+                        def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
+                            pct = int(sub_frac * 100)
+                            done_cum = (i - 1) + (sub_frac * 0.85)
+                            self.on_progress(
+                                done_cum,
+                                total_transc,
+                                "transcribing",
+                                f"[INFO] [{i}/{total_transc}] {rotulo}: {pct}% {msg or 'Faster-Whisper processando...'}",
+                                caminho.name,
+                            )
+
+                        if caminho.name not in transcricoes_no_banco:
+                            self.on_progress(
+                                i - 1,
+                                total_transc,
+                                "transcribing",
+                                f"[INFO] [{i}/{total_transc}] Transcrevendo {rotulo} via Faster-Whisper local (small)...",
+                                caminho.name,
+                            )
+                        else:
+                            self.on_progress(
+                                i - 1,
+                                total_transc,
+                                "transcribing",
+                                f"[INFO] [{i}/{total_transc}] Carregando transcrição existente de {rotulo} ...",
+                                caminho.name,
+                            )
+
+                        res = self.ingestor.transcrever_e_inserir(
+                            caminho,
+                            rotulo_audio=rotulo,
+                            cancel=self.cancel_event,
+                            on_sub_progress=_on_sub_progress,
+                        )
+
+                        if res.ja_existente:
+                            ja_existentes += 1
+                            mapa_diarizacao[caminho.name] = {
+                                "texto_diarizado": res.texto_transcricao,
+                                "agente_nome": res.agente_nome,
+                                "numero": res.numero,
+                                "estado_ddd": res.estado_ddd,
+                                "identificacao_cliente": res.identificacao_cliente,
+                            }
+                            self.on_progress(
+                                i,
+                                total_transc,
+                                "transcribing",
+                                f"[AVISO] [{i}/{total_transc}] {rotulo} - Transcrição já registrada no banco (pulado)",
+                                caminho.name,
+                            )
+                        elif res.sucesso:
+                            inseridos += 1
+                            mapa_diarizacao[caminho.name] = {
+                                "texto_diarizado": res.texto_transcricao,
+                                "agente_nome": res.agente_nome,
+                                "numero": res.numero,
+                                "estado_ddd": res.estado_ddd,
+                                "identificacao_cliente": res.identificacao_cliente,
+                            }
+                            self.on_progress(
+                                i,
+                                total_transc,
+                                "transcribing",
+                                f"[INFO] [{i}/{total_transc}] {rotulo} gravado com sucesso no banco!",
+                                caminho.name,
+                            )
+                else:
+                    self.on_progress(1, 1, "transcribing", None, None)
 
                 detalhes_existentes = f" | [INFO] {ja_existentes} já existente(s)" if ja_existentes > 0 else ""
 
@@ -276,6 +455,20 @@ class PipelineRunner:
                     None,
                 )
 
+                # Se o usuário escolheu APENAS transcrição, finaliza aqui
+                if self.modo_etapa == "transcricao":
+                    self.on_log("[INFO] Modo 'Apenas Transcrição': etapas de RPA, Revisão e Análise Comercial puladas.", "out", False, None)
+                    self.on_progress(0, 1, "cleanup", "[INFO] Limpando arquivos temporários ...", None)
+                    self._limpar_temporarios()
+                    self.on_progress(1, 1, "cleanup", "[INFO] Limpeza concluída.", None)
+                    self.on_finished(
+                        0,
+                        f"[INFO] Transcrição concluída ({inseridos} inserido(s){detalhes_existentes}).",
+                        None,
+                        False,
+                    )
+                    return
+
                 # 4.25) Coleta RPA Google (Triangulação de Dados)
                 from app.services.rpa_google import (
                     coletar_textos_google_lote,
@@ -284,21 +477,33 @@ class PipelineRunner:
                 )
 
                 # Verifica se a revisão da ligação já está no banco antes de acionar o robô RPA
-                revisoes_existentes = self.ingestor.verificar_revisoes_existentes(list(mapa_diarizacao.keys()))
-                arquivos_pendentes = [arq for arq in mapa_diarizacao if arq not in revisoes_existentes]
+                if self.modo_etapa == "analise":
+                    # Na análise comercial, ligações com revisão bruta ou válida não necessitam de RPA/Revisão
+                    arquivos_precisam_revisao = [c for c in copiados if c.name not in revisoes_no_banco_brutas]
+                    revisoes_existentes = set(revisoes_no_banco_brutas)
+                    arquivos_pendentes = [c.name for c in arquivos_precisam_revisao if c.name in mapa_diarizacao]
+                else:
+                    try:
+                        res_rev = self.ingestor.verificar_revisoes_existentes(
+                            list(mapa_diarizacao.keys()), apenas_validas=True
+                        )
+                        revisoes_existentes = set(res_rev) if isinstance(res_rev, (set, list)) else set()
+                    except Exception:
+                        revisoes_existentes = set()
+                    arquivos_pendentes = [arq for arq in mapa_diarizacao if arq not in revisoes_existentes]
 
                 textos_google: dict[str, str] = {}
                 telefones_para_busca: dict[str, str | None] = {}
 
-                if not arquivos_pendentes and mapa_diarizacao:
+                if not arquivos_pendentes and (mapa_diarizacao or self.modo_etapa == "analise"):
                     msg_pulo = (
                         "[INFO] Revisão da ligação já está no banco de dados. Etapa de coleta RPA no Google pulada."
-                        if len(mapa_diarizacao) == 1
-                        else f"[INFO] Todas as {len(mapa_diarizacao)} ligações já possuem revisão no banco de dados. Etapa de coleta RPA no Google pulada."
+                        if total == 1
+                        else f"[INFO] Todas as {total} ligações já possuem revisão no banco de dados. Etapa de coleta RPA no Google pulada."
                     )
                     self.on_progress(1, 1, "searching", None, None)
                     self.on_log(msg_pulo, "out", False, None)
-                    textos_google = {k: "Não encontrado" for k in mapa_diarizacao}
+                    textos_google = {c.name: "Não encontrado" for c in copiados}
                 else:
                     if revisoes_existentes:
                         msg_existentes = (
@@ -410,120 +615,150 @@ class PipelineRunner:
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
                 from app.services.revisao import MODELO_REVISAO
-                self.on_log(
-                    f"[INFO] Iniciando diarização e revisão com IA ({MODELO_REVISAO}) de {total_copiados} chamada(s) ...",
-                    "out", False, None,
-                )
-                for idx, caminho in enumerate(copiados, 1):
-                    if self.cancel_event.is_set():
-                        break
+                from app.services.gemini_pool import openrouter_em_cooldown
 
-                    rotulo_audio = self._rotular(idx)
+                mod_rev_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+                if not arquivos_pendentes:
+                    self.on_log(
+                        f"[INFO] Todas as {total_copiados} chamada(s) já possuem revisão válida no banco. Etapa de revisão com IA pulada.",
+                        "out", False, None,
+                    )
+                    self.on_progress(total_copiados, total_copiados, "reviewing", None, None)
+                else:
+                    self.on_log(
+                        f"[INFO] Iniciando diarização e revisão com IA ({mod_rev_log}) de {len(arquivos_pendentes)} chamada(s) pendente(s) (total no lote: {total_copiados}) ...",
+                        "out", False, None,
+                    )
+                    for idx, caminho in enumerate(copiados, 1):
+                        if self.cancel_event.is_set():
+                            break
 
-                    if caminho.name in revisoes_existentes:
-                        self.on_progress(
-                            idx,
-                            total_copiados,
-                            "reviewing",
-                            f"[AVISO] [{idx}/{total_copiados}] {rotulo_audio} - Revisão já registrada no banco (pulado)",
-                            caminho.name,
+                        rotulo_audio = self._rotular(idx)
+
+                        if caminho.name in revisoes_existentes:
+                            self.on_progress(
+                                idx,
+                                total_copiados,
+                                "reviewing",
+                                f"[AVISO] [{idx}/{total_copiados}] {rotulo_audio} - Revisão já registrada no banco (pulado)",
+                                caminho.name,
+                            )
+                            continue
+
+                        mod_rev_cur = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+                        msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando ({mod_rev_cur}): {rotulo_audio} ..."
+                        self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
+
+                        dados_audio = mapa_diarizacao.get(caminho.name, {})
+                        id_cliente = dados_audio.get("identificacao_cliente")
+                        tel_para_empresa = (
+                            str(int(id_cliente)).strip() if isinstance(id_cliente, (int, float))
+                            else str(id_cliente).strip() if id_cliente is not None
+                            else telefones_para_busca.get(caminho.name)
                         )
-                        continue
+                        res_rev = self.ingestor.revisar_transcricao(
+                            caminho.name,
+                            texto_diarizado=dados_audio.get("texto_diarizado"),
+                            agente_nome=dados_audio.get("agente_nome"),
+                            texto_google=textos_google.get(caminho.name),
+                            telefone=tel_para_empresa,
+                            identificacao_cliente=id_cliente,
+                            rotulo_audio=rotulo_audio,
+                            cancel=self.cancel_event,
+                        )
+                        if isinstance(res_rev, dict):
+                            dados_audio["id_empresa"] = res_rev.get("id_empresa")
+                            dados_audio["empresa"] = res_rev.get("empresa")
 
-                    msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando ({MODELO_REVISAO}): {rotulo_audio} ..."
-                    self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
+                        if self.cancel_event.wait(1.2):
+                            break
 
-                    dados_audio = mapa_diarizacao.get(caminho.name, {})
-                    id_cliente = dados_audio.get("identificacao_cliente")
-                    tel_para_empresa = (
-                        str(int(id_cliente)).strip() if isinstance(id_cliente, (int, float))
-                        else str(id_cliente).strip() if id_cliente is not None
-                        else telefones_para_busca.get(caminho.name)
+                    if self.cancel_event.is_set():
+                        self._limpar_temporarios()
+                        self.on_finished(
+                            0,
+                            f"[CANCELADO] Cancelado durante a diarização e revisão ({inseridos} registro(s) inserido(s)).",
+                            None,
+                            True,
+                        )
+                        return
+
+                    self.on_progress(
+                        total_copiados, total_copiados, "reviewing",
+                        None, None,
                     )
-                    res_rev = self.ingestor.revisar_transcricao(
-                        caminho.name,
-                        texto_diarizado=dados_audio.get("texto_diarizado"),
-                        agente_nome=dados_audio.get("agente_nome"),
-                        texto_google=textos_google.get(caminho.name),
-                        telefone=tel_para_empresa,
-                        identificacao_cliente=id_cliente,
-                        rotulo_audio=rotulo_audio,
-                        cancel=self.cancel_event,
+                    self.on_log(
+                        f"[INFO] Diarização e revisão finalizada com sucesso para {total_copiados} chamada(s).",
+                        "out", False, None,
                     )
-                    if isinstance(res_rev, dict):
-                        dados_audio["id_empresa"] = res_rev.get("id_empresa")
-                        dados_audio["empresa"] = res_rev.get("empresa")
-
-                    if self.cancel_event.wait(1.2):
-                        break
-
-                if self.cancel_event.is_set():
-                    self._limpar_temporarios()
-                    self.on_finished(
-                        0,
-                        f"[CANCELADO] Cancelado durante a diarização e revisão ({inseridos} registro(s) inserido(s)).",
-                        None,
-                        True,
-                    )
-                    return
-
-                self.on_progress(
-                    total_copiados, total_copiados, "reviewing",
-                    None, None,
-                )
-                self.on_log(
-                    f"[INFO] Diarização e revisão finalizada com sucesso para {total_copiados} chamada(s).",
-                    "out", False, None,
-                )
 
                 # 4.75) Análise com IA (ChamadaIngestor)
-                from app.services.analise_final_AI import MODELO_ANALISE
-                self.on_log(
-                    f"[INFO] Iniciando avaliação de critérios comerciais ({MODELO_ANALISE}) de {total_copiados} chamada(s) ...",
-                    "out", False, None,
-                )
-                for idx, caminho in enumerate(copiados, 1):
+                if self.modo_etapa == "apenas_revisao":
+                    self.on_log(
+                        "[INFO] Modo 'Apenas Revisão': etapa de Análise Comercial pulada.",
+                        "out", False, None,
+                    )
+                else:
+                    from app.services.analise_final_AI import MODELO_ANALISE
+                    from app.services.gemini_pool import openrouter_em_cooldown
+
+                    mod_ana_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_ANALISE
+                    self.on_log(
+                        f"[INFO] Iniciando avaliação de critérios comerciais ({mod_ana_log}) de {total_copiados} chamada(s) ...",
+                        "out", False, None,
+                    )
+                    for idx, caminho in enumerate(copiados, 1):
+                        if self.cancel_event.is_set():
+                            break
+
+                        rotulo_audio = self._rotular(idx)
+                        self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
+
+                        self.ingestor.analisar_chamada(
+                            caminho.name,
+                            rotulo_audio=rotulo_audio,
+                            cancel=self.cancel_event,
+                            permitir_texto_bruto=True,
+                        )
+                        if self.cancel_event.wait(1.2):
+                            break
+
                     if self.cancel_event.is_set():
-                        break
+                        self._limpar_temporarios()
+                        self.on_finished(
+                            0,
+                            f"[CANCELADO] Cancelado durante a análise ({inseridos} registro(s) inserido(s)).",
+                            None,
+                            True,
+                        )
+                        return
 
-                    rotulo_audio = self._rotular(idx)
-                    self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
-
-                    self.ingestor.analisar_chamada(
-                        caminho.name,
-                        rotulo_audio=rotulo_audio,
-                        cancel=self.cancel_event,
+                    self.on_progress(
+                        total_copiados, total_copiados, "analyzing",
+                        None, None,
                     )
-                    if self.cancel_event.wait(1.2):
-                        break
-
-                if self.cancel_event.is_set():
-                    self._limpar_temporarios()
-                    self.on_finished(
-                        0,
-                        f"[CANCELADO] Cancelado durante a análise ({inseridos} registro(s) inserido(s)).",
-                        None,
-                        True,
+                    self.on_log(
+                        f"[INFO] Avaliação comercial concluída com sucesso para {total_copiados} chamada(s).",
+                        "out", False, None,
                     )
-                    return
-
-                self.on_progress(
-                    total_copiados, total_copiados, "analyzing",
-                    None, None,
-                )
-                self.on_log(
-                    f"[INFO] Avaliação comercial concluída com sucesso para {total_copiados} chamada(s).",
-                    "out", False, None,
-                )
 
                 # 5) Limpeza
                 self.on_progress(0, 1, "cleanup", "[INFO] Limpando arquivos temporários ...", None)
                 self._limpar_temporarios()
                 self.on_progress(1, 1, "cleanup", "[INFO] Limpeza concluída.", None)
 
+                if self.modo_etapa == "analise":
+                    resumo_final = f"[INFO] Análise comercial finalizada para {total_copiados} chamada(s)."
+                elif self.modo_etapa == "apenas_revisao":
+                    resumo_final = f"[INFO] Revisão finalizada para {total_copiados} chamada(s)."
+                elif self.modo_etapa == "revisao":
+                    resumo_final = f"[INFO] Revisão e análise finalizadas para {total_copiados} chamada(s)."
+                else:
+                    resumo_final = f"[INFO] {inseridos} registro(s) inserido(s) com transcrição {detalhes_existentes}."
+
                 self.on_finished(
                     0,
-                    f"[INFO] {inseridos} registro(s) inserido(s) com transcrição {detalhes_existentes}.",
+                    resumo_final,
                     None,
                     False,
                 )

@@ -26,6 +26,7 @@ class TestAppGui(unittest.TestCase):
         self.app._status = MagicMock()
         self.app._btn_cancelar = MagicMock()
         self.app._btn_enviar = MagicMock()
+        self.app._option_etapa = MagicMock()
         self.app._log_dev_button = MagicMock()
         self.app._entrada = None
 

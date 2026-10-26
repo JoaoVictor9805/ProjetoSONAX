@@ -55,6 +55,8 @@ pyinstaller --noconfirm --clean --noconsole --onedir --name "SONAX" ^
     --collect-all requests ^
     --collect-all faster_whisper ^
     --collect-all ctranslate2 ^
+    --collect-all pywinauto ^
+    --collect-all pyperclip ^
     --exclude-module torch ^
     --exclude-module torchvision ^
     --exclude-module torchaudio ^

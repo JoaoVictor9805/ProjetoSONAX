@@ -33,6 +33,14 @@ _COR_OK = "#2ecc71"
 _COR_ERRO = "#e74c3c"
 _COR_NEUTRO = "#bdc3c7"
 
+_MODOS_EXECUCAO: list[tuple[str, str]] = [
+    ("Fluxo Completo (Transcrição, Revisão e Análise)", "completo"),
+    ("A partir da Revisão (Revisão e Análise)", "revisao"),
+    ("Apenas Transcrição", "transcricao"),
+    ("Apenas Revisão", "apenas_revisao"),
+    ("Apenas Análise Comercial (SPIN/BANT/SDR)", "analise"),
+]
+
 
 class App(ctk.CTk):
     """Janela principal do SONAX."""
@@ -44,7 +52,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.title("SONAX — Transcrição de Chamadas")
-        self.geometry("720x620")
+        self.geometry("720x650")
         self.minsize(460, 360)
 
         # ----- Estado da Camada de Visualização -----
@@ -98,7 +106,7 @@ class App(ctk.CTk):
 
     def _build_selector(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=20, pady=(12, 4))
+        row.pack(fill="x", padx=20, pady=(12, 12))
 
         self._entry_path = ctk.CTkEntry(
             row,
@@ -135,6 +143,29 @@ class App(ctk.CTk):
             command=self._on_cancelar,
         )
         self._btn_cancelar.pack(side="left", padx=(8, 0))
+
+        # Linha de seleção da etapa de processamento (Opção A)
+        etapa_row = ctk.CTkFrame(self, fg_color="transparent")
+        etapa_row.pack(fill="x", padx=20, pady=(6, 12))
+
+        ctk.CTkLabel(
+            etapa_row,
+            text="Etapas:",
+            text_color=_COR_NEUTRO,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(side="left", padx=(0, 8))
+
+        rotulos_etapas = [r for r, _ in _MODOS_EXECUCAO]
+        self._option_etapa = ctk.CTkOptionMenu(
+            etapa_row,
+            values=rotulos_etapas,
+            width=360,
+            height=28,
+            font=ctk.CTkFont(size=12),
+            dropdown_font=ctk.CTkFont(size=12),
+        )
+        self._option_etapa.set(rotulos_etapas[0])
+        self._option_etapa.pack(side="left")
 
     def _build_dropdown_menu(self) -> None:
         """Cria o menu dropdown de seleção com tema escuro elegante."""
@@ -302,7 +333,17 @@ class App(ctk.CTk):
             hover_color="#e74c3c",
         )
 
-        self._engine.start(self._entrada)
+        # Identifica o modo de etapas selecionado
+        modo_etapa = "completo"
+        if hasattr(self, "_option_etapa") and self._option_etapa is not None:
+            rotulo_selecionado = self._option_etapa.get()
+            for rotulo, modo in _MODOS_EXECUCAO:
+                if rotulo == rotulo_selecionado:
+                    modo_etapa = modo
+                    break
+            self._option_etapa.configure(state="disabled")
+
+        self._engine.start(self._entrada, modo_etapa=modo_etapa)
 
     def _on_cancelar(self) -> None:
         """Solicita cancelamento imediato à Engine."""
@@ -412,6 +453,9 @@ class App(ctk.CTk):
             hover_color="#95a5a6",
         )
 
+        # Reabilita o seletor de etapas
+        if hasattr(self, "_option_etapa") and self._option_etapa is not None:
+            self._option_etapa.configure(state="normal")
 
         if self._entrada is not None:
             try:

@@ -8,6 +8,7 @@ from app.database.chamadas_dao import (
     buscar_chamada_valida,
     buscar_identificacao_cliente,
     buscar_logs_com_revisao,
+    eh_revisao_texto_bruto,
     inserir_analise,
     inserir_empresa,
     inserir_revisao,
@@ -620,12 +621,55 @@ class TestChamadasDao(unittest.TestCase):
         self.assertIn("ON CONFLICT (telefone) DO UPDATE", sql)
         self.assertEqual(params, ("(41) 3310-1010", "Texto Google Capturado"))
 
-    def test_salvar_cache_rpa_google_ignora_vazio_ou_invalido(self):
+    def test_eh_revisao_texto_bruto_identifica_marcadores_e_duplicatas(self):
+        # Vazio ou nulo
+        self.assertTrue(eh_revisao_texto_bruto(None))
+        self.assertTrue(eh_revisao_texto_bruto(""))
+        self.assertTrue(eh_revisao_texto_bruto("   "))
+
+        # Marcadores explícitos de degradação graciosa
+        self.assertTrue(eh_revisao_texto_bruto("URA / Transcrição Bruta (Revisão indisponível):\nBom dia tudo bem"))
+        self.assertTrue(eh_revisao_texto_bruto("Transcrição Bruta: texto continuo sem locutores"))
+        self.assertTrue(eh_revisao_texto_bruto("Revisão indisponível devido a falha"))
+
+        # Idêntico à transcrição
+        transcricao = "olá bom dia aqui é do financeiro da falavinha next"
+        self.assertTrue(eh_revisao_texto_bruto(transcricao, transcricao))
+        self.assertTrue(eh_revisao_texto_bruto(transcricao.upper(), transcricao))
+
+        # Texto bruto longo sem locutores comparado com transcrição
+        self.assertTrue(eh_revisao_texto_bruto(
+            "olá bom dia gostaria de falar com o responsável pelo setor de compras da empresa",
+            "olá bom dia gostaria de falar com o responsável pelo setor de compras da empresa"
+        ))
+
+        # Revisão devidamente formatada com locutores NÃO é texto bruto
+        self.assertFalse(eh_revisao_texto_bruto(
+            "Agente (Lucas): Olá, bom dia!\nCliente: Bom dia, quem gostaria?",
+            transcricao="ola bom dia bom dia quem gostaria"
+        ))
+        self.assertFalse(eh_revisao_texto_bruto("URA: Bem-vindo à nossa central de atendimento."))
+
+    def test_verificar_coluna_revisao_com_texto_bruto(self):
         cur = MagicMock()
-        salvar_cache_rpa_google(cur, "", "Texto")
-        salvar_cache_rpa_google(cur, "(41) 3310-1010", "")
-        salvar_cache_rpa_google(cur, "(41) 3310-1010", "Não encontrado")
-        self.assertFalse(cur.execute.called)
+        # Quando a coluna contém marcador de texto bruto, apenas_validas=True retorna False
+        cur.fetchone.return_value = ("URA / Transcrição Bruta (Revisão indisponível):\nTexto", "Texto")
+        self.assertFalse(verificar_coluna_revisao(cur, "audio.wav", apenas_validas=True))
+        # Mas apenas_validas=False retorna True porque a coluna tem conteúdo
+        self.assertTrue(verificar_coluna_revisao(cur, "audio.wav", apenas_validas=False))
+
+    def test_buscar_logs_com_transcricao(self):
+        from app.database.chamadas_dao import buscar_logs_com_transcricao
+        cur = MagicMock()
+        cur.fetchall.return_value = [("audio1.wav",), ("audio2.wav",)]
+        res = buscar_logs_com_transcricao(cur, ["audio1.wav", "audio2.wav", "audio3.wav"])
+        self.assertEqual(res, {"audio1.wav", "audio2.wav"})
+
+        # Lista vazia retorna set vazio imediatamente sem consultar
+        cur.reset_mock()
+        res_vazio = buscar_logs_com_transcricao(cur, [])
+        self.assertEqual(res_vazio, set())
+        cur.execute.assert_not_called()
 
 
 if __name__ == "__main__":

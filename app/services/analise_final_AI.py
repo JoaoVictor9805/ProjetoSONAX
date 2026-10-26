@@ -1381,15 +1381,53 @@ def analisar_ligacao(
 
     resposta = None
     ultimo_erro = None
-    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto (sem OpenRouter)
-    for ch in (chain, chain_fallback_1, chain_fallback_2):
+
+    from app.services.gemini_pool import (
+        eh_erro_credito_openrouter,
+        marcar_openrouter_esgotado,
+        openrouter_em_cooldown,
+    )
+
+    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto com Pool de Chaves
+    # Se o OpenRouter estiver em cooldown por falta de créditos (24h), pula direto para o Gemini
+    if not openrouter_em_cooldown():
+        modelos_openrouter = [
+            (MODELO_ANALISE, chain),
+            (MODELO_ANALISE_FALLBACK_1, chain_fallback_1),
+        ]
+        for nome_mod, ch in modelos_openrouter:
+            try:
+                resposta = ch.invoke(inputs)
+                if resposta:
+                    break
+            except Exception as exc:
+                ultimo_erro = exc
+                from app.logs import log_dev_exc
+                log_dev_exc()
+                if eh_erro_credito_openrouter(exc):
+                    marcar_openrouter_esgotado(exc)
+                    # Não tenta o próximo modelo do OpenRouter já que a conta inteira está sem créditos
+                    break
+                else:
+                    print(f"  [AVISO] Falha na análise comercial via {nome_mod}. Tentando próximo modelo...")
+
+    # Fallback 2: Gemini com pool dinâmico e rotação resiliente de chaves (cooldown 24h)
+    if not resposta:
         try:
-            resposta = ch.invoke(inputs)
-            if resposta:
-                break
+            from app.services.gemini_pool import executar_analise_com_pool
+            resposta = executar_analise_com_pool(
+                prompt=prompt,
+                inputs=inputs,
+                modelo=MODELO_ANALISE_FALLBACK_2,
+                schema=AnaliseCompletaModel,
+            )
         except Exception as exc:
+            from app.logs import log_dev_exc
+            log_dev_exc()
+            print(f"  [AVISO] Falha na análise comercial via Gemini (todas as chaves): {exc}")
             ultimo_erro = exc
-    else:
+
+    if not resposta:
         if ultimo_erro:
             raise ultimo_erro
 

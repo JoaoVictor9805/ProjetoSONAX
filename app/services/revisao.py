@@ -249,33 +249,69 @@ def revisar_texto(
     resultado_raw = ""
     ultimo_erro = None
 
-    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto (sem OpenRouter)
-    for cl in (client, client_fallback_1, client_fallback_2):
-        try:
-            mensagens = prompt.format_messages(**inputs)
-            resposta = cl.invoke(mensagens)
-            raw_c = resposta.content if hasattr(resposta, "content") else resposta
-            if isinstance(raw_c, list):
-                conteudo = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in raw_c).strip()
-            else:
-                conteudo = str(raw_c or "").strip()
+    from app.services.gemini_pool import (
+        eh_erro_credito_openrouter,
+        marcar_openrouter_esgotado,
+        openrouter_em_cooldown,
+    )
 
-            # Se content vier vazio, resgata do canal de raciocínio se o provedor colocou o texto lá
-            if not conteudo and hasattr(resposta, "additional_kwargs"):
-                raciocinio = (
-                    resposta.additional_kwargs.get("reasoning_content")
-                    or resposta.additional_kwargs.get("reasoning")
-                    or ""
-                )
-                if isinstance(raciocinio, str) and raciocinio.strip():
-                    conteudo = raciocinio.strip()
+    # Sequência de fallbacks: DeepSeek 0731 -> DeepSeek V4.1 -> Gemini direto com Pool de Chaves
+    # Se o OpenRouter estiver em cooldown por falta de créditos (24h), pula direto para o Gemini
+    if not openrouter_em_cooldown():
+        modelos_openrouter = [
+            (MODELO_REVISAO, client),
+            (MODELO_REVISAO_FALLBACK_1, client_fallback_1),
+        ]
+        for nome_mod, cl in modelos_openrouter:
+            try:
+                mensagens = prompt.format_messages(**inputs)
+                resposta = cl.invoke(mensagens)
+                raw_c = resposta.content if hasattr(resposta, "content") else resposta
+                if isinstance(raw_c, list):
+                    conteudo = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in raw_c).strip()
+                else:
+                    conteudo = str(raw_c or "").strip()
 
-            if conteudo:
-                emp_temp, rev_temp = parsear_resposta_revisao(conteudo)
-                if rev_temp and rev_temp.strip():
-                    resultado_raw = conteudo
+                # Se content vier vazio, resgata do canal de raciocínio se o provedor colocou o texto lá
+                if not conteudo and hasattr(resposta, "additional_kwargs"):
+                    raciocinio = (
+                        resposta.additional_kwargs.get("reasoning_content")
+                        or resposta.additional_kwargs.get("reasoning")
+                        or ""
+                    )
+                    if isinstance(raciocinio, str) and raciocinio.strip():
+                        conteudo = raciocinio.strip()
+
+                if conteudo:
+                    emp_temp, rev_temp = parsear_resposta_revisao(conteudo)
+                    if rev_temp and rev_temp.strip():
+                        resultado_raw = conteudo
+                        break
+            except Exception as exc:
+                ultimo_erro = exc
+                from app.logs import log_dev_exc
+                log_dev_exc()
+                if eh_erro_credito_openrouter(exc):
+                    marcar_openrouter_esgotado(exc)
+                    # Não tenta o próximo modelo do OpenRouter já que a conta inteira está sem créditos
                     break
+                else:
+                    print(f"  [AVISO] Falha na revisão via {nome_mod}. Tentando próximo modelo...")
+
+    # Fallback 2: Gemini com pool dinâmico e rotação resiliente de chaves (cooldown 24h)
+    if not resultado_raw:
+        try:
+            from app.services.gemini_pool import executar_revisao_com_pool
+            resultado_raw = executar_revisao_com_pool(
+                prompt=prompt,
+                inputs=inputs,
+                modelo=MODELO_REVISAO_FALLBACK_2,
+                parsear_fn=parsear_resposta_revisao,
+            )
         except Exception as exc:
+            from app.logs import log_dev_exc
+            log_dev_exc()
+            print(f"  [AVISO] Falha na revisão via Gemini (todas as chaves): {exc}")
             ultimo_erro = exc
 
     if not resultado_raw:

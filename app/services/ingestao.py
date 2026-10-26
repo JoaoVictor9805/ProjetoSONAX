@@ -30,8 +30,10 @@ from app.database.chamadas_dao import (
     buscar_chamada_valida,
     buscar_identificacao_cliente,
     buscar_logs_com_revisao,
+    buscar_logs_com_transcricao,
     buscar_revisao,
     buscar_transcricao,
+    eh_revisao_texto_bruto,
     inserir_analise,
     inserir_empresa,
     inserir_registro_chamada,
@@ -260,21 +262,32 @@ class ChamadaIngestor:
     # ------------------------------------------------------------------------
 
     def verificar_revisao_existente(self, log_arquivo: str) -> bool:
-        """Verifica se a ligação já possui revisão preenchida no banco de dados."""
+        """Verifica se a ligação já possui revisão preenchida e válida no banco de dados."""
         try:
             with conectar() as cur:
-                return bool(verificar_coluna_revisao(cur, log_arquivo))
+                return bool(verificar_coluna_revisao(cur, log_arquivo, apenas_validas=True))
         except Exception:
             log_dev_exc()
             return False
 
-    def verificar_revisoes_existentes(self, logs: list[str]) -> set[str]:
+    def verificar_revisoes_existentes(self, logs: list[str], apenas_validas: bool = True) -> set[str]:
         """Retorna o conjunto de logs que já possuem revisão preenchida no banco de dados."""
         if not logs:
             return set()
         try:
             with conectar() as cur:
-                return buscar_logs_com_revisao(cur, logs)
+                return buscar_logs_com_revisao(cur, logs, apenas_validas=apenas_validas)
+        except Exception:
+            log_dev_exc()
+            return set()
+
+    def verificar_transcricoes_existentes(self, logs: list[str]) -> set[str]:
+        """Retorna o conjunto de logs que já possuem transcrição salva no banco de dados."""
+        if not logs:
+            return set()
+        try:
+            with conectar() as cur:
+                return buscar_logs_com_transcricao(cur, logs)
         except Exception:
             log_dev_exc()
             return set()
@@ -318,14 +331,20 @@ class ChamadaIngestor:
             print(f"  [CANCELADO] Revisão de {nome_exibicao} não iniciada.")
             return None
 
+        revisao_anterior_bruta = False
         try:
             with conectar() as cur:
-                if verificar_coluna_revisao(cur, log_arquivo):
+                if verificar_coluna_revisao(cur, log_arquivo, apenas_validas=True):
                     print(f"  [AVISO] Revisão de {nome_exibicao} já existe no banco (pulado)")
                     return None
 
+                rev_atual = buscar_revisao(cur, log_arquivo)
+                transc_atual = buscar_transcricao(cur, log_arquivo)
+                if rev_atual and eh_revisao_texto_bruto(rev_atual, transc_atual):
+                    revisao_anterior_bruta = True
+
                 if not texto_diarizado or not texto_diarizado.strip():
-                    texto_diarizado = buscar_transcricao(cur, log_arquivo)
+                    texto_diarizado = transc_atual
         except Exception:
             print(f"  [ERRO] Falha ao verificar revisão de '{nome_exibicao}' no banco")
             log_dev_exc()
@@ -339,10 +358,13 @@ class ChamadaIngestor:
             return None
 
         from app.services.revisao import MODELO_REVISAO
+        from app.services.gemini_pool import openrouter_em_cooldown
+        mod_rev_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
         if not rotulo_audio:
-            print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({MODELO_REVISAO})...")
+            print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({mod_rev_log})...")
 
         resultado_ia = None
+        sucesso_ia = False
         for tentativa in range(1, 4):
             try:
                 resultado_ia = self.ia.revisar(
@@ -350,7 +372,11 @@ class ChamadaIngestor:
                     texto_copiado_google=texto_google,
                     nome_atendente=agente_nome,
                 )
-                break
+                if resultado_ia and isinstance(resultado_ia, dict) and resultado_ia.get("revisao"):
+                    rev_candidata = str(resultado_ia.get("revisao", "")).strip()
+                    if rev_candidata and not eh_revisao_texto_bruto(rev_candidata):
+                        sucesso_ia = True
+                        break
             except Exception:
                 print(f"  [ERRO] Falha ao revisar transcrição de {nome_exibicao} (tentativa {tentativa}/3)")
                 log_dev_exc()
@@ -401,9 +427,12 @@ class ChamadaIngestor:
                         log_dev_exc()
 
                     resultado = inserir_revisao(cur, log_arquivo, revisao_texto, id_empresa=id_empresa)
-                    print(
-                        f"  [INFO] Revisão de {nome_exibicao} gravada com sucesso no banco:"
+                    msg_sucesso = (
+                        f"  [INFO] Revisão de {nome_exibicao} substituída com sucesso no banco (revisão de IA concluída):"
+                        if revisao_anterior_bruta
+                        else f"  [INFO] Revisão de {nome_exibicao} gravada com sucesso no banco:"
                     )
+                    print(msg_sucesso)
                     print(
                         f"    • Empresa vinculada: {empresa_nome} (ID: {id_empresa})"
                     )
@@ -437,6 +466,7 @@ class ChamadaIngestor:
         log_arquivo: str,
         rotulo_audio: str | None = None,
         cancel: threading.Event | None = None,
+        permitir_texto_bruto: bool = True,
     ) -> str | None:
         """Gera análise de qualidade comercial via IA e persiste nas 7 tabelas do banco."""
         nome_exibicao = rotulo_audio or log_arquivo
@@ -452,7 +482,8 @@ class ChamadaIngestor:
 
         try:
             with conectar() as cur:
-                if not verificar_coluna_revisao(cur, log_arquivo):
+                if not verificar_coluna_revisao(cur, log_arquivo, apenas_validas=not permitir_texto_bruto):
+                    print(f"  [AVISO] {nome_exibicao} não possui revisão de transcrição para analisar (pulado)")
                     return None
 
                 revisao = buscar_revisao(cur, log_arquivo)
@@ -507,7 +538,9 @@ class ChamadaIngestor:
             data_referencia_str = f"{dt_chamada_ref.strftime('%Y-%m-%d %H:%M:%S')} ({dia_extenso})"
 
         from app.services.analise_final_AI import MODELO_ANALISE
-        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} ({MODELO_ANALISE}) (SPIN/BANT/SDR)...")
+        from app.services.gemini_pool import openrouter_em_cooldown
+        mod_ana_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_ANALISE
+        print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} ({mod_ana_log}) (SPIN/BANT/SDR)...")
         analise_ia = None
         for tentativa in range(1, 4):
             try:

@@ -1,5 +1,6 @@
 # Ambiente e credenciais
 .env
+.gemini_quota_status.json
 .venv/
 venv/
 env/

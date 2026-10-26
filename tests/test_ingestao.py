@@ -257,6 +257,44 @@ class TestChamadaIngestor(unittest.TestCase):
         mock_inserir_rev.assert_called_once()
         self.assertEqual(mock_sleep.call_count, 2)
 
+    @patch("app.services.ingestao.time.sleep")
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.verificar_coluna_revisao")
+    @patch("app.services.ingestao.buscar_revisao")
+    @patch("app.services.ingestao.buscar_transcricao")
+    @patch("app.services.ingestao.inserir_empresa")
+    @patch("app.services.ingestao.inserir_revisao")
+    def test_revisar_transcricao_reprocessa_e_substitui_texto_bruto(
+        self, mock_inserir_rev, mock_inserir_emp, mock_buscar_transc, mock_buscar_rev,
+        mock_verificar_rev, mock_conectar, mock_sleep
+    ):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_verificar_rev.return_value = False
+        mock_buscar_rev.return_value = "URA / Transcrição Bruta (Revisão indisponível):\nOlá mundo"
+        mock_buscar_transc.return_value = "Olá mundo"
+        mock_inserir_emp.return_value = 101
+        mock_inserir_rev.return_value = "Agente: Olá\nCliente: Bom dia"
+
+        self.fake_ia.revisar = MagicMock(return_value={
+            "empresa": "Padaria Nova",
+            "revisao": "Agente: Olá\nCliente: Bom dia",
+            "fonte_dados": "Interlocutor",
+        })
+
+        res = self.ingestor.revisar_transcricao(
+            log_arquivo="audio_reprocessar.wav",
+            texto_diarizado=None,
+            agente_nome="Lucas",
+            rotulo_audio="Audio Reprocessar",
+        )
+
+        self.assertIsInstance(res, dict)
+        self.assertEqual(res["empresa"], "Padaria Nova")
+        self.assertEqual(res["revisao"], "Agente: Olá\nCliente: Bom dia")
+        self.assertEqual(res["id_empresa"], 101)
+        mock_inserir_emp.assert_called_once()
+        mock_inserir_rev.assert_called_once()
+
     @patch("app.services.ingestao.conectar")
     @patch("app.services.ingestao.verificar_coluna_revisao")
     @patch("app.services.ingestao.buscar_revisao")

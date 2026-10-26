@@ -6,6 +6,7 @@ Mantém todo SQL e mapeamento relacional isolado na camada de persistência (`ap
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,59 @@ import psycopg
 # ----------------------------
 # Consultas
 # ----------------------------
+
+def eh_revisao_texto_bruto(revisao: str | None, transcricao: str | None = None) -> bool:
+    """Verifica se o conteúdo da coluna 'revisao' é texto bruto não revisado adequadamente.
+
+    Critérios para identificar texto bruto:
+    1. Vazio, nulo ou apenas espaços em branco.
+    2. Contém marcadores conhecidos de degradação graciosa / falha na revisão:
+       - 'URA / Transcrição Bruta'
+       - 'Transcrição Bruta'
+       - 'Revisão indisponível'
+    3. Idêntico ou praticamente idêntico à transcrição bruta original armazenada na coluna 'transcricao'.
+    4. Não possui marcação de interlocutores ('Agente', 'Cliente', 'URA') e é muito semelhante
+       à transcrição bruta.
+    """
+    if not revisao or not str(revisao).strip():
+        return True
+
+    rev_str = str(revisao).strip()
+    rev_lower = rev_str.lower()
+
+    # Marcadores explícitos de fallback/degradação graciosa
+    marcadores_brutos = (
+        "transcrição bruta",
+        "transcricao bruta",
+        "revisão indisponível",
+        "revisao indisponivel",
+    )
+    if any(m in rev_lower for m in marcadores_brutos):
+        return True
+
+    # Comparação com a transcrição bruta do banco (se fornecida)
+    if transcricao and str(transcricao).strip():
+        transc_str = str(transcricao).strip()
+        if rev_str == transc_str:
+            return True
+
+        # Normalização de espaços em branco para comparação tolerante
+        rev_norm = re.sub(r"\s+", " ", rev_lower)
+        transc_norm = re.sub(r"\s+", " ", transc_str.lower())
+        if rev_norm == transc_norm:
+            return True
+
+        # Se não possui nenhum marcador de locutor da revisão (Agente, Cliente, URA)
+        tem_locutor = bool(
+            re.search(r"^\s*(?:Agente|Cliente|URA)\b", rev_str, re.MULTILINE | re.IGNORECASE)
+            or re.search(r"\b(?:Agente|Cliente)\s*\(", rev_str, re.IGNORECASE)
+        )
+        if not tem_locutor:
+            len_diff = abs(len(rev_norm) - len(transc_norm))
+            if len_diff < 50 and (rev_norm[:80] == transc_norm[:80]):
+                return True
+
+    return False
 
 def buscar_chamada_valida(
     cur: psycopg.Cursor,
@@ -273,38 +327,88 @@ def buscar_transcricao(
     return resultado[0] if resultado else None
 
 
-def verificar_coluna_revisao(
+def buscar_logs_com_transcricao(
     cur: psycopg.Cursor,
-    log: str
-) -> bool:
-    """Verifica se a coluna de revisão está preenchida no BD."""
+    logs: list[str],
+) -> set[str]:
+    """Retorna o conjunto de logs que possuem transcrição preenchida no banco."""
+    if not logs:
+        return set()
     cur.execute(
         """
-        SELECT revisao FROM registro_chamadas 
+        SELECT log FROM registro_chamadas 
+        WHERE log = ANY(%s) 
+          AND transcricao IS NOT NULL 
+          AND TRIM(transcricao) != ''
+        """,
+        (logs,),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def verificar_coluna_revisao(
+    cur: psycopg.Cursor,
+    log: str,
+    *,
+    apenas_validas: bool = True,
+) -> bool:
+    """Verifica se a coluna de revisão está preenchida no BD.
+
+    Se apenas_validas=True (padrão), retorna False caso o conteúdo seja apenas
+    texto bruto / degradação graciosa, permitindo que a ligação seja reprocessada pela IA.
+    """
+    cur.execute(
+        """
+        SELECT revisao, transcricao FROM registro_chamadas 
         WHERE log = %s 
         LIMIT 1
         """,
         (log,)
     )
     resultado = cur.fetchone()
-    return bool(resultado and resultado[0] and str(resultado[0]).strip())
+    if not resultado or not resultado[0] or not str(resultado[0]).strip():
+        return False
+
+    rev = resultado[0]
+    transc = resultado[1] if len(resultado) > 1 else None
+
+    if apenas_validas:
+        return not eh_revisao_texto_bruto(rev, transc)
+
+    return True
 
 
 def buscar_logs_com_revisao(
     cur: psycopg.Cursor,
-    logs: list[str]
+    logs: list[str],
+    *,
+    apenas_validas: bool = True,
 ) -> set[str]:
-    """Retorna o conjunto de logs que já possuem a coluna revisao preenchida no BD."""
+    """Retorna o conjunto de logs que já possuem a coluna revisao preenchida no BD.
+
+    Se apenas_validas=True (padrão), exclui logs cujo conteúdo seja apenas texto bruto
+    não revisado por IA, permitindo novo envio à IA quando o arquivo for reprocessado.
+    """
     if not logs:
         return set()
     cur.execute(
         """
-        SELECT log FROM registro_chamadas 
+        SELECT log, revisao, transcricao FROM registro_chamadas 
         WHERE log = ANY(%s) AND revisao IS NOT NULL AND TRIM(revisao) != '';
         """,
         (list(logs),),
     )
-    return {row[0] for row in cur.fetchall()}
+    logs_com_revisao = set()
+    for row in cur.fetchall():
+        log_nome = row[0]
+        rev = row[1] if len(row) > 1 else None
+        transc = row[2] if len(row) > 2 else None
+        if apenas_validas:
+            if rev is None or not eh_revisao_texto_bruto(rev, transc):
+                logs_com_revisao.add(log_nome)
+        else:
+            logs_com_revisao.add(log_nome)
+    return logs_com_revisao
 
 
 def inserir_revisao(

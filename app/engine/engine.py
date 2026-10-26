@@ -103,7 +103,7 @@ class PipelineEngine:
         """Retorna todas as linhas de log formatadas para o modo solicitado."""
         return self._log_session.obter_linhas_formatadas(modo_dev=modo_dev)
 
-    def start(self, entrada: Path) -> None:
+    def start(self, entrada: Path, modo_etapa: str = "completo") -> None:
         """Inicia a execução do pipeline de transcrição de forma assíncrona.
 
         Raises:
@@ -125,6 +125,7 @@ class PipelineEngine:
             on_log=self._handle_runner_log,
             on_finished=self._handle_runner_finished,
             provedor_ia=self._provedor_ia,
+            modo_etapa=modo_etapa,
         )
 
         self._thread = threading.Thread(
