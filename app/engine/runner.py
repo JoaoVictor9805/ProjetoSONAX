@@ -216,16 +216,16 @@ class PipelineRunner:
                     self.on_progress(0, 1, "classifying", "[INFO] Classificando arquivos por duração ...", None)
                     inspecao = self.inspector.classificar_lote(wavs_para_processamento_acustico, cancel=self.cancel_event)
                     self.on_log(
-                        f"[INFO] Total faltantes: {len(wavs_para_processamento_acustico)}  •  >1min: {len(inspecao.longos)}  •  "
-                        f"<=1min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
+                        f"[INFO] Total faltantes: {len(wavs_para_processamento_acustico)}  •  >1:30min: {len(inspecao.longos)}  •  "
+                        f"<=1:30min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
                         "out", False, None,
                     )
-                    self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1min elegível(is).", None)
+                    self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1:30min elegível(is).", None)
 
                     if not inspecao.longos and len(wavs_para_processamento_acustico) == len(wavs):
                         self._limpar_temporarios()
                         self.on_log("[AVISO] Nenhum áudio com mais de 1 minuto encontrado.", "out", False, None)
-                        self.on_finished(0, "[AVISO] Nenhum áudio >1min encontrado.", None, False)
+                        self.on_finished(0, "[AVISO] Nenhum áudio >1:30min encontrado.", None, False)
                         return
 
                     if self.cancel_event.is_set():
@@ -243,8 +243,10 @@ class PipelineRunner:
                             inspecao.longos, cancel=self.cancel_event, on_progress=on_quality_progress,
                         )
                         inspecao.invalidos.extend(rejeitados)
-                        if rejeitados:
-                            self.on_log(f"[AVISO] {len(rejeitados)} áudio(s) reprovados e excluídos do processamento.", "out", False, None)
+                        self.on_log(
+                            f"[INFO] Filtro de qualidade acústica: {len(aprovados)} aprovado(s) • {len(rejeitados)} reprovado(s) (Péssimo) de {len(inspecao.longos)} inspecionado(s).",
+                            "out", False, None,
+                        )
 
                     # 3) Cópia para a pasta destino (io)
                     if aprovados:
@@ -253,9 +255,7 @@ class PipelineRunner:
                         self.on_progress(0, len(aprovados), "copying", f"[INFO] Copiando {len(aprovados)} arquivo(s) para a pasta de trabalho ...", None)
 
                         def on_copy_progress(idx: int, tot: int, p: Path) -> None:
-                            rotulo = self._rotular(idx)
-                            msg = f"[INFO] Copiado ({idx}/{tot}): {rotulo}"
-                            self.on_progress(idx, tot, "copying", msg, p.name)
+                            self.on_progress(idx, tot, "copying", None, p.name)
 
                         copiados_novos = copiar_lote_trabalho(
                             aprovados, self.destino, cancel=self.cancel_event, on_progress=on_copy_progress,
@@ -344,16 +344,35 @@ class PipelineRunner:
                 else:
                     faltantes_transc = [c for c in copiados if c.name not in transcricoes_no_banco]
                     if faltantes_transc:
-                        self.on_log(
-                            f"[INFO] Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s) (total no lote: {total}) ...",
-                            "out", False, None,
-                        )
+                        if transcricoes_no_banco:
+                            self.on_log(
+                                f"[INFO] Transcrição: {len(transcricoes_no_banco)} de {total} chamada(s) já possuem transcrição no banco (puladas). "
+                                f"Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s)...",
+                                "out", False, None,
+                            )
+                        else:
+                            self.on_log(
+                                f"[INFO] Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s) (total no lote: {total}) ...",
+                                "out", False, None,
+                            )
                     else:
                         self.on_log(
                             f"[INFO] Todas as {total} chamadas já possuem transcrição no banco.",
                             "out", False, None,
                         )
-                    arquivos_para_transcrever = copiados
+                    arquivos_para_transcrever = faltantes_transc
+
+                # Carrega metadados e transcrições em lote para os áudios já gravados no banco
+                if transcricoes_no_banco and hasattr(self.ingestor, "carregar_transcricoes_lote"):
+                    nomes_existentes = [c.name for c in copiados if c.name in transcricoes_no_banco]
+                    if nomes_existentes:
+                        try:
+                            dados_existentes = self.ingestor.carregar_transcricoes_lote(nomes_existentes)
+                            if isinstance(dados_existentes, dict):
+                                mapa_diarizacao.update(dados_existentes)
+                                ja_existentes = len(dados_existentes)
+                        except Exception as exc:
+                            self.on_log(f"  [AVISO] Falha ao carregar transcrições em lote do banco: {exc}", "out", True, None)
 
                 total_transc = len(arquivos_para_transcrever)
                 if total_transc > 0:
@@ -625,26 +644,25 @@ class PipelineRunner:
                     )
                     self.on_progress(total_copiados, total_copiados, "reviewing", None, None)
                 else:
-                    self.on_log(
-                        f"[INFO] Iniciando diarização e revisão com IA ({mod_rev_log}) de {len(arquivos_pendentes)} chamada(s) pendente(s) (total no lote: {total_copiados}) ...",
-                        "out", False, None,
-                    )
+                    if revisoes_existentes:
+                        self.on_log(
+                            f"[INFO] Diarização e revisão: {len(revisoes_existentes)} de {total_copiados} chamada(s) já possuem revisão válida no banco (puladas). "
+                            f"Iniciando revisão com IA ({mod_rev_log}) de {len(arquivos_pendentes)} chamada(s) pendente(s)...",
+                            "out", False, None,
+                        )
+                    else:
+                        self.on_log(
+                            f"[INFO] Iniciando diarização e revisão com IA ({mod_rev_log}) de {len(arquivos_pendentes)} chamada(s) pendente(s) (total no lote: {total_copiados}) ...",
+                            "out", False, None,
+                        )
                     for idx, caminho in enumerate(copiados, 1):
                         if self.cancel_event.is_set():
                             break
 
-                        rotulo_audio = self._rotular(idx)
-
                         if caminho.name in revisoes_existentes:
-                            self.on_progress(
-                                idx,
-                                total_copiados,
-                                "reviewing",
-                                f"[AVISO] [{idx}/{total_copiados}] {rotulo_audio} - Revisão já registrada no banco (pulado)",
-                                caminho.name,
-                            )
                             continue
 
+                        rotulo_audio = self._rotular(idx)
                         mod_rev_cur = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
                         msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando ({mod_rev_cur}): {rotulo_audio} ..."
                         self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
@@ -702,26 +720,55 @@ class PipelineRunner:
                     from app.services.analise_final_AI import MODELO_ANALISE
                     from app.services.gemini_pool import openrouter_em_cooldown
 
+                    nomes_copiados = [c.name for c in copiados]
+                    analises_existentes: set[str] = set()
+                    if hasattr(self.ingestor, "verificar_analises_existentes"):
+                        try:
+                            res_ana = self.ingestor.verificar_analises_existentes(nomes_copiados)
+                            analises_existentes = set(res_ana) if isinstance(res_ana, (set, list)) else set()
+                        except Exception:
+                            analises_existentes = set()
+
+                    pendentes_analise = [c for c in copiados if c.name not in analises_existentes]
+                    total_pendentes = len(pendentes_analise)
                     mod_ana_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_ANALISE
-                    self.on_log(
-                        f"[INFO] Iniciando avaliação de critérios comerciais ({mod_ana_log}) de {total_copiados} chamada(s) ...",
-                        "out", False, None,
-                    )
-                    for idx, caminho in enumerate(copiados, 1):
-                        if self.cancel_event.is_set():
-                            break
 
-                        rotulo_audio = self._rotular(idx)
-                        self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
-
-                        self.ingestor.analisar_chamada(
-                            caminho.name,
-                            rotulo_audio=rotulo_audio,
-                            cancel=self.cancel_event,
-                            permitir_texto_bruto=True,
+                    if not pendentes_analise:
+                        self.on_log(
+                            f"[INFO] Todas as {total_copiados} chamada(s) já possuem avaliação comercial no banco de dados. Etapa de análise comercial pulada!",
+                            "out", False, None,
                         )
-                        if self.cancel_event.wait(1.2):
-                            break
+                        self.on_progress(total_copiados, total_copiados, "analyzing", None, None)
+                    else:
+                        if analises_existentes:
+                            self.on_log(
+                                f"[INFO] Avaliação comercial: {len(analises_existentes)} de {total_copiados} chamada(s) já avaliadas no banco (puladas). "
+                                f"Iniciando avaliação ({mod_ana_log}) das {total_pendentes} chamada(s) pendente(s)...",
+                                "out", False, None,
+                            )
+                        else:
+                            self.on_log(
+                                f"[INFO] Iniciando avaliação de critérios comerciais ({mod_ana_log}) de {total_copiados} chamada(s) ...",
+                                "out", False, None,
+                            )
+                        for idx, caminho in enumerate(copiados, 1):
+                            if self.cancel_event.is_set():
+                                break
+
+                            if caminho.name in analises_existentes:
+                                continue
+
+                            rotulo_audio = self._rotular(idx)
+                            self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
+
+                            self.ingestor.analisar_chamada(
+                                caminho.name,
+                                rotulo_audio=rotulo_audio,
+                                cancel=self.cancel_event,
+                                permitir_texto_bruto=True,
+                            )
+                            if self.cancel_event.wait(1.2):
+                                break
 
                     if self.cancel_event.is_set():
                         self._limpar_temporarios()

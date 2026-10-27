@@ -111,7 +111,7 @@ class AudioInspector:
             meta = self.inspecionar(w)
             if meta is None:
                 invalidos.append(w)
-            elif meta.duracao > 60:
+            elif meta.duracao >= 90:
                 longos.append(meta)
             else:
                 curtos.append(meta)
@@ -153,26 +153,14 @@ class AudioInspector:
                     classificacao = classificar_qualidade_audio(dados)
                     break
                 except Exception:
-                    print(
-                        f"[AVISO] Não foi possível analisar a qualidade "
-                        f"de '{rotulo_audio}' (tentativa {tentativa}/3)"
-                    )
                     log_dev_exc()
-                    if tentativa < 3:
-                        print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
             else:
-                print(
-                    f"[ERRO] Não foi possível analisar a qualidade "
-                    f"de '{rotulo_audio}' após 3 tentativas — excluído do processamento."
-                )
                 rejeitados.append(meta.path)
                 continue
 
             if classificacao == "Péssimo":
-                print(f"  [INFO] {rotulo_audio} reprovado ({classificacao}) — excluído do processamento")
                 rejeitados.append(meta.path)
             else:
-                print(f"  [INFO] {rotulo_audio} aprovado ({classificacao})")
                 aprovados.append(meta)
 
         return aprovados, rejeitados

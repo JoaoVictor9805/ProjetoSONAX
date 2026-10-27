@@ -296,6 +296,24 @@ def openrouter_em_cooldown() -> bool:
             return True
 
 
+def resetar_cooldown_chaves(resetar_gemini: bool = True, resetar_openrouter: bool = False) -> None:
+    """Reseta o status de cooldown das chaves gravado em disco.
+
+    Args:
+        resetar_gemini: Se True, remove o cooldown de todas as chaves Gemini.
+        resetar_openrouter: Se True, remove o cooldown do OpenRouter.
+    """
+    with _LOCK:
+        status = _carregar_status_disco()
+        if resetar_gemini and resetar_openrouter:
+            status = {}
+        elif resetar_gemini:
+            status = {k: v for k, v in status.items() if k == OPENROUTER_STATUS_KEY}
+        elif resetar_openrouter:
+            status.pop(OPENROUTER_STATUS_KEY, None)
+        _salvar_status_disco(status)
+
+
 def obter_cliente_gemini(modelo: str, api_key: str) -> ChatGoogleGenerativeAI:
     """Cria ou recupera em cache o cliente ChatGoogleGenerativeAI para o modelo e chave especificados."""
     cache_key = (modelo, api_key)

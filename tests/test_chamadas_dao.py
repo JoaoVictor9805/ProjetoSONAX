@@ -665,10 +665,35 @@ class TestChamadasDao(unittest.TestCase):
         res = buscar_logs_com_transcricao(cur, ["audio1.wav", "audio2.wav", "audio3.wav"])
         self.assertEqual(res, {"audio1.wav", "audio2.wav"})
 
-        # Lista vazia retorna set vazio imediatamente sem consultar
+    def test_buscar_logs_com_analise(self):
+        from app.database.chamadas_dao import buscar_logs_com_analise
+        cur = MagicMock()
+        cur.fetchall.return_value = [("audio1.wav",), ("audio2.wav",)]
+        res = buscar_logs_com_analise(cur, ["audio1.wav", "audio2.wav", "audio3.wav"])
+        self.assertEqual(res, {"audio1.wav", "audio2.wav"})
+
         cur.reset_mock()
-        res_vazio = buscar_logs_com_transcricao(cur, [])
+        res_vazio = buscar_logs_com_analise(cur, [])
         self.assertEqual(res_vazio, set())
+        cur.execute.assert_not_called()
+
+    def test_carregar_dados_transcricoes_existentes(self):
+        from app.database.chamadas_dao import carregar_dados_transcricoes_existentes
+        cur = MagicMock()
+        cur.fetchall.return_value = [
+            ("audio1.wav", "Transcrição 1", "Agente 1", "4199999999", "41", 123),
+            ("audio2.wav", "Transcrição 2", "Agente 2", None, "11", 456),
+        ]
+        res = carregar_dados_transcricoes_existentes(cur, ["audio1.wav", "audio2.wav"])
+        self.assertEqual(len(res), 2)
+        self.assertEqual(res["audio1.wav"]["texto_diarizado"], "Transcrição 1")
+        self.assertEqual(res["audio1.wav"]["agente_nome"], "Agente 1")
+        self.assertEqual(res["audio1.wav"]["numero"], "4199999999")
+        self.assertEqual(res["audio2.wav"]["numero"], "456")
+
+        cur.reset_mock()
+        res_vazio = carregar_dados_transcricoes_existentes(cur, [])
+        self.assertEqual(res_vazio, {})
         cur.execute.assert_not_called()
 
 

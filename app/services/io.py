@@ -61,14 +61,15 @@ def copiar_lote_trabalho(
     pasta_destino: Path,
     cancel: threading.Event | None = None,
     on_progress: OnCopyProgressCallback | None = None,
+    max_workers: int = 8,
 ) -> list[Path]:
-    """Copia os áudios elegíveis para a pasta de destino com retries.
+    """Copia os áudios elegíveis para a pasta de destino em lote com retries.
 
     Ordena decrescente por duração e descarta duplicatas por nome de arquivo.
+    Executa a cópia concorrente via threads para máxima velocidade em lote.
     Retorna a lista dos arquivos copiados com sucesso na pasta de destino.
     """
     pasta_destino.mkdir(exist_ok=True, parents=True)
-    copiados: list[Path] = []
     vistos = set()
 
     # Normaliza lista para tuplas (Path, duracao)
@@ -80,15 +81,26 @@ def copiar_lote_trabalho(
             itens.append((item[0], item[1]))
 
     itens_ordenados = sorted(itens, key=lambda x: -x[1])
-    total = len(itens_ordenados)
 
+    # Deduplica preservando ordem decrescente de duração
+    itens_unicos: list[Path] = []
     for caminho, _ in itens_ordenados:
-        if cancel is not None and cancel.is_set():
-            break
+        if caminho.name not in vistos:
+            vistos.add(caminho.name)
+            itens_unicos.append(caminho)
 
-        if caminho.name in vistos:
-            continue
-        vistos.add(caminho.name)
+    total = len(itens_unicos)
+    if total == 0:
+        return []
+
+    copiados_sucesso_set: set[str] = set()
+    lock = threading.Lock()
+    concluidos = 0
+
+    def _copiar_arquivo(caminho: Path) -> Path | None:
+        nonlocal concluidos
+        if cancel is not None and cancel.is_set():
+            return None
 
         destino = pasta_destino / caminho.name
         sucesso = False
@@ -99,26 +111,38 @@ def copiar_lote_trabalho(
                 sucesso = True
                 break
             except Exception:
-                print(
-                    f"  [AVISO] Falha ao copiar '{caminho.name}' (tentativa {tentativa}/3)"
-                )
                 log_dev_exc()
-                if tentativa < 3:
-                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
 
         if not sucesso:
-            print(f"  [ERRO] Não foi possível copiar '{caminho.name}' após 3 tentativas.")
-            continue
+            return None
 
-        copiados.append(destino)
+        with lock:
+            concluidos += 1
+            copiados_sucesso_set.add(destino.name)
+            if on_progress is not None:
+                try:
+                    on_progress(concluidos, total, caminho)
+                except Exception:
+                    pass
 
-        if on_progress is not None:
-            try:
-                on_progress(len(copiados), total, caminho)
-            except Exception:
-                pass
+        return destino
 
-    return copiados
+    workers = min(max_workers, total)
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(_copiar_arquivo, p) for p in itens_unicos]
+            for future in as_completed(futures):
+                if cancel is not None and cancel.is_set():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+    else:
+        for p in itens_unicos:
+            if cancel is not None and cancel.is_set():
+                break
+            _copiar_arquivo(p)
+
+    return [pasta_destino / p.name for p in itens_unicos if p.name in copiados_sucesso_set]
 
 
 def deletar_pasta(pasta: Path) -> bool:

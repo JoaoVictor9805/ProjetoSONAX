@@ -29,10 +29,12 @@ from app.database.chamadas_dao import (
     buscar_cache_rpa_google,
     buscar_chamada_valida,
     buscar_identificacao_cliente,
+    buscar_logs_com_analise,
     buscar_logs_com_revisao,
     buscar_logs_com_transcricao,
     buscar_revisao,
     buscar_transcricao,
+    carregar_dados_transcricoes_existentes,
     eh_revisao_texto_bruto,
     inserir_analise,
     inserir_empresa,
@@ -288,6 +290,28 @@ class ChamadaIngestor:
         try:
             with conectar() as cur:
                 return buscar_logs_com_transcricao(cur, logs)
+        except Exception:
+            log_dev_exc()
+            return set()
+
+    def carregar_transcricoes_lote(self, logs: list[str]) -> dict[str, dict[str, Any]]:
+        """Carrega metadados e transcrições de ligações existentes no banco em lote."""
+        if not logs:
+            return {}
+        try:
+            with conectar() as cur:
+                return carregar_dados_transcricoes_existentes(cur, logs)
+        except Exception:
+            log_dev_exc()
+            return {}
+
+    def verificar_analises_existentes(self, logs: list[str]) -> set[str]:
+        """Retorna o conjunto de logs que já possuem avaliação comercial no banco de dados."""
+        if not logs:
+            return set()
+        try:
+            with conectar() as cur:
+                return buscar_logs_com_analise(cur, logs)
         except Exception:
             log_dev_exc()
             return set()

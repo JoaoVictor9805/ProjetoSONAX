@@ -312,6 +312,50 @@ class TestRunnerModos(unittest.TestCase):
         self.assertTrue(any("1 de 2 chamada(s) já possuem revisão válida" in t for t in textos_log))
         self.assertTrue(any("1 chamada(s) pendente(s) de revisão" in t for t in textos_log))
 
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.engine.runner.resolver_destino")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.get_database_url")
+    def test_modo_analise_comercial_pula_analises_ja_existentes_em_lote(
+        self, mock_env, mock_coletar, mock_inspector_cls, mock_copiar, mock_resolver, mock_deletar
+    ):
+        p_existente = Path("audio_existente.wav")
+        p_pendente = Path("audio_pendente.wav")
+        mock_coletar.return_value = [p_existente, p_pendente]
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+            modo_etapa="analise",
+        )
+
+        runner.ingestor = MagicMock()
+        # Ambos possuem revisão válida no banco
+        runner.ingestor.verificar_revisoes_existentes.return_value = {p_existente.name, p_pendente.name}
+        runner.ingestor.verificar_transcricoes_existentes.return_value = {p_existente.name, p_pendente.name}
+        # Apenas p_existente já tem análise gravada em avaliacao_ia
+        runner.ingestor.verificar_analises_existentes.return_value = {p_existente.name}
+
+        runner.run()
+
+        # analisar_chamada deve ter sido chamado APENAS para p_pendente, pulando p_existente instantaneamente
+        runner.ingestor.analisar_chamada.assert_called_once_with(
+            p_pendente.name,
+            rotulo_audio="Audio 02",
+            cancel=self.cancel_event,
+            permitir_texto_bruto=True,
+        )
+
+        # Log informativo de lote emitido
+        textos_log = [c[0] for c in self.log_calls]
+        self.assertTrue(any("1 de 2 chamada(s) já avaliadas no banco (puladas)" in t for t in textos_log))
+
     def test_modos_execucao_labels_sem_emojis_e_ordem_exata(self):
         """Valida que os rótulos do menu não possuem emojis e seguem exatamente a ordem solicitada."""
         rotulos = [r for r, _ in _MODOS_EXECUCAO]
