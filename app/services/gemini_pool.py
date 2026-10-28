@@ -133,15 +133,54 @@ def _salvar_status_disco(status: dict[str, dict[str, Any]]) -> None:
         print(f"  [AVISO] Falha ao persistir status de cotas do Gemini: {exc}")
 
 
+def calcular_proximo_reset_gemini(momento: datetime | None = None) -> datetime:
+    """Calcula o momento do próximo reset diário das cotas do Google Gemini.
+
+    As cotas diárias gratuitas (Requests Per Day - RPD) do Google Gemini são
+    redefinidas à meia-noite no fuso horário do Pacífico (00:00 America/Los_Angeles),
+    o que corresponde às 04:00 AM (ou 05:00 AM) no Horário de Brasília.
+
+    Regra:
+    - Se a chave foi bloqueada em um dia anterior (ex.: às 11h ou 18h do dia 27),
+      no dia seguinte (dia 28 às 08h) o reset de meia-noite PT já ocorreu e a chave é liberada.
+    """
+    if momento is None:
+        momento = datetime.now()
+
+    if momento.tzinfo is None:
+        momento_local = momento.astimezone()
+    else:
+        momento_local = momento
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_pt = ZoneInfo("America/Los_Angeles")
+        # Converte para o fuso oficial de renovação do Google (Pacific Time)
+        dt_pt = momento_local.astimezone(tz_pt)
+        # Próxima meia-noite no fuso do Pacífico
+        amanha_pt = dt_pt.date() + timedelta(days=1)
+        reset_pt = datetime(amanha_pt.year, amanha_pt.month, amanha_pt.day, 0, 0, 0, tzinfo=tz_pt)
+        # Converte de volta para o fuso local da máquina
+        reset_local = reset_pt.astimezone(momento_local.tzinfo)
+        return reset_local.replace(tzinfo=None)
+    except Exception:
+        # Fallback fixo para 04:00 da manhã
+        base_reset = momento.replace(hour=4, minute=0, second=0, microsecond=0)
+        if momento < base_reset:
+            return base_reset
+        return base_reset + timedelta(days=1)
+
+
 def marcar_cota_esgotada(
     var_name: str,
     api_key: str,
     erro: Exception | str = "",
 ) -> None:
-    """Registra o momento do esgotamento da cota e bloqueia a chave por 24 horas."""
+    """Registra o momento do esgotamento da cota e bloqueia a chave até o próximo reset diário (00:00 PT)."""
     agora = datetime.now()
     ts_agora = agora.timestamp()
-    expira = agora + timedelta(seconds=DURACAO_BLOQUEIO_SEGUNDOS)
+    expira = calcular_proximo_reset_gemini(agora)
+    ts_expira = expira.timestamp()
     mascarada = mascarar_chave(api_key)
 
     with _LOCK:
@@ -151,6 +190,7 @@ def marcar_cota_esgotada(
             "chave_mascarada": mascarada,
             "bloqueado_em": ts_agora,
             "bloqueado_em_iso": agora.strftime("%Y-%m-%d %H:%M:%S"),
+            "expira_em": ts_expira,
             "expira_em_iso": expira.strftime("%Y-%m-%d %H:%M:%S"),
             "motivo": str(erro)[:200] if erro else "RESOURCE_EXHAUSTED (Limite atingido)",
         }
@@ -159,19 +199,20 @@ def marcar_cota_esgotada(
     print(
         f"  [AVISO] Limite de cota atingido na chave Gemini {var_name} ({mascarada}). "
         f"Momento registrado: {agora.strftime('%Y-%m-%d %H:%M:%S')}. "
-        f"Esta chave ficará em cooldown por 24h (até {expira.strftime('%Y-%m-%d %H:%M:%S')})."
+        f"Esta chave ficará em cooldown até o próximo reset diário ({expira.strftime('%d/%m/%Y às %H:%M:%S')})."
     )
 
 
 def obter_chaves_gemini_disponiveis() -> list[tuple[str, str]]:
-    """Retorna a lista de chaves configuradas que NÃO estão em período de bloqueio de 24h.
-    Reativa automaticamente chaves cujo período de 24 horas já expirou.
+    """Retorna a lista de chaves configuradas que NÃO estão em período de cooldown.
+    Reativa automaticamente chaves cujo reset diário já ocorreu (meia-noite Pacific Time / 04:00 BRT).
     """
     configuradas = listar_chaves_gemini_configuradas()
     if not configuradas:
         return []
 
-    agora_ts = time.time()
+    agora = datetime.now()
+    agora_ts = agora.timestamp()
     disponiveis: list[tuple[str, str]] = []
     modificado = False
 
@@ -184,27 +225,29 @@ def obter_chaves_gemini_disponiveis() -> list[tuple[str, str]]:
                 disponiveis.append((var_name, api_key))
                 continue
 
-            bloqueado_em = reg.get("bloqueado_em", 0)
-            decorrido = agora_ts - bloqueado_em
+            bloqueado_em_ts = reg.get("bloqueado_em", 0)
+            bloqueado_em_dt = datetime.fromtimestamp(bloqueado_em_ts)
+            proximo_reset_dt = calcular_proximo_reset_gemini(bloqueado_em_dt)
+            proximo_reset_ts = proximo_reset_dt.timestamp()
 
-            if decorrido >= DURACAO_BLOQUEIO_SEGUNDOS:
-                # 24 horas expiradas! Reativa a chave
+            if agora_ts >= proximo_reset_ts:
+                # Reset diário atingido! Reativa a chave
                 del status[api_key]
                 modificado = True
                 mascarada = mascarar_chave(api_key)
                 print(
-                    f"  [INFO] Período de 24h de bloqueio expirado para a chave Gemini {var_name} ({mascarada}). "
+                    f"  [INFO] Reset diário de cota atingido para a chave Gemini {var_name} ({mascarada}). "
                     "Chave reativada e pronta para novas requisições!"
                 )
                 disponiveis.append((var_name, api_key))
             else:
-                restante_segundos = DURACAO_BLOQUEIO_SEGUNDOS - decorrido
+                restante_segundos = max(0, int(proximo_reset_ts - agora_ts))
                 horas = int(restante_segundos // 3600)
                 minutos = int((restante_segundos % 3600) // 60)
                 from app.logs import log_dev
                 log_dev(
-                    f"Chave Gemini {var_name} ({mascarar_chave(api_key)}) em cooldown de cota. "
-                    f"Libera em {horas}h {minutos}m."
+                    f"Chave Gemini {var_name} ({mascarar_chave(api_key)}) em cooldown de cota diária. "
+                    f"Libera no próximo reset ({proximo_reset_dt.strftime('%d/%m às %H:%M')}, em {horas}h {minutos}m)."
                 )
 
         if modificado:

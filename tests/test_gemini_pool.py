@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from app.services.gemini_pool import (
     DURACAO_BLOQUEIO_SEGUNDOS,
     OPENROUTER_STATUS_KEY,
+    calcular_proximo_reset_gemini,
     eh_erro_cota_gemini,
     eh_erro_credito_openrouter,
     executar_analise_com_pool,
@@ -26,12 +27,15 @@ from app.services.gemini_pool import (
 class TestGeminiPool(unittest.TestCase):
 
     def setUp(self):
-        # Limpa variáveis de teste
-        self.patcher = patch.dict(os.environ, {
+        # Limpa variáveis de teste isolando o ambiente
+        env_mock = {
             "GEMINI_API_KEY": "key-primary-123456",
             "GEMINI_API_KEY_FALLBACK": "key-fallback-1-789012",
             "GEMINI_API_KEY_FALLBACK_2": "key-fallback-2-345678",
-        })
+        }
+        for i in range(3, 21):
+            env_mock[f"GEMINI_API_KEY_FALLBACK_{i}"] = ""
+        self.patcher = patch.dict(os.environ, env_mock)
         self.patcher.start()
 
     def tearDown(self):
@@ -123,6 +127,31 @@ class TestGeminiPool(unittest.TestCase):
 
         disp = obter_chaves_gemini_disponiveis()
         # A chave deve ter sido desbloqueada e reativada!
+        nomes_disp = [item[0] for item in disp]
+        self.assertIn("GEMINI_API_KEY", nomes_disp)
+        self.assertNotIn("key-primary-123456", status_simulado)
+
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_reseta_chave_bloqueada_ontem_liberada_hoje(self, mock_carregar, mock_salvar):
+        # Simula chave bloqueada às 11:00 do dia 27
+        bloqueio_ontem = datetime.now() - timedelta(days=1)
+        tempo_bloqueio = bloqueio_ontem.timestamp()
+        status_simulado = {
+            "key-primary-123456": {
+                "var_name": "GEMINI_API_KEY",
+                "bloqueado_em": tempo_bloqueio,
+            }
+        }
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        # No dia seguinte após a virada (ex.: 08:00 de hoje), deve estar liberada
+        disp = obter_chaves_gemini_disponiveis()
         nomes_disp = [item[0] for item in disp]
         self.assertIn("GEMINI_API_KEY", nomes_disp)
         self.assertNotIn("key-primary-123456", status_simulado)
