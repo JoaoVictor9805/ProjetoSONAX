@@ -167,15 +167,15 @@ class TestRunnerModos(unittest.TestCase):
         runner.ingestor = MagicMock()
         # p1 já tem transcrição, p2 não tem transcrição no banco (ex.: descartado)
         runner.ingestor.verificar_transcricoes_existentes.return_value = {p1.name}
-
-        mock_item = MagicMock()
-        mock_item.ja_existente = True
-        mock_item.texto_transcricao = "texto transcrito"
-        mock_item.agente_nome = "Agente"
-        mock_item.numero = "123"
-        mock_item.estado_ddd = "41"
-        mock_item.identificacao_cliente = None
-        runner.ingestor.transcrever_e_inserir.return_value = mock_item
+        runner.ingestor.carregar_transcricoes_lote.return_value = {
+            p1.name: {
+                "texto_diarizado": "texto transcrito",
+                "agente_nome": "Agente",
+                "numero": "123",
+                "estado_ddd": "41",
+                "identificacao_cliente": None,
+            }
+        }
 
         # p1 não possui revisão válida (vazia ou texto bruto)
         runner.ingestor.verificar_revisoes_existentes.return_value = set()
@@ -186,9 +186,9 @@ class TestRunnerModos(unittest.TestCase):
             with patch("app.services.rpa_google.coletar_textos_google_lote", return_value={}):
                 runner.run()
 
-        # Whisper NÃO deve ser chamado para p2 (p2 foi ignorado por não ter transcrição)
-        # Apenas p1 é verificado e revisado
-        runner.ingestor.transcrever_e_inserir.assert_called_once_with(p1, rotulo_audio="Audio 01", cancel=self.cancel_event, on_sub_progress=unittest.mock.ANY)
+        # Atomicidade: transcrição NÃO deve ser executada no modo revisão
+        runner.ingestor.transcrever_e_inserir.assert_not_called()
+        runner.ingestor.carregar_transcricoes_lote.assert_called_once()
         runner.ingestor.revisar_transcricao.assert_called_once()
         runner.ingestor.analisar_chamada.assert_called_once_with(
             p1.name,
@@ -224,16 +224,16 @@ class TestRunnerModos(unittest.TestCase):
         )
 
         runner.ingestor = MagicMock()
-        mock_item = MagicMock()
-        mock_item.sucesso = False
-        mock_item.ja_existente = True
-        mock_item.texto_transcricao = "texto"
-        mock_item.agente_nome = "Agente"
-        mock_item.numero = "123"
-        mock_item.estado_ddd = "41"
-        mock_item.identificacao_cliente = None
-        runner.ingestor.transcrever_e_inserir.return_value = mock_item
         runner.ingestor.verificar_transcricoes_existentes.return_value = {p1.name}
+        runner.ingestor.carregar_transcricoes_lote.return_value = {
+            p1.name: {
+                "texto_diarizado": "texto",
+                "agente_nome": "Agente",
+                "numero": "123",
+                "estado_ddd": "41",
+                "identificacao_cliente": None,
+            }
+        }
         # Sem revisão válida no banco (apenas_validas=True retorna vazio)
         runner.ingestor.verificar_revisoes_existentes.return_value = set()
         runner.ingestor.obter_cache_rpa.return_value = {}
@@ -243,6 +243,8 @@ class TestRunnerModos(unittest.TestCase):
             with patch("app.services.rpa_google.coletar_textos_google_lote", return_value={}):
                 runner.run()
 
+        # Transcrição NÃO deve ser executada
+        runner.ingestor.transcrever_e_inserir.assert_not_called()
         # Revisão executada
         runner.ingestor.revisar_transcricao.assert_called_once()
         # Análise comercial DEVE ter sido pulada no modo apenas_revisao
@@ -280,18 +282,25 @@ class TestRunnerModos(unittest.TestCase):
         runner.ingestor = MagicMock()
         # Ambos têm transcrição
         runner.ingestor.verificar_transcricoes_existentes.return_value = {p_bruto.name, p_valida.name}
+        runner.ingestor.carregar_transcricoes_lote.return_value = {
+            p_bruto.name: {
+                "texto_diarizado": "texto bruto existente",
+                "agente_nome": "Carlos",
+                "numero": "1199999999",
+                "estado_ddd": "11",
+                "identificacao_cliente": None,
+            },
+            p_valida.name: {
+                "texto_diarizado": "texto valido",
+                "agente_nome": "Carlos",
+                "numero": "1199999999",
+                "estado_ddd": "11",
+                "identificacao_cliente": None,
+            },
+        }
 
         # apenas_validas=True retorna apenas p_valida (p_bruto é texto bruto/degradação graciosa)
         runner.ingestor.verificar_revisoes_existentes.return_value = {p_valida.name}
-
-        mock_item = MagicMock()
-        mock_item.ja_existente = True
-        mock_item.texto_transcricao = "texto bruto existente"
-        mock_item.agente_nome = "Carlos"
-        mock_item.numero = "1199999999"
-        mock_item.estado_ddd = "11"
-        mock_item.identificacao_cliente = None
-        runner.ingestor.transcrever_e_inserir.return_value = mock_item
         runner.ingestor.obter_cache_rpa.return_value = {}
         runner.ingestor.revisar_transcricao.return_value = {"id_empresa": 10, "empresa": "Empresa Reanalisada"}
 
@@ -299,18 +308,15 @@ class TestRunnerModos(unittest.TestCase):
             with patch("app.services.rpa_google.coletar_textos_google_lote", return_value={}):
                 runner.run()
 
-        # Apenas p_bruto deve ter sido enviado para transcrever_e_inserir (carregar dados) e revisar_transcricao
-        runner.ingestor.transcrever_e_inserir.assert_called_once_with(
-            p_bruto, rotulo_audio="Audio 01", cancel=self.cancel_event, on_sub_progress=unittest.mock.ANY
-        )
+        # Transcrição NÃO deve ser executada
+        runner.ingestor.transcrever_e_inserir.assert_not_called()
         runner.ingestor.revisar_transcricao.assert_called_once()
         args, kwargs = runner.ingestor.revisar_transcricao.call_args
         self.assertEqual(args[0], p_bruto.name)
 
-        # Log informando que 1 áudio válido foi pulado e 1 pendente foi carregado
+        # Log informando que 1 áudio válido foi pulado
         textos_log = [c[0] for c in self.log_calls]
         self.assertTrue(any("1 de 2 chamada(s) já possuem revisão válida" in t for t in textos_log))
-        self.assertTrue(any("1 chamada(s) pendente(s) de revisão" in t for t in textos_log))
 
     @patch("app.engine.runner.deletar_pasta")
     @patch("app.engine.runner.resolver_destino")

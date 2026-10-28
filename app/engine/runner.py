@@ -290,63 +290,47 @@ class PipelineRunner:
                 ja_existentes = 0
                 mapa_diarizacao: dict[str, dict] = {}
 
-                # Determina quais arquivos precisam passar pela checagem/execução de transcrição
-                if self.modo_etapa == "analise":
-                    # Na etapa de análise comercial, se o áudio já tem revisão (mesmo que texto bruto),
-                    # a transcrição e revisão prévias não são necessárias.
-                    arquivos_para_transcrever = [c for c in copiados if c.name not in revisoes_no_banco_brutas]
-                    if not arquivos_para_transcrever:
-                        self.on_log(
-                            f"[INFO] Todas as {total} chamadas já possuem revisão no banco de dados. Etapas de transcrição e revisão puladas!",
-                            "out", False, None,
-                        )
-                    else:
-                        faltantes_transc = [c for c in arquivos_para_transcrever if c.name not in transcricoes_no_banco]
-                        if faltantes_transc:
-                            self.on_log(
-                                f"[INFO] Modo Análise Comercial: {len(faltantes_transc)} chamada(s) sem transcrição no banco. Transcrevendo apenas faltantes...",
-                                "out", False, None,
-                            )
-                        else:
-                            self.on_log(
-                                f"[INFO] Modo Análise Comercial: {len(arquivos_para_transcrever)} chamada(s) sem revisão, mas já com transcrição no banco.",
-                                "out", False, None,
-                            )
-                elif self.modo_etapa in ("revisao", "apenas_revisao"):
-                    # Identifica quais chamadas precisam de revisão com IA (vazias ou com texto bruto)
-                    nomes_copiados = [c.name for c in copiados]
+                # 4.1) Carrega metadados e transcrições em lote para os áudios já gravados no banco
+                nomes_existentes = [c.name for c in copiados if c.name in transcricoes_no_banco]
+                if nomes_existentes and hasattr(self.ingestor, "carregar_transcricoes_lote"):
                     try:
-                        res_validas = self.ingestor.verificar_revisoes_existentes(nomes_copiados, apenas_validas=True)
-                        revisoes_validas = set(res_validas) if isinstance(res_validas, (set, list)) else set()
-                    except Exception:
-                        revisoes_validas = set()
+                        dados_existentes = self.ingestor.carregar_transcricoes_lote(nomes_existentes)
+                        if isinstance(dados_existentes, dict):
+                            mapa_diarizacao.update(dados_existentes)
+                            ja_existentes = len(dados_existentes)
+                    except Exception as exc:
+                        self.on_log(f"  [AVISO] Falha ao carregar transcrições em lote do banco: {exc}", "out", True, None)
 
-                    precisam_revisao = [c for c in copiados if c.name not in revisoes_validas]
-                    qtd_validas = len(copiados) - len(precisam_revisao)
-                    if qtd_validas > 0:
+                # 4.2) Determina quais arquivos precisam passar pela execução de transcrição
+                if self.modo_etapa == "analise":
+                    # Na etapa de análise comercial, etapas de transcrição e revisão prévias não são executadas
+                    arquivos_para_transcrever = []
+                    self.on_log(
+                        f"[INFO] Modo 'Apenas Análise Comercial': Etapas de transcrição e revisão puladas.",
+                        "out", False, None,
+                    )
+                elif self.modo_etapa in ("revisao", "apenas_revisao"):
+                    # Nos modos a partir da revisão, nenhuma transcrição é executada: apenas revisa o que já está transcrito
+                    arquivos_para_transcrever = []
+                    qtd_carregadas = len(mapa_diarizacao) if mapa_diarizacao else len(nomes_existentes)
+                    nome_modo = "Apenas Revisão" if self.modo_etapa == "apenas_revisao" else "A partir da Revisão"
+                    self.on_log(
+                        f"[INFO] Modo '{nome_modo}': Etapa de transcrição pulada ({qtd_carregadas} de {total} chamada(s) já transcritas carregadas do banco em lote).",
+                        "out", False, None,
+                    )
+                    sem_transcricao = [c for c in copiados if c.name not in transcricoes_no_banco]
+                    if sem_transcricao:
                         self.on_log(
-                            f"[INFO] {qtd_validas} de {total} chamada(s) já possuem revisão válida com IA no banco (puladas).",
+                            f"  [AVISO] {len(sem_transcricao)} áudio(s) sem transcrição no banco ignorados nesta etapa.",
                             "out", False, None,
                         )
-
-                    if precisam_revisao:
-                        self.on_log(
-                            f"[INFO] {len(precisam_revisao)} chamada(s) pendente(s) de revisão (vazias ou com texto bruto). Carregando dados do banco...",
-                            "out", False, None,
-                        )
-                        arquivos_para_transcrever = precisam_revisao
-                    else:
-                        self.on_log(
-                            f"[INFO] Todas as {total} chamadas já possuem revisão válida com IA no banco de dados!",
-                            "out", False, None,
-                        )
-                        arquivos_para_transcrever = []
                 else:
+                    # Modo completo ou apenas_transcricao: transcreve apenas o que NÃO estiver no banco
                     faltantes_transc = [c for c in copiados if c.name not in transcricoes_no_banco]
                     if faltantes_transc:
                         if transcricoes_no_banco:
                             self.on_log(
-                                f"[INFO] Transcrição: {len(transcricoes_no_banco)} de {total} chamada(s) já possuem transcrição no banco (puladas). "
+                                f"[INFO] Transcrição: {len(transcricoes_no_banco)} de {total} chamada(s) já possuem transcrição no banco (puladas em lote). "
                                 f"Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s)...",
                                 "out", False, None,
                             )
@@ -355,24 +339,13 @@ class PipelineRunner:
                                 f"[INFO] Iniciando transcrição de {len(faltantes_transc)} arquivo(s) faltante(s) (total no lote: {total}) ...",
                                 "out", False, None,
                             )
+                        arquivos_para_transcrever = faltantes_transc
                     else:
                         self.on_log(
-                            f"[INFO] Todas as {total} chamadas já possuem transcrição no banco.",
+                            f"[INFO] Todas as {total} chamadas já possuem transcrição no banco de dados (carregadas em lote).",
                             "out", False, None,
                         )
-                    arquivos_para_transcrever = faltantes_transc
-
-                # Carrega metadados e transcrições em lote para os áudios já gravados no banco
-                if transcricoes_no_banco and hasattr(self.ingestor, "carregar_transcricoes_lote"):
-                    nomes_existentes = [c.name for c in copiados if c.name in transcricoes_no_banco]
-                    if nomes_existentes:
-                        try:
-                            dados_existentes = self.ingestor.carregar_transcricoes_lote(nomes_existentes)
-                            if isinstance(dados_existentes, dict):
-                                mapa_diarizacao.update(dados_existentes)
-                                ja_existentes = len(dados_existentes)
-                        except Exception as exc:
-                            self.on_log(f"  [AVISO] Falha ao carregar transcrições em lote do banco: {exc}", "out", True, None)
+                        arquivos_para_transcrever = []
 
                 total_transc = len(arquivos_para_transcrever)
                 if total_transc > 0:
@@ -395,22 +368,13 @@ class PipelineRunner:
                                 caminho.name,
                             )
 
-                        if caminho.name not in transcricoes_no_banco:
-                            self.on_progress(
-                                i - 1,
-                                total_transc,
-                                "transcribing",
-                                f"[INFO] [{i}/{total_transc}] Transcrevendo {rotulo} via Faster-Whisper local (small)...",
-                                caminho.name,
-                            )
-                        else:
-                            self.on_progress(
-                                i - 1,
-                                total_transc,
-                                "transcribing",
-                                f"[INFO] [{i}/{total_transc}] Carregando transcrição existente de {rotulo} ...",
-                                caminho.name,
-                            )
+                        self.on_progress(
+                            i - 1,
+                            total_transc,
+                            "transcribing",
+                            f"[INFO] [{i}/{total_transc}] Transcrevendo {rotulo} via Faster-Whisper local (small)...",
+                            caminho.name,
+                        )
 
                         res = self.ingestor.transcrever_e_inserir(
                             caminho,
@@ -419,23 +383,7 @@ class PipelineRunner:
                             on_sub_progress=_on_sub_progress,
                         )
 
-                        if res.ja_existente:
-                            ja_existentes += 1
-                            mapa_diarizacao[caminho.name] = {
-                                "texto_diarizado": res.texto_transcricao,
-                                "agente_nome": res.agente_nome,
-                                "numero": res.numero,
-                                "estado_ddd": res.estado_ddd,
-                                "identificacao_cliente": res.identificacao_cliente,
-                            }
-                            self.on_progress(
-                                i,
-                                total_transc,
-                                "transcribing",
-                                f"[AVISO] [{i}/{total_transc}] {rotulo} - Transcrição já registrada no banco (pulado)",
-                                caminho.name,
-                            )
-                        elif res.sucesso:
+                        if res.sucesso:
                             inseridos += 1
                             mapa_diarizacao[caminho.name] = {
                                 "texto_diarizado": res.texto_transcricao,
@@ -451,6 +399,15 @@ class PipelineRunner:
                                 f"[INFO] [{i}/{total_transc}] {rotulo} gravado com sucesso no banco!",
                                 caminho.name,
                             )
+                        elif res.ja_existente:
+                            ja_existentes += 1
+                            mapa_diarizacao[caminho.name] = {
+                                "texto_diarizado": res.texto_transcricao,
+                                "agente_nome": res.agente_nome,
+                                "numero": res.numero,
+                                "estado_ddd": res.estado_ddd,
+                                "identificacao_cliente": res.identificacao_cliente,
+                            }
                 else:
                     self.on_progress(1, 1, "transcribing", None, None)
 
