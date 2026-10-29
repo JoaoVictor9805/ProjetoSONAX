@@ -388,6 +388,84 @@ class TestRunnerModos(unittest.TestCase):
             for emoji in emojis:
                 self.assertNotIn(emoji, r)
 
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.engine.runner.resolver_destino")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.get_database_url")
+    def test_transcricao_sub_progress_marcos(
+        self, mock_env, mock_coletar, mock_inspector_cls, mock_copiar, mock_resolver, mock_deletar
+    ):
+        """Valida que _on_sub_progress emite mensagens apenas nos marcos de 25%, 50% e 75%."""
+        p1 = Path("1001-2026-09-28-10-00-00.wav")
+        mock_coletar.return_value = [p1]
+        mock_copiar.return_value = [p1]
+
+        mock_inspector = MagicMock()
+        mock_inspecao = MagicMock()
+        mock_inspecao.longos = [p1]
+        mock_inspecao.curtos = []
+        mock_inspecao.invalidos = []
+        mock_inspector.classificar_lote.return_value = mock_inspecao
+        mock_inspector.filtrar_qualidade_acustica.return_value = ([p1], [])
+        mock_inspector_cls.return_value = mock_inspector
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+            modo_etapa="transcricao",
+        )
+        runner.ingestor = MagicMock()
+        mock_item = MagicMock()
+        mock_item.sucesso = True
+        mock_item.ja_existente = False
+        mock_item.texto_transcricao = "transcricao ok"
+        mock_item.agente_nome = "Ana"
+        mock_item.numero = "33101010"
+        mock_item.estado_ddd = "41"
+        mock_item.identificacao_cliente = None
+
+        def fake_transcrever(*args, **kwargs):
+            cb = kwargs.get("on_sub_progress")
+            if cb:
+                cb(0.05, "prep")
+                cb(0.15, "init")
+                cb(0.26, "seg1")
+                cb(0.35, "seg2")
+                cb(0.52, "seg3")
+                cb(0.70, "seg4")
+                cb(0.78, "seg5")
+                cb(0.95, "seg6")
+            return mock_item
+
+        runner.ingestor.transcrever_e_inserir.side_effect = fake_transcrever
+        runner.ingestor.verificar_transcricoes_existentes.return_value = set()
+
+        runner.run()
+
+        chamadas_sub = [
+            c for c in self.progress_calls
+            if c[2] == "transcribing" and c[4] == p1.name
+        ]
+        self.assertEqual(len(chamadas_sub), 10)
+
+        msgs_sub = [c[3] for c in chamadas_sub[1:-1]]
+        self.assertEqual(len(msgs_sub), 8)
+
+        msgs_com_conteudo = [m for m in msgs_sub if m is not None]
+        self.assertEqual(len(msgs_com_conteudo), 3)
+        self.assertTrue(any("25% concluído" in m for m in msgs_com_conteudo))
+        self.assertTrue(any("50% concluído" in m for m in msgs_com_conteudo))
+        self.assertTrue(any("75% concluído" in m for m in msgs_com_conteudo))
+
+        msgs_silenciosas = [m for m in msgs_sub if m is None]
+        self.assertEqual(len(msgs_silenciosas), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

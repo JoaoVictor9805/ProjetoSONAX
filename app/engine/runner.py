@@ -356,15 +356,24 @@ class PipelineRunner:
                             break
 
                         rotulo = self._rotular(i)
+                        marcos_atingidos: set[int] = set()
 
                         def _on_sub_progress(sub_frac: float, msg: str = "") -> None:
                             pct = int(sub_frac * 100)
                             done_cum = (i - 1) + (sub_frac * 0.85)
+
+                            # Identifica se atingiu algum novo marco (25%, 50%, 75%)
+                            msg_log = None
+                            for marco in (25, 50, 75):
+                                if pct >= marco and marco not in marcos_atingidos:
+                                    marcos_atingidos.add(marco)
+                                    msg_log = f"[INFO] [{i}/{total_transc}] {rotulo}: {marco}% concluído..."
+
                             self.on_progress(
                                 done_cum,
                                 total_transc,
                                 "transcribing",
-                                f"[INFO] [{i}/{total_transc}] {rotulo}: {pct}% {msg or 'Faster-Whisper processando...'}",
+                                msg_log,
                                 caminho.name,
                             )
 
