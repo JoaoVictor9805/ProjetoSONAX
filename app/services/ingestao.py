@@ -69,6 +69,8 @@ class TranscricaoItemResult:
     estado_ddd: str | None = None
     identificacao_cliente: Any | None = None
     motivo_descarte: str | None = None
+    duracao_segundos: float = 0.0
+    qualidade_resumo: str | None = None
 
 
 class ChamadaIngestor:
@@ -76,6 +78,180 @@ class ChamadaIngestor:
 
     def __init__(self, provedor_ia: ProvedorIA | None = None):
         self.ia = provedor_ia or ProvedorIAReal()
+
+    def _executar_transcricao_com_retries(
+        self,
+        caminho: Path,
+        rotulo_audio: str,
+        cancel: threading.Event | None = None,
+        on_sub_progress: SubProgressCallback | None = None,
+    ) -> dict[str, Any] | None:
+        """Executa a transcrição via provedor de IA com até 3 tentativas."""
+        for tentativa in range(1, 4):
+            try:
+                return self.ia.transcrever(
+                    caminho,
+                    cancel=cancel,
+                    on_progress=on_sub_progress,
+                )
+            except TranscricaoCancelada:
+                raise
+            except Exception:
+                print(f"[AVISO] Falha na transcrição de '{rotulo_audio}' (tentativa {tentativa}/3)")
+                log_dev_exc()
+                if tentativa < 3:
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
+        print(f"[ERRO] Não foi possível transcrever '{rotulo_audio}' após 3 tentativas. Arquivo ignorado.")
+        return None
+
+    def transcrever_sem_banco(
+        self,
+        caminho: Path,
+        rotulo_audio: str,
+        cancel: threading.Event | None = None,
+        on_sub_progress: SubProgressCallback | None = None,
+        duracao_segundos: float = 0.0,
+    ) -> TranscricaoItemResult:
+        """Transcreve qualquer áudio independente do nome/título, sem usar banco de dados."""
+        if cancel is not None and cancel.is_set():
+            raise TranscricaoCancelada()
+
+        res_transcricao = self._executar_transcricao_com_retries(
+            caminho, rotulo_audio, cancel=cancel, on_sub_progress=on_sub_progress
+        )
+        if res_transcricao is None:
+            return TranscricaoItemResult(
+                caminho=caminho,
+                sucesso=False,
+                duracao_segundos=duracao_segundos,
+                motivo_descarte="Falha na transcrição após 3 tentativas.",
+            )
+
+        texto_transcricao = (res_transcricao.get("texto", "") or "").strip()
+        duracao_final = float(res_transcricao.get("duracao_segundos") or duracao_segundos or 0.0)
+
+        qualidade_resumo = ""
+        try:
+            dados_transcricao = analisar_transcricao(texto_transcricao)
+            metricas_transcricao = res_transcricao.get("metricas", {}) if res_transcricao else {}
+            avaliacao = avaliar_qualidade_transcricao({**dados_transcricao, **metricas_transcricao})
+            classif = avaliacao.get("classificacao", "")
+            pontos = avaliacao.get("pontuacao", 0)
+            qualidade_resumo = f"{classif} ({pontos}/100)" if classif else ""
+            if classif == "Péssimo":
+                print(
+                    f"  [AVISO] Qualidade da transcrição de {rotulo_audio} baixa "
+                    f"({pontos}/100 - {avaliacao.get('motivo', '')}) — mantendo no modo teste"
+                )
+        except Exception:
+            log_dev_exc()
+
+        return TranscricaoItemResult(
+            caminho=caminho,
+            sucesso=True,
+            texto_transcricao=texto_transcricao,
+            duracao_segundos=duracao_final,
+            qualidade_resumo=qualidade_resumo,
+        )
+
+    def _executar_revisao_com_retries(
+        self,
+        texto_diarizado: str,
+        nome_exibicao: str,
+        *,
+        texto_google: str | None = None,
+        agente_nome: str | None = None,
+    ) -> tuple[str, str, str | None, bool]:
+        """Executa revisão e diarização via IA com até 3 tentativas e fallback gracioso."""
+        from app.services.revisao import MODELO_REVISAO
+        from app.services.gemini_pool import openrouter_em_cooldown
+
+        mod_rev_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+        print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({mod_rev_log})...")
+
+        resultado_ia = None
+        fallback_bruto = False
+        for tentativa in range(1, 4):
+            try:
+                resultado_ia = self.ia.revisar(
+                    texto_diarizado,
+                    texto_copiado_google=texto_google,
+                    nome_atendente=agente_nome,
+                )
+                if resultado_ia and isinstance(resultado_ia, dict) and resultado_ia.get("revisao"):
+                    rev_candidata = str(resultado_ia.get("revisao", "")).strip()
+                    if rev_candidata and not eh_revisao_texto_bruto(rev_candidata):
+                        break
+            except Exception:
+                print(f"  [ERRO] Falha ao revisar transcrição de {nome_exibicao} (tentativa {tentativa}/3)")
+                log_dev_exc()
+                if tentativa < 3:
+                    tempo_espera = 2 * tentativa
+                    print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) em {tempo_espera}s ...")
+                    time.sleep(tempo_espera)
+        else:
+            fallback_bruto = True
+            print(
+                f"  [AVISO] Não foi possível revisar {nome_exibicao} após 3 tentativas via IA. "
+                "Aplicando degradação graciosa (mantendo transcrição bruta)."
+            )
+            resultado_ia = {
+                "empresa": "Não encontrado",
+                "revisao": f"URA / Transcrição Bruta (Revisão indisponível):\n{texto_diarizado}",
+                "fonte_dados": "Não identificado",
+            }
+
+        if isinstance(resultado_ia, dict):
+            revisao_texto = resultado_ia.get("revisao", "")
+            empresa_nome = resultado_ia.get("empresa", "Não encontrado")
+            fonte_dados = resultado_ia.get("fonte_dados")
+        else:
+            revisao_texto = str(resultado_ia)
+            empresa_nome = "Não encontrado"
+            fonte_dados = None
+
+        return revisao_texto, empresa_nome, fonte_dados, fallback_bruto
+
+    def revisar_sem_banco(
+        self,
+        log_arquivo: str,
+        texto_diarizado: str,
+        rotulo_audio: str | None = None,
+        cancel: threading.Event | None = None,
+    ) -> dict[str, Any] | None:
+        """Diariza e revisa uma transcrição sem consultar ou gravar no banco de dados."""
+        nome_exibicao = rotulo_audio or log_arquivo
+
+        if cancel is not None and cancel.is_set():
+            print(f"  [CANCELADO] Revisão de {nome_exibicao} não iniciada.")
+            return None
+
+        if not texto_diarizado or not texto_diarizado.strip():
+            return {
+                "revisao": "",
+                "empresa": "Não encontrado",
+                "fonte_dados": "Não identificado",
+                "fallback_bruto": False,
+            }
+
+        revisao_texto, empresa_nome, fonte_dados, fallback_bruto = self._executar_revisao_com_retries(
+            texto_diarizado,
+            nome_exibicao,
+            texto_google=None,
+            agente_nome=None,
+        )
+
+        from app.logs import log_dev
+        if fonte_dados:
+            log_dev(f"[{nome_exibicao}] Fonte de dados da empresa: {fonte_dados}")
+        log_dev(f"[{nome_exibicao}] Prévia da revisão ({len(revisao_texto)} caracteres):\n{revisao_texto[:250]}...")
+
+        return {
+            "revisao": revisao_texto,
+            "empresa": empresa_nome,
+            "fonte_dados": fonte_dados,
+            "fallback_bruto": fallback_bruto,
+        }
 
     # ------------------------------------------------------------------------
     # Fase 1: Transcrição e Inserção Inicial

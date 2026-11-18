@@ -101,7 +101,7 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
      * Apenas chamadas infrutíferas sem qualquer perspectiva comercial ou diálogo:
        1. URA eletrônica pura sem atendimento humano, ligação muda, queda instantânea antes de qualquer fala, ou engano.
        2. Chamadas que pararam na recepção/secretária SEM próximo passo (apenas informou indisponibilidade sem retorno, ou recusa imediata e definitiva sem diálogo).
-     * Nesses casos: retorne `ligacao_relevante: "n"`, `nota_final: null`, `nota_criterio: null` em todos os critérios, `codigo_oportunidade: null`, `crm.acao: "Não se aplica"` e `resultado: "Dados insuficientes"`.
+     * Nesses casos: retorne `ligacao_relevante: "n"`, `nota_final: null`, `nota_criterio: null` em todos os critérios, `codigo_oportunidade: null`, `crm.acao: "não se aplica"` e `resultado: "Dados insuficientes"`.
    - **Interlocutor, Cargo e Conversa com Decisor**:
      * **REGRA DO CARGO MAIS ALTO (HIERARQUIA)**: Em chamadas transferidas (ex.: iniciadas na secretária/recepção e depois repassadas para o setor financeiro/fiscal ou diretoria), preencha SEMPRE o nome (`interlocutor`) e o cargo (`cargo`) do **contato mais alto e relevante com quem o SDR dialogou na ligação** (ex.: se falou com a secretária Ana e depois foi transferido para o Diretor Carlos, preencha "Carlos" e "Diretor Financeiro").
      * Preencha `cargo` com a função identificada na chamada (ex.: Sócio, Diretor Financeiro, Controller, Gerente Fiscal, Contador, Analista, Secretária, etc.) ou "Não se aplica".
@@ -114,8 +114,8 @@ Seu trabalho é transformar cada transcrição em informações úteis para o CR
    - **Tudo que for possível gerar e extrair nas ligações relevantes DEVE ser gerado**: Mesmo que a ligação tenha sido breve ou não tenha percorrido todas as etapas (ex.: retenção na recepção com retorno agendado, ou diálogo inicial com decisor), extraia e preencha tudo o que puder ser observado: perfil da empresa (setor, regime, faturamento se citados), sinais de SPIN (situação, atrito, urgência se houver), sinais de BANT (decisor indicado, prazo, necessidade), dados do interlocutor e avanço no CRM.
    - **O que não for possível identificar na chamada, mantenha vazio**:
      * Critérios sem oportunidade na conversa: `nota_criterio: null` com `justificativa_criterio: "Sem oportunidade na conversa"`.
-     * Dados de perfil não abordados: `faturamento_anual: null`, `faturamento_mensal: null`, `periodo_meses: null`, `regime_tributario: null` (ou "Não se aplica"), origens como `"não informado"`.
-     * Dimensões de BANT não abordadas: classificação como `"não informado"`, evidência como `"Não se aplica"`.
+     * Dados de perfil não abordados: `faturamento_anual: null`, `faturamento_mensal: null`, `periodo_meses: null`, `regime_tributario: "não informado"`, `faturamento_declarado_texto: "não informado"`, origens como `"não informado"`, `faturamento_regra: "não informado"`, `detalhes_faturamento: "não se aplica"`.
+     * Dimensões de BANT não abordadas: classificação como `"não informado"`, evidência como `"não se aplica"`.
      * Dimensões de SPIN não investigadas: flag `"n"`, texto `"Não se aplica"`.
    - **Avaliação justa do SDR**:
      * Quando não for possível avaliar TODAS as categorias solicitadas, avalie as que for possível e atribua uma nota geral (`nota_final`) proporcional ao que pôde ser observado.
@@ -164,14 +164,14 @@ Extraia a qualificação do perfil comercial identificando com rigor a confiabil
   * `"industrial"`: empresa pertencente ao segmento industrial (fabricação, manufatura, usinagem, metalúrgica, química, alimentos, etc. - segmento preferencial da campanha).
   * `"outro confirmado"`: empresa pertencente a outro setor econômico confirmado na chamada (ex.: transporte, comércio, serviços, agronegócio), sem descartá-la automaticamente caso cumpra os demais requisitos de regime e faturamento.
   * `"não informado"`: quando o setor da empresa não for mencionado, for ambíguo ou não puder ser identificado com segurança.
-- **Regime Tributário (`regime_tributario`)**: "Lucro Real", "Lucro Presumido", "Simples Nacional", outro regime específico, ou "Não informado".
+- **Regime Tributário (`regime_tributario`)**: "Lucro Real", "Lucro Presumido", "Simples Nacional", outro regime específico, ou "não informado".
 - **Faturamento**:
-  * `faturamento_declarado_texto`: Citação exata do que foi dito sobre faturamento na chamada (ou "Não se aplica").
+  * `faturamento_declarado_texto`: Citação exata do que foi dito sobre faturamento na chamada (ou "não informado").
   * `faturamento_anual`: Valor numérico float em reais correspondente ao faturamento anual, ou `null` se não informado.
   * `periodo_meses`: Número de meses ao qual o faturamento anual se refere (ex.: 12 para 1 ano completo), ou `null`.
   * `faturamento_mensal`: Valor numérico float mensal em reais se citado diretamente ou calculado, ou `null`.
-  * `faturamento_regra`: `"declarado_mensal"`, `"calculado_12_meses"`, `"nao_confirmado"` ou `"nao_informado"`.
-  * `detalhes_faturamento`: Breve justificativa de cálculo ou ambiguidade (ou "Não se aplica").
+  * `faturamento_regra`: `"declarado mensal"`, `"calculado 12 meses"`, `"não confirmado"` ou `"não informado"`.
+  * `detalhes_faturamento`: Breve justificativa de cálculo ou ambiguidade (ou "não se aplica").
 
 #### 4. Status Comercial da Empresa (`resultado`)
 Classifique a qualificação técnica da empresa ESTRITAMENTE em uma das 4 categorias abaixo (NUNCA utilize termos de avanço comercial como "Reunião Agendada" ou "Reunião confirmada" aqui; o agendamento de reunião deve ser registrado exclusivamente nos campos `reuniao_confirmada` e `crm.acao`):
@@ -267,7 +267,7 @@ Registre `interesse_expresso`, `duvidas`, `objecoes`, `resposta_sdr` e `reacao_i
   * `"envio de material solicitado"`: O prospect ou a recepção solicitou envio de apresentação ou material explicativo antes de qualquer tomada de decisão.
   * `"sem próximo passo definido"`: A conversa ocorreu substantivamente com o decisor, mas não houve definição de compromisso, data de retorno agendada ou envio formal acordado.
   * `"sem interesse explícito"`: Recusa clara e expressa do interlocutor em avançar ou ouvir a proposta comercial (ou pediu para não ligar mais).
-  * `"Não se aplica"`: Chamadas sem diálogo substantivo e sem qualquer próximo passo (apenas URA eletrônica, ligação muda, queda, engano ou recepção sem próximo passo).
+  * `"não se aplica"`: Chamadas sem diálogo substantivo e sem qualquer próximo passo (apenas URA eletrônica, ligação muda, queda, engano ou recepção sem próximo passo).
 - `responsavel`: SDR, Executivo do respectivo SDR ou responsável nomeado (ou "Não se aplica").
 - `prazo`: Data e horário combinados ou mencionados na chamada (ex.: 'Amanhã às 14h', 'Sexta-feira às 10h') ou 'Não se aplica'.
 - `prazo_data`: Data e hora estipuladas calculadas no formato ISO 'YYYY-MM-DD HH:MM:SS', ou null.
@@ -317,7 +317,7 @@ Retorne única e exclusivamente um objeto JSON válido contendo exatamente as 8 
     "faturamento_mensal": 2000000.0,
     "periodo_meses": 12,
     "faturamento_origem": "confirmado pelo interlocutor",
-    "faturamento_regra": "calculado_12_meses",
+    "faturamento_regra": "calculado 12 meses",
     "detalhes_faturamento": "Média mensal de R$ 2.000.000,00 calculada a partir de faturamento anual de 12 meses (R$ 24.000.000,00)."
   },
   "analise_spin": {

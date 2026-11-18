@@ -114,7 +114,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
         self.assertEqual(res["avaliacao_ia"]["reuniao_confirmada"], "n")
         self.assertEqual(res["avaliacao_ia"]["data_confirmada"], "n")
-        self.assertEqual(res["crm"]["acao"], "Não se aplica")
+        self.assertEqual(res["crm"]["acao"], "não se aplica")
 
     def test_ligacao_nao_relevante_forca_notas_null_para_power_bi(self):
         # Toda ligação não relevante (ligacao_relevante = 'n') deve ter notas estritamente NULL
@@ -150,7 +150,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         for crit in res["avaliacao_criterio"]:
             self.assertIsNone(crit["nota_criterio"])
             self.assertTrue(crit["justificativa_criterio"].startswith("Não avaliável:"))
-        self.assertEqual(res["crm"]["acao"], "Não se aplica")
+        self.assertEqual(res["crm"]["acao"], "não se aplica")
 
     def test_resumo_crm_limitado_a_80_palavras(self):
         texto_longo = " ".join(["palavra"] * 120)
@@ -210,11 +210,11 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(res["avaliacao_sdr"]["frase_alternativa"], "Não se aplica")
         self.assertEqual(res["analise_spin"]["situacao"], "Não se aplica")
         self.assertEqual(res["analise_spin"]["problema"], "Não se aplica")
-        self.assertEqual(res["analise_bant"]["budget_evidencia"], "Não se aplica")
+        self.assertEqual(res["analise_bant"]["budget_evidencia"], "não se aplica")
         self.assertEqual(res["interlocutor"]["duvidas"], "Não se aplica")
         self.assertEqual(res["interlocutor"]["objecoes"], "Não se aplica")
-        self.assertEqual(res["crm"]["responsavel"], "Não se aplica")
-        self.assertEqual(res["crm"]["prazo"], "Não se aplica")
+        self.assertEqual(res["crm"]["responsavel"], "não se aplica")
+        self.assertEqual(res["crm"]["prazo"], "não se aplica")
 
     def test_normalizacao_setor(self):
         # 1. Industrial e variações fabris/manufatura
@@ -277,8 +277,8 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(normalizar_acao_crm("Pediu para não ligar mais"), "sem interesse explícito")
 
         # 7. Não se aplica
-        self.assertEqual(normalizar_acao_crm("Não se aplica"), "Não se aplica")
-        self.assertEqual(normalizar_acao_crm("qualquer_coisa", eh_nao_avaliavel=True), "Não se aplica")
+        self.assertEqual(normalizar_acao_crm("Não se aplica"), "não se aplica")
+        self.assertEqual(normalizar_acao_crm("qualquer_coisa", eh_nao_avaliavel=True), "não se aplica")
 
     def test_normalizacao_resultado_status_comercial(self):
         # 1. Perfil confirmado e contorno de Reunião Agendada/Confirmada
@@ -358,7 +358,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         perfil = res["analise_perfil"]
         self.assertEqual(perfil["faturamento_mensal"], 2000000.0)
         self.assertEqual(perfil["faturamento_origem"], "confirmado pelo interlocutor")
-        self.assertEqual(perfil["faturamento_regra"], "calculado_12_meses")
+        self.assertEqual(perfil["faturamento_regra"], "calculado 12 meses")
         self.assertIn("calculada deterministicamente", perfil["detalhes_faturamento"])
         # Como Lucro Real foi confirmado e 2M >= 1M calculado, qualifica como Perfil confirmado!
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil confirmado")
@@ -381,7 +381,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res = calcular_e_sanitizar_analise(dados)
         perfil = res["analise_perfil"]
         self.assertIsNone(perfil["faturamento_mensal"])
-        self.assertEqual(perfil["faturamento_regra"], "nao_confirmado")
+        self.assertEqual(perfil["faturamento_regra"], "não confirmado")
         self.assertEqual(perfil["faturamento_origem"], "não informado")
         # Sem faturamento mensal confirmado de 12 meses, não pode ser Perfil confirmado
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
@@ -536,7 +536,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         res = calcular_e_sanitizar_analise(dados)
 
         self.assertIsNone(res["avaliacao_sdr"]["nota_final"])
-        self.assertEqual(res["crm"]["acao"], "Não se aplica")
+        self.assertEqual(res["crm"]["acao"], "não se aplica")
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Dados insuficientes")
         self.assertEqual(res["avaliacao_ia"]["ligacao_relevante"], "n")
 
@@ -726,13 +726,13 @@ class TestAnaliseFinalAI(unittest.TestCase):
         bant = res["analise_bant"]
 
         self.assertEqual(bant["budget_classificacao"], "confirmado")
-        self.assertEqual(bant["budget_evidencia"], "Não se aplica")
+        self.assertEqual(bant["budget_evidencia"], "não se aplica")
         self.assertEqual(bant["authority_classificacao"], "indício")
-        self.assertEqual(bant["authority_evidencia"], "Não se aplica")
+        self.assertEqual(bant["authority_evidencia"], "não se aplica")
         self.assertEqual(bant["need_classificacao"], "negado")
         self.assertEqual(bant["need_evidencia"], "Prospect afirmou não ter dores fiscais.")
         self.assertEqual(bant["timeline_classificacao"], "não informado")
-        self.assertEqual(bant["timeline_evidencia"], "Não se aplica")
+        self.assertEqual(bant["timeline_evidencia"], "não se aplica")
 
     def test_faturamento_anual_afirmado_sdr_nao_confirma_perfil(self):
         """Faturamento afirmado apenas pelo SDR calcula mensal mas NÃO qualifica Perfil confirmado."""
@@ -754,7 +754,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         perfil = res["analise_perfil"]
         self.assertEqual(perfil["faturamento_mensal"], 2000000.0)
         self.assertEqual(perfil["faturamento_origem"], "afirmado apenas pelo SDR")
-        self.assertEqual(perfil["faturamento_regra"], "calculado_12_meses")
+        self.assertEqual(perfil["faturamento_regra"], "calculado 12 meses")
         # Não pode virar Perfil confirmado pois o faturamento não foi confirmado pelo lead!
         self.assertEqual(res["avaliacao_ia"]["resultado"], "Perfil pendente")
 
@@ -1301,7 +1301,7 @@ class TestAnaliseFinalAI(unittest.TestCase):
         self.assertEqual(m.prazo, "Amanhã às 14h")
         self.assertEqual(m.prazo_data, "2026-10-10 14:00:00")
 
-        m_vazio = CrmModel(acao="Não se aplica")
+        m_vazio = CrmModel(acao="não se aplica")
         self.assertIsNone(m_vazio.prazo)
         self.assertIsNone(m_vazio.prazo_data)
 

@@ -36,6 +36,7 @@ class ProgressNormalizer:
         "searching": (0.83, 0.02, "coletando dados no Google  •  "),
         "reviewing": (0.83, 0.08, None),     # dinâmico: "revisando {done}/{total}  •  "
         "analyzing": (0.91, 0.07, None),     # dinâmico: "analisando {done}/{total}  •  "
+        "exporting": (0.91, 0.07, "salvando na planilha  •  "),
         "cleanup": (0.98, 0.02, "limpando temporários  •  "),
     }
 

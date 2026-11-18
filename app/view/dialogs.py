@@ -59,4 +59,27 @@ def pick_archive(
     )
 
 
+def pick_audio_file(
+    parent: ctk.CTk,
+    initial: Path | None = None,
+) -> str | None:
+    """Abre o diálogo nativo para seleção de qualquer arquivo de áudio suportado."""
+    if initial is not None:
+        initialdir = str(initial.parent if initial.is_file() else initial)
+    else:
+        initialdir = str(Path.cwd())
+    return filedialog.askopenfilename(
+        parent=parent,
+        initialdir=initialdir,
+        title="Selecione o arquivo de áudio",
+        filetypes=[
+            (
+                "Arquivos de Áudio (*.wav, *.mp3, *.m4a, *.ogg, *.flac, *.aac, *.wma, *.opus, *.webm, *.mp4)",
+                "*.wav *.mp3 *.m4a *.ogg *.flac *.aac *.wma *.opus *.webm *.mp4",
+            ),
+            ("Todos", "*.*"),
+        ],
+    )
+
+
 

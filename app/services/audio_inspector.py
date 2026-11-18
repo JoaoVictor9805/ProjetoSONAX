@@ -49,7 +49,43 @@ class AudioInspector:
     """Módulo profundo para inspeção estrutural e acústica de áudios."""
 
     def inspecionar(self, caminho: Path) -> AudioMetadata | None:
-        """Lê os cabeçalhos RIFF/WAVE e extrai duração em segundos ou None se inválido."""
+        """Lê metadados do arquivo de áudio (WAV via RIFF ou outros formatos via soundfile/PyAV)."""
+        meta_wav = self._inspecionar_wav(caminho)
+        if meta_wav is not None:
+            return meta_wav
+
+        # Fallback para outros formatos de áudio (.mp3, .m4a, .ogg, .flac, etc.)
+        # Somente tenta decodificar se a extensão for de áudio conhecida.
+        from app.services.io import EXTENSOES_AUDIO
+        if caminho.suffix.lower() not in EXTENSOES_AUDIO:
+            return None
+
+        try:
+            import soundfile
+            info = soundfile.info(caminho)
+            if info.duration and info.duration > 0:
+                return AudioMetadata(path=caminho, duracao=float(info.duration))
+        except Exception:
+            pass
+
+        try:
+            import av
+            with av.open(str(caminho)) as container:
+                if container.streams.audio:
+                    duracao_sec = 0.0
+                    if container.duration:
+                        duracao_sec = float(container.duration) / 1_000_000.0
+                    elif container.streams.audio[0].duration and container.streams.audio[0].time_base:
+                        duracao_sec = float(container.streams.audio[0].duration * container.streams.audio[0].time_base)
+                    if duracao_sec > 0:
+                        return AudioMetadata(path=caminho, duracao=duracao_sec)
+        except Exception:
+            pass
+
+        return None
+
+    def _inspecionar_wav(self, caminho: Path) -> AudioMetadata | None:
+        """Lê os cabeçalhos RIFF/WAVE e extrai duração em segundos ou None se não for WAV."""
         try:
             with open(caminho, "rb") as f:
                 riff, _, wave = struct.unpack("<4sI4s", f.read(12))

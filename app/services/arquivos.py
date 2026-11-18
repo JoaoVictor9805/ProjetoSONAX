@@ -134,9 +134,14 @@ def descompactar_arquivo(
         shutil.rmtree(pasta_extracao, ignore_errors=True)
         raise DescompactacaoError(f"Falha ao descompactar '{entrada.name}': {e}") from e
 
-    # Se o arquivo compactado tiver uma única pasta raiz sem .wav no topo, "entra" nela
+    # Se o arquivo compactado tiver uma única pasta raiz sem áudios no topo, "entra" nela
+    from app.services.io import EXTENSOES_AUDIO
     subdirs = [p for p in pasta_extracao.iterdir() if p.is_dir()]
-    if len(subdirs) == 1 and not any(pasta_extracao.glob("*.wav")):
+    tem_audio_topo = any(
+        p.is_file() and p.suffix.lower() in EXTENSOES_AUDIO
+        for p in pasta_extracao.iterdir()
+    )
+    if len(subdirs) == 1 and not tem_audio_topo:
         pasta_trabalho = subdirs[0]
     else:
         pasta_trabalho = pasta_extracao

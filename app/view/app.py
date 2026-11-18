@@ -18,7 +18,6 @@ from pathlib import Path
 
 import customtkinter as ctk
 
-from app.database.config import get_database_url
 from app.engine import (
     EngineEvent,
     ExecutionFinishedEvent,
@@ -26,7 +25,8 @@ from app.engine import (
     PipelineEngine,
     ProgressUpdateEvent,
 )
-from app.view.dialogs import pick_archive, pick_folder
+from app.services.io import EXTENSOES_AUDIO
+from app.view.dialogs import pick_archive, pick_audio_file, pick_folder
 
 # Cor do texto de status por exit_code (consistente com semântica CLI).
 _COR_OK = "#2ecc71"
@@ -34,11 +34,8 @@ _COR_ERRO = "#e74c3c"
 _COR_NEUTRO = "#bdc3c7"
 
 _MODOS_EXECUCAO: list[tuple[str, str]] = [
-    ("Fluxo Completo (Transcrição, Revisão e Análise)", "completo"),
-    ("A partir da Revisão (Revisão e Análise)", "revisao"),
-    ("Apenas Transcrição", "transcricao"),
-    ("Apenas Revisão", "apenas_revisao"),
-    ("Apenas Análise Comercial (SPIN/BANT/SDR)", "analise"),
+    ("Transcrição e Diarização (Planilha)", "completo"),
+    ("Apenas Transcrição (Planilha)", "transcricao"),
 ]
 
 
@@ -51,7 +48,7 @@ class App(ctk.CTk):
         # ----- Configuração da janela -----
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.title("SONAX — Transcrição de Chamadas")
+        self.title("SONAX — Modo Teste (Transcrição e Diarização)")
         self.geometry("720x650")
         self.minsize(460, 360)
 
@@ -81,18 +78,16 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="SONAX - Transcrição de Chamadas",
+            text="SONAX - Modo Teste (Transcrição e Diarização)",
             font=ctk.CTkFont(size=22, weight="bold"),
         ).pack(anchor="w")
 
         instrucoes = (
-            "1.  Clique em Procurar e selecione a pasta descompactada com os arquivos de áudio \n"
-            "    .wav **ou** um arquivo .zip/.rar com a pasta.\n"
-            "2.  Você pode enviar a pasta geral ou especificar conforme seu escopo.\n"
+            "1.  Clique em Procurar e selecione um arquivo de áudio (.wav, .mp3, .m4a, etc.),\n"
+            "    uma pasta com os áudios ou um arquivo .zip/.rar.\n"
+            "2.  Qualquer título de arquivo de áudio é aceito (sem busca por empresa ou avaliação).\n"
             "3.  Quando o botão Enviar ficar disponível, clique nele para iniciar.\n"
-            "4.  Acompanhe o progresso pelo log e pela barra abaixo.\n"
-            "\n"
-            "obs. Não altere o nome dos arquivos ou pastas antes de enviar"
+            "4.  O resultado é salvo na planilha 'transcricoes_modo_teste.xlsx' na raiz do projeto."
         )
 
         ctk.CTkLabel(
@@ -110,7 +105,7 @@ class App(ctk.CTk):
 
         self._entry_path = ctk.CTkEntry(
             row,
-            placeholder_text="Nenhuma pasta, .zip ou .rar selecionado...",
+            placeholder_text="Nenhum áudio, pasta, .zip ou .rar selecionado...",
             state="readonly",
         )
         self._entry_path.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -180,6 +175,10 @@ class App(ctk.CTk):
             bd=1,
             relief="solid",
             font=("Segoe UI", 10),
+        )
+        self._menu_procurar.add_command(
+            label="🎵  Selecionar Arquivo de Áudio...",
+            command=self._on_selecionar_audio,
         )
         self._menu_procurar.add_command(
             label="📁  Selecionar Pasta...",
@@ -259,6 +258,25 @@ class App(ctk.CTk):
         finally:
             self._menu_procurar.grab_release()
 
+    def _on_selecionar_audio(self) -> None:
+        """Abre o seletor nativo de arquivo de áudio e valida o caminho retornado."""
+        escolha = pick_audio_file(self, initial=self._entrada)
+        if not escolha:
+            return
+        path = Path(escolha)
+        if not path.is_file() or path.suffix.lower() not in EXTENSOES_AUDIO:
+            self._set_status(
+                f"Formato de áudio não suportado ({path.suffix}).",
+                cor=_COR_ERRO,
+            )
+            return
+        if path.stat().st_size == 0:
+            self._set_status(f"Arquivo vazio: {path}", cor=_COR_ERRO)
+            return
+        self._entrada = path
+        self._set_entry_path(path)
+        self._habilitar_enviar_se_ok()
+
     def _on_selecionar_pasta(self) -> None:
         """Abre o seletor nativo de pasta e valida o caminho retornado."""
         escolha = pick_folder(self, initial=self._entrada)
@@ -299,15 +317,9 @@ class App(ctk.CTk):
         self._entry_path.configure(state="readonly")
 
     def _habilitar_enviar_se_ok(self) -> None:
-        """Confere o .env e habilita o botão Enviar, ou mostra erro."""
-        try:
-            get_database_url()
-        except KeyError as e:
+        """Habilita o botão Enviar quando há uma entrada válida selecionada."""
+        if self._entrada is None:
             self._btn_enviar.configure(state="disabled")
-            self._set_status(
-                f"Configure o .env antes de processar (faltando: {e}).",
-                cor=_COR_ERRO,
-            )
             return
         self._btn_enviar.configure(state="normal")
         self._set_status("Pronto para enviar.", cor=_COR_NEUTRO)
@@ -458,11 +470,7 @@ class App(ctk.CTk):
             self._option_etapa.configure(state="normal")
 
         if self._entrada is not None:
-            try:
-                get_database_url()
-                self._btn_enviar.configure(state="normal")
-            except KeyError:
-                self._btn_enviar.configure(state="disabled")
+            self._btn_enviar.configure(state="normal")
 
     # ----------------------------------------------------------------
     # Utilitários de Interface

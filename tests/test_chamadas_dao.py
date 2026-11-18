@@ -238,7 +238,7 @@ class TestChamadasDao(unittest.TestCase):
                 "faturamento_mensal": 2000000.0,
                 "faturamento_anual": 24000000.0,
                 "faturamento_origem": "confirmado pelo interlocutor",
-                "faturamento_regra": "calculado_12_meses",
+                "faturamento_regra": "calculado 12 meses",
                 "detalhes_faturamento": "Calculado a partir de 12 meses.",
             },
             "crm": {

@@ -196,7 +196,9 @@ class AnalisePerfilModel(BaseModel):
         default="não informado",
         description="Origem/confiabilidade da informação de setor",
     )
-    regime_tributario: str | None = Field(default=None, description="Regime tributário identificado ou 'Não informado'")
+    regime_tributario: str = Field(
+        default="não informado", description="Regime tributário identificado ou 'não informado'"
+    )
     regime_origem: Literal[
         "confirmado pelo interlocutor",
         "afirmado apenas pelo SDR",
@@ -206,8 +208,8 @@ class AnalisePerfilModel(BaseModel):
         default="não informado",
         description="Origem/confiabilidade da informação de regime tributário",
     )
-    faturamento_declarado_texto: str | None = Field(
-        default=None, description="Citação ou menção bruta de faturamento na chamada"
+    faturamento_declarado_texto: str = Field(
+        default="não informado", description="Citação ou menção bruta de faturamento na chamada ou 'não informado'"
     )
     faturamento_anual: float | None = Field(
         default=None, description="Valor anual numérico em reais se informado, ou null"
@@ -228,16 +230,16 @@ class AnalisePerfilModel(BaseModel):
         description="Origem da informação de faturamento",
     )
     faturamento_regra: Literal[
-        "declarado_mensal",
-        "calculado_12_meses",
-        "nao_confirmado",
-        "nao_informado",
+        "declarado mensal",
+        "calculado 12 meses",
+        "não confirmado",
+        "não informado",
     ] = Field(
-        default="nao_informado",
+        default="não informado",
         description="Regra de determinação do faturamento",
     )
-    detalhes_faturamento: str | None = Field(
-        default=None, description="Justificativa de cálculo ou ambiguidade"
+    detalhes_faturamento: str = Field(
+        default="não se aplica", description="Justificativa de cálculo ou ambiguidade ou 'não se aplica'"
     )
 
 
@@ -373,7 +375,7 @@ ACOES_CRM_VALIDAS = (
     "envio de material solicitado",
     "sem próximo passo definido",
     "sem interesse explícito",
-    "Não se aplica",
+    "não se aplica",
 )
 ACAO_CRM_VALIDAS = ACOES_CRM_VALIDAS
 
@@ -386,13 +388,13 @@ class CrmModel(BaseModel):
         "envio de material solicitado",
         "sem próximo passo definido",
         "sem interesse explícito",
-        "Não se aplica",
+        "não se aplica",
     ] | None = Field(
         default=None,
         description=(
             "Classificação do avanço comercial: 'reunião confirmada', 'reunião proposta sem aceite', "
             "'retorno com data combinado', 'envio de material solicitado', "
-            "'sem próximo passo definido', 'sem interesse explícito' ou 'Não se aplica'"
+            "'sem próximo passo definido', 'sem interesse explícito' ou 'não se aplica'"
         ),
     )
     responsavel: str | None = Field(default=None, description="Responsável pelo próximo passo")
@@ -595,6 +597,89 @@ def normalizar_texto_nao_se_aplica(valor: Any) -> str:
     return val_str
 
 
+def normalizar_texto_nao_informado(valor: Any) -> str:
+    """Normaliza campos de texto de perfil que representam ausência para 'não informado'."""
+    if valor is None:
+        return "não informado"
+    val_str = str(valor).strip()
+    if not val_str:
+        return "não informado"
+    val_norm = val_str.lower().rstrip(".").strip()
+    termos_ausencia = {
+        "não se aplica", "nao se aplica",
+        "não houve", "nao houve",
+        "não informado", "nao informado",
+        "não identificado", "nao identificado",
+        "nenhum", "nenhuma",
+        "não há", "nao ha",
+        "nada", "n/a", "sem retorno",
+        "null", "none",
+        "não ocorreu", "nao ocorreu",
+        "sem informações", "sem informacoes",
+        "não mencionou", "nao mencionou",
+        "não relatado", "nao relatado",
+        "sem dados", "sem dado",
+    }
+    if (
+        val_norm in termos_ausencia
+        or val_norm.startswith("não se aplica")
+        or val_norm.startswith("nao se aplica")
+        or val_norm.startswith("não informado")
+        or val_norm.startswith("nao informado")
+        or val_norm.startswith("não houve")
+        or val_norm.startswith("nao houve")
+    ):
+        return "não informado"
+    return val_str
+
+
+def normalizar_texto_nao_se_aplica_minusculo(valor: Any) -> str:
+    """Normaliza campos de texto para 'não se aplica' em minúsculo quando ausente/vazio."""
+    if valor is None:
+        return "não se aplica"
+    val_str = str(valor).strip()
+    if not val_str:
+        return "não se aplica"
+    val_norm = val_str.lower().rstrip(".").strip()
+    termos_ausencia = {
+        "não se aplica", "nao se aplica",
+        "não houve", "nao houve",
+        "não informado", "nao informado",
+        "não identificado", "nao identificado",
+        "nenhum", "nenhuma",
+        "não há", "nao ha",
+        "nada", "n/a", "sem retorno",
+        "null", "none",
+        "não ocorreu", "nao ocorreu",
+        "sem informações", "sem informacoes",
+        "não mencionou", "nao mencionou",
+        "não relatado", "nao relatado",
+        "sem dados", "sem dado",
+    }
+    if (
+        val_norm in termos_ausencia
+        or val_norm.startswith("não se aplica")
+        or val_norm.startswith("nao se aplica")
+        or val_norm.startswith("não houve")
+        or val_norm.startswith("nao houve")
+    ):
+        return "não se aplica"
+    return val_str
+
+
+def normalizar_detalhes_faturamento(valor: Any) -> str:
+    """Normaliza detalhes_faturamento para 'não se aplica' em minúsculo quando ausente."""
+    if valor is None:
+        return "não se aplica"
+    val_str = str(valor).strip()
+    if not val_str:
+        return "não se aplica"
+    val_norm = val_str.lower().rstrip(".").strip()
+    if val_norm in ("não se aplica", "nao se aplica", "não informado", "nao informado", "none", "null", "não houve"):
+        return "não se aplica"
+    return val_str
+
+
 def normalizar_origem_dado(origem: Any, eh_nao_avaliavel: bool = False) -> str:
     """Normaliza a origem do dado de perfil para uma das 4 categorias padrão."""
     if eh_nao_avaliavel or origem is None:
@@ -722,14 +807,14 @@ def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
     - 'Não se aplica' (chamadas sem diálogo substantivo / não avaliáveis sem próximo passo)
     """
     if acao is None:
-        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
+        return "não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
     val = str(acao).strip()
     if not val:
-        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
+        return "não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
     val_norm = val.lower().rstrip(".").strip()
 
     if val_norm in ("não se aplica", "nao se aplica", "n/a", "none", "null"):
-        return "Não se aplica"
+        return "não se aplica"
 
     # 1. Reunião confirmada
     if any(k in val_norm for k in (
@@ -790,16 +875,16 @@ def normalizar_acao_crm(acao: Any, eh_nao_avaliavel: bool = False) -> str:
         "nova tentativa", "sem compromisso", "sem avanço", "sem avanco",
         "pendente", "a definir",
     )):
-        return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
+        return "não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
 
     # Checagem exata em ACOES_CRM_VALIDAS
     for acao_valida in ACOES_CRM_VALIDAS:
         if val_norm == acao_valida.lower():
             if eh_nao_avaliavel and acao_valida == "sem próximo passo definido":
-                return "Não se aplica"
+                return "não se aplica"
             return acao_valida
 
-    return "Não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
+    return "não se aplica" if eh_nao_avaliavel else "sem próximo passo definido"
 
 
 def normalizar_classificacao_bant(val: Any) -> str:
@@ -1223,7 +1308,7 @@ def calcular_e_sanitizar_analise(
     for k_cls in ("budget_classificacao", "authority_classificacao", "need_classificacao", "timeline_classificacao"):
         bant[k_cls] = normalizar_classificacao_bant(bant.get(k_cls))
     for k in ("budget_evidencia", "authority_evidencia", "need_evidencia", "timeline_evidencia"):
-        bant[k] = normalizar_texto_nao_se_aplica(bant.get(k))
+        bant[k] = normalizar_texto_nao_se_aplica_minusculo(bant.get(k))
 
     # 6. Padronização de campos em interlocutor
     inter = resultado.setdefault("interlocutor", {})
@@ -1234,7 +1319,7 @@ def calcular_e_sanitizar_analise(
     crm = resultado.setdefault("crm", {})
     crm["acao"] = normalizar_acao_crm(crm.get("acao"), eh_nao_avaliavel=eh_nao_avaliavel)
     for k in ("responsavel", "prazo", "dados_extras"):
-        crm[k] = normalizar_texto_nao_se_aplica(crm.get(k))
+        crm[k] = normalizar_texto_nao_se_aplica_minusculo(crm.get(k))
 
     tem_ref = bool(
         data_referencia
@@ -1247,30 +1332,32 @@ def calcular_e_sanitizar_analise(
         palavras = resumo_crm.split()
         if len(palavras) > 80:
             crm["resumo"] = " ".join(palavras[:80]) + "..."
+        elif resumo_crm.lower() in ("não se aplica", "nao se aplica"):
+            crm["resumo"] = "não se aplica"
     else:
-        crm["resumo"] = "Não se aplica"
+        crm["resumo"] = "não se aplica"
 
     # 8. Análise de Perfil e Cálculo Determinístico de Faturamento
     perfil = resultado.setdefault("analise_perfil", {})
     if eh_nao_avaliavel:
         perfil["setor"] = "não informado"
         perfil["setor_origem"] = "não informado"
-        perfil["regime_tributario"] = "Não se aplica"
+        perfil["regime_tributario"] = "não informado"
         perfil["regime_origem"] = "não informado"
-        perfil["faturamento_declarado_texto"] = "Não se aplica"
+        perfil["faturamento_declarado_texto"] = "não informado"
         perfil["faturamento_anual"] = None
         perfil["faturamento_mensal"] = None
         perfil["periodo_meses"] = None
         perfil["faturamento_origem"] = "não informado"
-        perfil["faturamento_regra"] = "nao_informado"
-        perfil["detalhes_faturamento"] = "Não se aplica"
+        perfil["faturamento_regra"] = "não informado"
+        perfil["detalhes_faturamento"] = "não se aplica"
     else:
         perfil["setor"] = normalizar_setor(perfil.get("setor"), eh_nao_avaliavel=False)
         perfil["setor_origem"] = normalizar_origem_dado(perfil.get("setor_origem"), eh_nao_avaliavel=False)
         perfil["regime_origem"] = normalizar_origem_dado(perfil.get("regime_origem"), eh_nao_avaliavel=False)
-        perfil["regime_tributario"] = normalizar_texto_nao_se_aplica(perfil.get("regime_tributario"))
-        perfil["faturamento_declarado_texto"] = normalizar_texto_nao_se_aplica(perfil.get("faturamento_declarado_texto"))
-        perfil["detalhes_faturamento"] = normalizar_texto_nao_se_aplica(perfil.get("detalhes_faturamento"))
+        perfil["regime_tributario"] = normalizar_texto_nao_informado(perfil.get("regime_tributario"))
+        perfil["faturamento_declarado_texto"] = normalizar_texto_nao_informado(perfil.get("faturamento_declarado_texto"))
+        perfil["detalhes_faturamento"] = normalizar_detalhes_faturamento(perfil.get("detalhes_faturamento"))
 
         fat_anual = _converter_para_float(perfil.get("faturamento_anual"))
         fat_mensal = _converter_para_float(perfil.get("faturamento_mensal"))
@@ -1283,25 +1370,25 @@ def calcular_e_sanitizar_analise(
         if fat_anual is not None and fat_anual > 0 and periodo == 12:
             calc_mensal = round(fat_anual / 12.0, 2)
             perfil["faturamento_mensal"] = calc_mensal
-            perfil["faturamento_regra"] = "calculado_12_meses"
+            perfil["faturamento_regra"] = "calculado 12 meses"
             perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem"))
-            if perfil["detalhes_faturamento"] in ("Não se aplica", "", None):
+            if perfil["detalhes_faturamento"] in ("Não se aplica", "não se aplica", "", None):
                 perfil["detalhes_faturamento"] = (
                     f"Média mensal de R$ {calc_mensal:,.2f} calculada deterministicamente a partir de "
                     f"faturamento anual de 12 meses (R$ {fat_anual:,.2f})."
                 )
         elif fat_mensal is not None and fat_mensal > 0 and (periodo is None or periodo == 1):
             perfil["faturamento_mensal"] = fat_mensal
-            perfil["faturamento_regra"] = "declarado_mensal"
+            perfil["faturamento_regra"] = "declarado mensal"
             perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem"))
         elif periodo is not None and periodo != 12 and fat_anual is not None:
             # Período ambíguo ou diferente de 12 meses
             perfil["faturamento_mensal"] = None
-            perfil["faturamento_regra"] = "nao_confirmado"
+            perfil["faturamento_regra"] = "não confirmado"
             perfil["faturamento_origem"] = "não informado"
         else:
             perfil["faturamento_mensal"] = fat_mensal
-            perfil["faturamento_regra"] = "declarado_mensal" if fat_mensal else "nao_informado"
+            perfil["faturamento_regra"] = "declarado mensal" if fat_mensal else "não informado"
             perfil["faturamento_origem"] = normalizar_origem_faturamento(perfil.get("faturamento_origem")) if fat_mensal else "não informado"
 
     # 9. Coerção determinística estrita de status comercial (resultado) e relevância

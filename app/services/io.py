@@ -22,38 +22,58 @@ from app.logs import log_dev_exc
 if TYPE_CHECKING:
     from app.services.audio_inspector import AudioMetadata
 
+EXTENSOES_AUDIO = {
+    ".wav", ".mp3", ".m4a", ".ogg", ".flac",
+    ".aac", ".wma", ".opus", ".webm", ".mp4",
+}
+
 OnCopyProgressCallback = Callable[[int, int, Path], None]
 
 
 def resolver_destino(diretorio: Path) -> Path:
     """Devolve a pasta `audios_maiores_1min` a ser usada como destino.
 
+    Se o `diretorio` for um arquivo, usa a pasta pai dele.
     Se o `diretorio` for ele mesmo uma pasta de ramal (nome numérico,
     ex.: "00011687"), o destino vai no nível acima (junto das outras
     pastas de ramal). Caso contrário, fica dentro do próprio `diretorio`.
     """
+    if diretorio.is_file():
+        return diretorio.parent / "audios_maiores_1min"
     if diretorio.name.isdigit():
         return diretorio.parent / "audios_maiores_1min"
     return diretorio / "audios_maiores_1min"
 
 
-def coletar_wavs(diretorio: Path) -> list[Path]:
-    """Varre `diretorio` recursivamente e devolve os .wav ordenados,
-    ignorando qualquer pasta temporária 'audios_maiores_1min*' e
-    deduplicando arquivos com o mesmo nome.
+def coletar_audios(entrada: Path) -> list[Path]:
+    """Coleta arquivos de áudio suportados a partir de um arquivo único ou diretório.
+
+    Ignora pastas temporárias (`audios_maiores_1min*` / `sonax_teste_*`) e
+    deduplica arquivos com o mesmo nome.
     """
-    vistos = set()
-    wavs: list[Path] = []
-    for p in sorted(diretorio.glob("**/*")):
+    if entrada.is_file():
+        return [entrada] if entrada.suffix.lower() in EXTENSOES_AUDIO else []
+
+    vistos: set[str] = set()
+    audios: list[Path] = []
+    for p in sorted(entrada.glob("**/*")):
         if (
             p.is_file()
-            and p.suffix.lower() == ".wav"
-            and not any(part.startswith("audios_maiores_1min") for part in p.parts)
+            and p.suffix.lower() in EXTENSOES_AUDIO
+            and not any(
+                part.startswith("audios_maiores_1min") or part.startswith("sonax_teste_")
+                for part in p.parts
+            )
         ):
             if p.name not in vistos:
                 vistos.add(p.name)
-                wavs.append(p)
-    return wavs
+                audios.append(p)
+    return audios
+
+
+def coletar_wavs(diretorio: Path) -> list[Path]:
+    """Alias retrocompatível para coleta de arquivos de áudio suportados."""
+    return coletar_audios(diretorio)
 
 
 def copiar_lote_trabalho(
