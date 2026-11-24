@@ -8,16 +8,20 @@ from unittest.mock import MagicMock, patch
 
 from app.services.gemini_pool import (
     DURACAO_BLOQUEIO_SEGUNDOS,
+    MODELOS_GEMINI_PADRAO,
     OPENROUTER_STATUS_KEY,
+    calcular_proximo_reset_gemini,
     eh_erro_cota_gemini,
     eh_erro_credito_openrouter,
     executar_analise_com_pool,
     executar_revisao_com_pool,
     listar_chaves_gemini_configuradas,
+    listar_modelos_gemini,
     marcar_cota_esgotada,
     marcar_openrouter_esgotado,
     mascarar_chave,
     obter_chaves_gemini_disponiveis,
+    obter_modelo_gemini_ativo,
     openrouter_em_cooldown,
 )
 
@@ -161,11 +165,12 @@ class TestGeminiPool(unittest.TestCase):
             )
 
             self.assertIn("Empresa Teste", resultado)
-            # A chave 1 deve ter sido marcada como esgotada
+            # A chave 1 deve ter sido marcada como esgotada para o modelo atual
             mock_marcar.assert_called_once_with(
                 "GEMINI_API_KEY",
                 "key-primary-123456",
                 cl1.invoke.side_effect,
+                modelo="gemini-3.1-flash-lite",
             )
             self.assertEqual(cl2.invoke.call_count, 1)
 
@@ -259,6 +264,199 @@ class TestGeminiPool(unittest.TestCase):
         # Como já passaram 25h, cooldown deve retornar False e limpar o registro
         self.assertFalse(openrouter_em_cooldown())
         self.assertNotIn(OPENROUTER_STATUS_KEY, status_simulado)
+
+    def test_listar_modelos_gemini_preserva_primario_e_ordem_padrao(self):
+        self.assertEqual(
+            MODELOS_GEMINI_PADRAO,
+            (
+                "gemini-3.1-flash-lite",
+                "gemini-3.5-flash-lite",
+                "gemini-3.6-flash",
+                "gemini-3.8-flash",
+                "gemini-4-hydrogen",
+            ),
+        )
+        modelos = listar_modelos_gemini("gemini-3.1-flash-lite")
+        self.assertEqual(modelos[0], "gemini-3.1-flash-lite")
+        self.assertEqual(modelos, list(MODELOS_GEMINI_PADRAO))
+
+        modelos_custom = listar_modelos_gemini("gemini-3.6-flash")
+        self.assertEqual(modelos_custom[0], "gemini-3.6-flash")
+        self.assertEqual(len(modelos_custom), len(set(modelos_custom)))
+        self.assertIn("gemini-3.1-flash-lite", modelos_custom)
+
+        with patch.dict(os.environ, {"GEMINI_MODELS_FALLBACK": "gemini-custom-x, gemini-3.5-flash-lite"}):
+            modelos_env = listar_modelos_gemini("gemini-3.1-flash-lite")
+            self.assertEqual(modelos_env[0], "gemini-3.1-flash-lite")
+            self.assertEqual(modelos_env[1], "gemini-custom-x")
+            self.assertEqual(modelos_env.count("gemini-3.5-flash-lite"), 1)
+
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_esgotamento_um_modelo_nao_bloqueia_demais_na_mesma_chave(self, mock_carregar, mock_salvar):
+        status_simulado = {}
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        marcar_cota_esgotada(
+            "GEMINI_API_KEY",
+            "key-primary-123456",
+            "429 RESOURCE_EXHAUSTED",
+            modelo="gemini-3.1-flash-lite",
+        )
+        self.assertIn("key-primary-123456::gemini-3.1-flash-lite", status_simulado)
+
+        disp_31 = obter_chaves_gemini_disponiveis(modelo="gemini-3.1-flash-lite")
+        self.assertNotIn(("GEMINI_API_KEY", "key-primary-123456"), disp_31)
+        self.assertEqual(len(disp_31), 2)
+
+        disp_35 = obter_chaves_gemini_disponiveis(modelo="gemini-3.5-flash-lite")
+        self.assertIn(("GEMINI_API_KEY", "key-primary-123456"), disp_35)
+        self.assertEqual(len(disp_35), 3)
+
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_obter_modelo_gemini_ativo_retorna_proximo_livre(self, mock_carregar, mock_salvar):
+        status_simulado = {}
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        self.assertEqual(obter_modelo_gemini_ativo("gemini-3.1-flash-lite"), "gemini-3.1-flash-lite")
+
+        for var_name, api_key in listar_chaves_gemini_configuradas():
+            marcar_cota_esgotada(var_name, api_key, "429", modelo="gemini-3.1-flash-lite")
+
+        self.assertEqual(obter_modelo_gemini_ativo("gemini-3.1-flash-lite"), "gemini-3.5-flash-lite")
+
+    @patch("app.services.gemini_pool.obter_cliente_gemini")
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_executar_revisao_rotaciona_para_proximo_modelo_apos_esgotar_chaves(
+        self, mock_carregar, mock_salvar, mock_obter_cliente
+    ):
+        status_simulado = {}
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        mock_prompt = MagicMock()
+        mock_prompt.format_messages.return_value = ["msg"]
+
+        chamadas: list[tuple[str, str]] = []
+
+        def obter_cliente_impl(modelo, api_key):
+            chamadas.append((modelo, api_key))
+            cl = MagicMock()
+            if modelo == "gemini-3.1-flash-lite":
+                cl.invoke.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED")
+            else:
+                resp = MagicMock()
+                resp.content = '{"Empresa": "Acme", "Revisao": "Agente: Bom dia"}'
+                cl.invoke.return_value = resp
+            return cl
+
+        mock_obter_cliente.side_effect = obter_cliente_impl
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "key-1",
+                "GEMINI_API_KEY_FALLBACK": "key-2",
+                "GEMINI_API_KEY_FALLBACK_2": "",
+            },
+        ):
+            resultado = executar_revisao_com_pool(
+                mock_prompt,
+                {"ligacao": "texto"},
+                "gemini-3.1-flash-lite",
+                lambda txt: ("Acme", "Agente: Bom dia"),
+                modelos_fallback=["gemini-3.5-flash-lite"],
+            )
+
+        self.assertIn("Acme", resultado)
+        self.assertEqual(
+            chamadas,
+            [
+                ("gemini-3.1-flash-lite", "key-1"),
+                ("gemini-3.1-flash-lite", "key-2"),
+                ("gemini-3.5-flash-lite", "key-1"),
+            ],
+        )
+
+    @patch("app.services.gemini_pool.obter_cliente_gemini")
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_executar_analise_rotaciona_para_proximo_modelo_apos_esgotar_chaves(
+        self, mock_carregar, mock_salvar, mock_obter_cliente
+    ):
+        status_simulado = {}
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        mock_prompt = MagicMock()
+        mock_prompt.__or__.side_effect = lambda x: x
+
+        chamadas: list[tuple[str, str]] = []
+
+        def obter_cliente_impl(modelo, api_key):
+            chamadas.append((modelo, api_key))
+            cl = MagicMock()
+            chain = MagicMock()
+            if modelo == "gemini-3.1-flash-lite":
+                chain.invoke.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED")
+            else:
+                chain.invoke.return_value = {"avaliacao_ia": {"resultado": "Perfil pendente"}}
+            cl.with_structured_output.return_value = chain
+            return cl
+
+        mock_obter_cliente.side_effect = obter_cliente_impl
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "key-1",
+                "GEMINI_API_KEY_FALLBACK": "key-2",
+                "GEMINI_API_KEY_FALLBACK_2": "",
+            },
+        ):
+            resultado = executar_analise_com_pool(
+                mock_prompt,
+                {"ligacao": "texto"},
+                "gemini-3.1-flash-lite",
+                MagicMock,
+                modelos_fallback=["gemini-3.5-flash-lite"],
+            )
+
+        self.assertEqual(resultado["avaliacao_ia"]["resultado"], "Perfil pendente")
+        self.assertEqual(
+            chamadas,
+            [
+                ("gemini-3.1-flash-lite", "key-1"),
+                ("gemini-3.1-flash-lite", "key-2"),
+                ("gemini-3.5-flash-lite", "key-1"),
+            ],
+        )
+
+    def test_calcular_proximo_reset_gemini_retorna_futuro(self):
+        agora = datetime.now()
+        reset = calcular_proximo_reset_gemini(agora)
+        self.assertGreater(reset, agora)
+        self.assertLessEqual((reset - agora).total_seconds(), 25 * 3600)
 
 
 if __name__ == "__main__":

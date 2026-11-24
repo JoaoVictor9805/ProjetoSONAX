@@ -614,10 +614,14 @@ class PipelineRunner:
 
                 # 4.5) Diarização e revisão com IA (ChamadaIngestor)
                 total_copiados = len(copiados)
-                from app.services.revisao import MODELO_REVISAO
-                from app.services.gemini_pool import openrouter_em_cooldown
+                from app.services.revisao import MODELO_REVISAO, MODELO_REVISAO_FALLBACK_2
+                from app.services.gemini_pool import obter_modelo_gemini_ativo, openrouter_em_cooldown
 
-                mod_rev_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+                mod_rev_log = (
+                    obter_modelo_gemini_ativo(MODELO_REVISAO_FALLBACK_2)
+                    if openrouter_em_cooldown()
+                    else MODELO_REVISAO
+                )
                 if not arquivos_pendentes:
                     self.on_log(
                         f"[INFO] Todas as {total_copiados} chamada(s) já possuem revisão válida no banco. Etapa de revisão com IA pulada.",
@@ -645,7 +649,11 @@ class PipelineRunner:
                             )
                             continue
 
-                        mod_rev_cur = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+                        mod_rev_cur = (
+                            obter_modelo_gemini_ativo(MODELO_REVISAO_FALLBACK_2)
+                            if openrouter_em_cooldown()
+                            else MODELO_REVISAO
+                        )
                         msg = f"[INFO] [{idx}/{total_copiados}] Diarizando e revisando ({mod_rev_cur}): {rotulo_audio} ..."
                         self.on_progress(idx - 1, total_copiados, "reviewing", msg, caminho.name)
 
@@ -699,10 +707,14 @@ class PipelineRunner:
                         "out", False, None,
                     )
                 else:
-                    from app.services.analise_final_AI import MODELO_ANALISE
-                    from app.services.gemini_pool import openrouter_em_cooldown
+                    from app.services.analise_final_AI import MODELO_ANALISE, MODELO_ANALISE_FALLBACK_2
+                    from app.services.gemini_pool import obter_modelo_gemini_ativo, openrouter_em_cooldown
 
-                    mod_ana_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_ANALISE
+                    mod_ana_log = (
+                        obter_modelo_gemini_ativo(MODELO_ANALISE_FALLBACK_2)
+                        if openrouter_em_cooldown()
+                        else MODELO_ANALISE
+                    )
                     self.on_log(
                         f"[INFO] Iniciando avaliação de critérios comerciais ({mod_ana_log}) de {total_copiados} chamada(s) ...",
                         "out", False, None,

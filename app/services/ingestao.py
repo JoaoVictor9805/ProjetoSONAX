@@ -43,6 +43,7 @@ from app.database.chamadas_dao import (
     verificar_coluna_revisao,
     verificar_tabela_analise,
 )
+from app.services.fallback_bd import salvar_fallback_bd
 from app.services.ia import ProvedorIA, ProvedorIAReal
 from app.services.parses import parse_nome_arquivo
 from app.services.qualidade_transcricao import (
@@ -219,6 +220,7 @@ class ChamadaIngestor:
 
         # 5. INSERT no banco
         id_reg = None
+        ultimo_erro_bd: Exception | None = None
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
@@ -229,15 +231,34 @@ class ChamadaIngestor:
                         transcricao=texto_transcricao,
                     )
                 break
-            except Exception:
+            except Exception as exc:
+                ultimo_erro_bd = exc
                 print(f"  [ERRO] Falha ao salvar '{rotulo_audio}' no banco de dados (tentativa {tentativa}/3)")
                 log_dev_exc()
                 if tentativa < 3:
                     print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
         else:
             print(f"  [ERRO] Não foi possível inserir '{rotulo_audio}' após 3 tentativas.")
+            try:
+                caminho_csv, _ = salvar_fallback_bd(
+                    log=caminho.name,
+                    protocolo=protocolo,
+                    transcricao=texto_transcricao,
+                    etapa_falha="transcricao",
+                    erro=ultimo_erro_bd,
+                )
+                print(f"  [AVISO] Dados de transcrição de '{rotulo_audio}' salvos em fallback local ({caminho_csv.name}).")
+            except Exception:
+                log_dev_exc()
             return TranscricaoItemResult(
-                caminho=caminho, sucesso=False, motivo_descarte="Falha ao inserir no banco após 3 tentativas."
+                caminho=caminho,
+                sucesso=False,
+                texto_transcricao=texto_transcricao,
+                agente_nome=nome_atendente,
+                numero=numero,
+                estado_ddd=estado_ddd,
+                identificacao_cliente=identificacao_cliente,
+                motivo_descarte="Falha ao inserir no banco após 3 tentativas.",
             )
 
         if id_reg is None:
@@ -357,9 +378,13 @@ class ChamadaIngestor:
         if not texto_diarizado or not texto_diarizado.strip():
             return None
 
-        from app.services.revisao import MODELO_REVISAO
-        from app.services.gemini_pool import openrouter_em_cooldown
-        mod_rev_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_REVISAO
+        from app.services.revisao import MODELO_REVISAO, MODELO_REVISAO_FALLBACK_2
+        from app.services.gemini_pool import obter_modelo_gemini_ativo, openrouter_em_cooldown
+        mod_rev_log = (
+            obter_modelo_gemini_ativo(MODELO_REVISAO_FALLBACK_2)
+            if openrouter_em_cooldown()
+            else MODELO_REVISAO
+        )
         if not rotulo_audio:
             print(f"  [INFO] Diarizando e revisando {nome_exibicao} ({mod_rev_log})...")
 
@@ -406,6 +431,12 @@ class ChamadaIngestor:
 
         resultado = None
         id_empresa = None
+        ultimo_erro_bd_rev: Exception | None = None
+        tel_empresa_fallback: str | None = (
+            str(int(identificacao_cliente)).strip() if isinstance(identificacao_cliente, (int, float))
+            else str(identificacao_cliente).strip() if identificacao_cliente is not None
+            else telefone
+        )
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
@@ -419,6 +450,7 @@ class ChamadaIngestor:
                         else str(id_cli).strip() if id_cli is not None
                         else telefone
                     )
+                    tel_empresa_fallback = tel_empresa
 
                     try:
                         with cur.connection.transaction():
@@ -441,13 +473,37 @@ class ChamadaIngestor:
                         log_dev(f"[{nome_exibicao}] Fonte de dados da empresa: {fonte_dados}")
                     log_dev(f"[{nome_exibicao}] Prévia da revisão ({len(revisao_texto)} caracteres):\n{revisao_texto[:250]}...")
                 break
-            except Exception:
+            except Exception as exc:
+                ultimo_erro_bd_rev = exc
                 print(f"  [ERRO] Falha ao salvar a revisão '{nome_exibicao}' no banco de dados (tentativa {tentativa}/3)")
                 log_dev_exc()
                 if tentativa < 3:
                     print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
         else:
             print(f"  [ERRO] Não foi possível salvar a revisão '{nome_exibicao}' após 3 tentativas.")
+            protocolo_rev: int | None = None
+            try:
+                call_id_rev = parse_nome_arquivo(Path(log_arquivo)).get("call_id")
+                if call_id_rev and str(call_id_rev).isdigit():
+                    protocolo_rev = int(call_id_rev)
+            except Exception:
+                protocolo_rev = None
+            try:
+                caminho_csv, _ = salvar_fallback_bd(
+                    log=log_arquivo,
+                    protocolo=protocolo_rev,
+                    transcricao=texto_diarizado,
+                    revisao=revisao_texto,
+                    id_empresa=id_empresa,
+                    empresa_nome=empresa_nome,
+                    empresa_telefone=tel_empresa_fallback,
+                    empresa_fonte_dados=fonte_dados,
+                    etapa_falha="revisao",
+                    erro=ultimo_erro_bd_rev,
+                )
+                print(f"  [AVISO] Dados de revisão de '{nome_exibicao}' salvos em fallback local ({caminho_csv.name}).")
+            except Exception:
+                log_dev_exc()
             return None
 
         return {
@@ -479,6 +535,7 @@ class ChamadaIngestor:
         id_empresa = None
         empresa_nome = None
         agente_nome = None
+        transcricao_atual: str | None = None
 
         try:
             with conectar() as cur:
@@ -497,13 +554,15 @@ class ChamadaIngestor:
 
                 # Obter metadados da ligação
                 cur.execute(
-                    "SELECT protocolo, id_empresa FROM registro_chamadas WHERE log = %s LIMIT 1;",
+                    "SELECT protocolo, id_empresa, transcricao FROM registro_chamadas WHERE log = %s LIMIT 1;",
                     (log_arquivo,),
                 )
                 row_reg = cur.fetchone()
                 if row_reg:
                     protocolo = row_reg[0]
                     id_empresa = row_reg[1]
+                    if isinstance(row_reg, (tuple, list)) and len(row_reg) > 2 and isinstance(row_reg[2], str):
+                        transcricao_atual = row_reg[2]
 
                 if id_empresa:
                     cur.execute(
@@ -537,9 +596,13 @@ class ChamadaIngestor:
             dia_extenso = dias_semana[dt_chamada_ref.weekday()]
             data_referencia_str = f"{dt_chamada_ref.strftime('%Y-%m-%d %H:%M:%S')} ({dia_extenso})"
 
-        from app.services.analise_final_AI import MODELO_ANALISE
-        from app.services.gemini_pool import openrouter_em_cooldown
-        mod_ana_log = "gemini-3.1-flash-lite" if openrouter_em_cooldown() else MODELO_ANALISE
+        from app.services.analise_final_AI import MODELO_ANALISE, MODELO_ANALISE_FALLBACK_2
+        from app.services.gemini_pool import obter_modelo_gemini_ativo, openrouter_em_cooldown
+        mod_ana_log = (
+            obter_modelo_gemini_ativo(MODELO_ANALISE_FALLBACK_2)
+            if openrouter_em_cooldown()
+            else MODELO_ANALISE
+        )
         print(f"  [INFO] Analisando qualidade comercial de {nome_exibicao} ({mod_ana_log}) (SPIN/BANT/SDR)...")
         analise_ia = None
         for tentativa in range(1, 4):
@@ -565,6 +628,7 @@ class ChamadaIngestor:
             return None
 
         id_avaliacao = None
+        ultimo_erro_bd_ana: Exception | None = None
         for tentativa in range(1, 4):
             try:
                 with conectar() as cur:
@@ -647,13 +711,29 @@ class ChamadaIngestor:
                     else:
                         print(f"  [INFO] Análise de {nome_exibicao} inserida com sucesso no banco")
                 break
-            except Exception:
+            except Exception as exc:
+                ultimo_erro_bd_ana = exc
                 print(f"  [ERRO] Falha ao salvar a análise '{nome_exibicao}' no banco de dados (tentativa {tentativa}/3)")
                 log_dev_exc()
                 if tentativa < 3:
                     print(f"  [INFO] Tentando novamente ({tentativa + 1}/3) ...")
         else:
             print(f"  [ERRO] Não foi possível salvar a análise '{nome_exibicao}' após 3 tentativas.")
+            try:
+                caminho_csv, _ = salvar_fallback_bd(
+                    log=log_arquivo,
+                    protocolo=protocolo if isinstance(protocolo, int) else None,
+                    transcricao=transcricao_atual,
+                    revisao=revisao,
+                    id_empresa=id_empresa if isinstance(id_empresa, int) else None,
+                    empresa_nome=empresa_nome if isinstance(empresa_nome, str) else None,
+                    analise_json=analise_ia,
+                    etapa_falha="analise",
+                    erro=ultimo_erro_bd_ana,
+                )
+                print(f"  [AVISO] Dados da análise de '{nome_exibicao}' salvos em fallback local ({caminho_csv.name}).")
+            except Exception:
+                log_dev_exc()
             return None
 
         return id_avaliacao

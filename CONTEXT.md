@@ -21,8 +21,8 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Triangulação de Dados**: Comparação contextual no prompt de IA entre os dados coletados pelo robô Google e a transcrição da chamada para identificar a entidade comercial correta.
 - **Fonte de Dados da Empresa (`fonte_dados`)**: Campo cadastral em `empresa` que identifica as fontes humanas na ligação que forneceram as informações (`Interlocutor`, `Agente` ou `Interlocutor / Agente`), garantindo rastreabilidade fidedigna sem persistir texto web raspado no cadastro de empresas.
 - **Resolução de Entidades por Telefone**: Ancoragem primária do cadastro da `empresa` no número de telefone para evitar duplicatas geradas por variações de grafia ou nomes fantasia informados na fala.
-- **Revisão e Diarização Textual**: Etapa conduzida primariamente por LLM `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` (OpenRouter) e em seguida `gemini-3.1-flash-lite` (direto via Google API sem OpenRouter), com degradação graciosa final para a transcrição bruta do Whisper em caso de falha total.
-- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida primariamente por `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` e `gemini-3.1-flash-lite` (direto via Google API) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
+- **Revisão e Diarização Textual**: Etapa conduzida primariamente por LLM `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` (OpenRouter) e em seguida pool direto do Google Gemini com rotação de chaves por projeto e cascata automática de modelos por cota diária (`gemini-3.1-flash-lite` -> `gemini-3.5-flash-lite` -> `gemini-3.6-flash` -> `gemini-3.8-flash` -> `gemini-4-hydrogen`, reset diário à meia-noite PT), com degradação graciosa final para a transcrição bruta do Whisper em caso de falha total.
+- **Análise Comercial (SPIN / BANT / SDR)**: Avaliação conduzida primariamente por `deepseek/deepseek-v4-flash-0731` (OpenRouter), com contingência em cascata para `deepseek/deepseek-v4.1-flash` e pool direto do Google Gemini com rotação de chaves e cascata de modelos por cota (`gemini-3.1-flash-lite` -> `gemini-3.5-flash-lite` -> `gemini-3.6-flash` -> `gemini-3.8-flash` -> `gemini-4-hydrogen`) com saída estruturada tipada (Pydantic / Structured Output) distribuída em 7 tabelas normalizadas.
 - **Critérios Oficiais (`dim_criterio_avaliacao`)**: Seis dimensões com pontuação máxima total de 100 pontos:
   - `CRIT_ABERTURA` (10 pts)
   - `CRIT_SPIN` (30 pts)
@@ -34,6 +34,7 @@ O pipeline processa arquivos de áudio `.wav` (diretamente ou extraídos de arqu
 - **Chamada Relevante (`ligacao_relevante: 's'`)**: Chamada com diálogo comercial efetivo com decisor/área de interesse OU retenção na recepção com próximo passo comercial concreto (retorno agendado, envio de material, reunião proposta/confirmada). Toda ligação relevante gera obrigatoriamente a avaliação completa do SDR (`avaliacao_sdr`, critérios pontuados proporcionalmente, oportunidade de melhoria e feedback sem prefixo 'Não avaliável').
 - **Chamada Não Avaliável / Não Relevante (`ligacao_relevante: 'n'`)**: Chamadas sem contato útil (URA, queda imediata, número errado, secretária eletrônica ou retenção na recepção sem próximo passo / `crm.acao == "Não se aplica"`). Recebem nota final, notas de critério e código de oportunidade como **NULL** no banco para não distorcer médias ou quebrar tipos inteiros (`Int64`) no Power BI.
 - **Hierarquia e Expiração Temporal de Status Comercial (`data_status_comercial`)**: O status comercial da empresa (`status_comercial`) segue regras anti-regressão de pesos para proteger empresas qualificadas contra rebaixamento por chamadas fracas posteriores. Possui janela de validade de 1 mês (30 dias) ancorada na data de compromisso agendada (`crm.prazo_data`) ou, subsidiariamente, na data da ligação (`chamadas.dt_inicio`). Se recontatada após essa janela (> 30 dias), o status anterior expira e a nova ligação pode redefinir o status vigente da empresa.
+- **Fallback Local de Banco de Dados (`app/services/fallback_bd.py`)**: Quando a persistência no PostgreSQL falha após todas as tentativas em qualquer etapa (`transcrever_e_inserir`, `revisar_transcricao` ou `analisar_chamada`), os dados processados (`log`, `protocolo`, `transcricao`, `revisao`, metadados da `empresa` e JSON estruturado `analise_json`) são gravados e consolidados na raiz do projeto em `fallback_bd_pendentes.csv` (planilha UTF-8 com BOM) e `fallback_bd_pendentes.json`, permitindo reingestão posterior via `reprocessar_fallback_bd()`.
 
 ---
 
@@ -55,11 +56,11 @@ Arquivos WAV / ZIP / RAR
 4. Coleta RPA Google (Triangulação de Dados)
           │ Cache relacional (`cache_rpa_google`) + Pywinauto / Chrome local
           ▼
-5. Revisão & Diarização com IA (DeepSeek 0731 -> V4.1 -> Gemini 3.1)
+5. Revisão & Diarização com IA (DeepSeek 0731 -> V4.1 -> Cascata Gemini)
           │ Identificação de empresa -> Tabela `empresa`
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼
-6. Análise de Qualidade Comercial (DeepSeek 0731 -> V4.1 -> Gemini 3.1)
+6. Análise de Qualidade Comercial (DeepSeek 0731 -> V4.1 -> Cascata Gemini)
           │ Persistência atômica nas 7 tabelas normalizadas:
           │   - avaliacao_ia
           │   - avaliacao_sdr

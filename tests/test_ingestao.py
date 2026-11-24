@@ -360,6 +360,83 @@ class TestChamadaIngestor(unittest.TestCase):
             self.ingestor.salvar_cache_rpa("(41) 3310-1010", "Não encontrado")
             mock_conectar.assert_not_called()
 
+    @patch("app.services.ingestao.salvar_fallback_bd")
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.registro_ja_existe")
+    @patch("app.services.ingestao.analisar_transcricao")
+    @patch("app.services.ingestao.avaliar_qualidade_transcricao")
+    @patch("app.services.ingestao.parse_nome_arquivo")
+    @patch("app.services.ingestao.buscar_chamada_valida")
+    @patch("app.services.ingestao.inserir_registro_chamada")
+    def test_transcrever_salva_fallback_quando_insert_bd_falha(
+        self,
+        mock_inserir,
+        mock_buscar_chamada,
+        mock_parse_nome,
+        mock_avaliar,
+        mock_analisar,
+        mock_ja_existe,
+        mock_conectar,
+        mock_fallback,
+    ):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_ja_existe.return_value = False
+        mock_analisar.return_value = {}
+        mock_avaliar.return_value = {"classificacao": "Bom"}
+        mock_parse_nome.return_value = {"call_id": "21153502152", "ramal": "1001"}
+        mock_buscar_chamada.return_value = {"protocolo": 21153502152, "ramal": "1001", "agente_nome": "Ana"}
+        mock_inserir.side_effect = RuntimeError("BD fora do ar")
+        mock_fallback.return_value = (Path("fallback_bd_pendentes.csv"), Path("fallback_bd_pendentes.json"))
+
+        res = self.ingestor.transcrever_e_inserir(
+            caminho=Path("1001-2026-09-28-10-00-00.wav"),
+            rotulo_audio="Audio 01",
+        )
+
+        self.assertFalse(res.sucesso)
+        self.assertEqual(res.texto_transcricao, self.fake_ia.transcricao_padrao["texto"])
+        mock_fallback.assert_called_once()
+        kwargs = mock_fallback.call_args.kwargs
+        self.assertEqual(kwargs["log"], "1001-2026-09-28-10-00-00.wav")
+        self.assertEqual(kwargs["protocolo"], 21153502152)
+        self.assertEqual(kwargs["etapa_falha"], "transcricao")
+
+    @patch("app.services.ingestao.salvar_fallback_bd")
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.verificar_coluna_revisao")
+    @patch("app.services.ingestao.buscar_revisao")
+    @patch("app.services.ingestao.verificar_tabela_analise")
+    @patch("app.services.ingestao.inserir_analise")
+    def test_analisar_chamada_salva_fallback_quando_insert_bd_falha(
+        self,
+        mock_inserir_analise,
+        mock_verificar_analise,
+        mock_buscar_rev,
+        mock_verificar_rev,
+        mock_conectar,
+        mock_fallback,
+    ):
+        mock_cur = MagicMock()
+        mock_cur.fetchone.side_effect = [(998877, 42, "transcricao bruta"), ("Empresa X",), ("Ana", None)]
+        mock_conectar.return_value.__enter__.return_value = mock_cur
+        mock_verificar_rev.return_value = True
+        mock_buscar_rev.return_value = "Agente (Ana): Bom dia"
+        mock_verificar_analise.return_value = False
+        mock_inserir_analise.side_effect = RuntimeError("Timeout PostgreSQL")
+        mock_fallback.return_value = (Path("fallback_bd_pendentes.csv"), Path("fallback_bd_pendentes.json"))
+
+        res = self.ingestor.analisar_chamada(log_arquivo="audio1.wav", rotulo_audio="Audio 01")
+
+        self.assertIsNone(res)
+        mock_fallback.assert_called_once()
+        kwargs = mock_fallback.call_args.kwargs
+        self.assertEqual(kwargs["log"], "audio1.wav")
+        self.assertEqual(kwargs["protocolo"], 998877)
+        self.assertEqual(kwargs["transcricao"], "transcricao bruta")
+        self.assertEqual(kwargs["revisao"], "Agente (Ana): Bom dia")
+        self.assertEqual(kwargs["etapa_falha"], "analise")
+        self.assertIsInstance(kwargs["analise_json"], dict)
+
 
 if __name__ == "__main__":
     unittest.main()
