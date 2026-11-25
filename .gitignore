@@ -1,6 +1,8 @@
 # Ambiente e credenciais
 .env
 .gemini_quota_status.json
+fallback_bd_pendentes.csv
+fallback_bd_pendentes.json
 .venv/
 venv/
 env/
