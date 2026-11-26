@@ -128,6 +128,63 @@ class TestTranscricaoFasterWhisper(unittest.TestCase):
             self.assertEqual(res["texto"], "teste")
             mock_fw.assert_called_once()
 
+    def test_respeita_whisper_device_e_compute_type_do_env(self):
+        mock_modelo = MagicMock()
+        mock_seg = MagicMock(
+            text="Teste CPU.",
+            avg_logprob=-0.1,
+            compression_ratio=1.0,
+            no_speech_prob=0.0,
+            end=2.0,
+        )
+        mock_modelo.transcribe.return_value = ([mock_seg], MagicMock(duration=2.0))
+
+        with patch.dict(
+            "os.environ",
+            {"WHISPER_MODEL": "small", "WHISPER_DEVICE": "cpu", "WHISPER_COMPUTE_TYPE": "int8"},
+        ):
+            with patch("app.services.transcricao.obter_modelo_whisper", return_value=mock_modelo) as mock_obter:
+                res = transcrever_audio_faster_whisper(self.audio_path)
+
+        self.assertEqual(res["texto"], "Teste CPU.")
+        mock_obter.assert_called_once_with(nome="small", device="cpu", compute_type="int8")
+
+    def test_fallback_automatico_para_cpu_quando_cublas_falha_na_inferencia(self):
+        mock_cuda = MagicMock()
+
+        def gerador_cublas():
+            raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            yield  # pragma: no cover
+
+        mock_cuda.transcribe.return_value = (gerador_cublas(), MagicMock(duration=2.0))
+
+        mock_cpu = MagicMock()
+        mock_seg = MagicMock(
+            text="Fallback CPU ok.",
+            avg_logprob=-0.1,
+            compression_ratio=1.0,
+            no_speech_prob=0.0,
+            end=2.0,
+        )
+        mock_cpu.transcribe.return_value = ([mock_seg], MagicMock(duration=2.0))
+
+        with patch.dict(
+            "os.environ",
+            {"WHISPER_MODEL": "small", "WHISPER_DEVICE": "auto", "WHISPER_COMPUTE_TYPE": "auto"},
+        ):
+            with patch(
+                "app.services.transcricao.obter_modelo_whisper",
+                side_effect=[mock_cuda, mock_cpu],
+            ) as mock_obter:
+                res = transcrever_audio_faster_whisper(self.audio_path)
+
+        self.assertEqual(res["texto"], "Fallback CPU ok.")
+        self.assertEqual(mock_obter.call_count, 2)
+        self.assertEqual(
+            mock_obter.call_args_list[1].kwargs,
+            {"nome": "small", "device": "cpu", "compute_type": "int8"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
