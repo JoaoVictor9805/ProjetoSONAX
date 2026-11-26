@@ -56,22 +56,36 @@ class TranscricaoCancelada(TranscricaoErro):
 calcular_duracao_wav = obter_duracao_wav
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=4)
 def obter_modelo_whisper(
     nome: str = "small",
     device: str = "auto",
     compute_type: str = "auto",
 ) -> Any:
-    """Carrega o modelo Faster-Whisper uma única vez por processo (singleton em cache)."""
+    """Carrega o modelo Faster-Whisper uma única vez por configuração (singleton em cache)."""
     from faster_whisper import WhisperModel
+    device_norm = (device or "auto").strip().lower()
+    compute_norm = (compute_type or "auto").strip().lower()
+    if device_norm == "cpu" and compute_norm == "auto":
+        compute_norm = "int8"
+
     try:
-        return WhisperModel(nome, device=device, compute_type=compute_type)
+        return WhisperModel(nome, device=device_norm, compute_type=compute_norm)
     except Exception:
         # Fallback para execução segura em CPU
         try:
             return WhisperModel(nome, device="cpu", compute_type="int8")
         except Exception:
             return WhisperModel(nome, device="cpu", compute_type="float32")
+
+
+def _eh_erro_biblioteca_cuda(exc: Exception) -> bool:
+    """Identifica erro de DLL/biblioteca CUDA/cuBLAS/cuDNN durante inferência."""
+    msg = str(exc).lower()
+    return any(
+        termo in msg
+        for termo in ("cublas", "cudnn", "libcuda", "cudart", "cufft", "cuda driver", "no cuda")
+    )
 
 
 def transcrever_audio_faster_whisper(
@@ -125,9 +139,17 @@ def transcrever_audio_faster_whisper(
     if on_progress:
         on_progress(0.05, "Preparando modelo Faster-Whisper (small)...")
 
+    modelo_injetado = modelo is not None
+    nome_modelo = os.getenv("WHISPER_MODEL", "small")
+    device_env = (os.getenv("WHISPER_DEVICE") or "auto").strip().lower()
+    compute_env = (os.getenv("WHISPER_COMPUTE_TYPE") or "auto").strip().lower()
+
     if modelo is None:
-        nome_modelo = os.getenv("WHISPER_MODEL", "small")
-        modelo = obter_modelo_whisper(nome=nome_modelo)
+        modelo = obter_modelo_whisper(
+            nome=nome_modelo,
+            device=device_env,
+            compute_type=compute_env,
+        )
 
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado antes da inferência.")
@@ -135,44 +157,66 @@ def transcrever_audio_faster_whisper(
     if on_progress:
         on_progress(0.15, "Transcrevendo áudio via Faster-Whisper local (small)...")
 
+    def _executar_transcricao_modelo(modelo_ativo: Any):
+        try:
+            segments, info = modelo_ativo.transcribe(
+                str(caminho_path),
+                language=language,
+                beam_size=beam_size,
+                vad_filter=vad_filter,
+            )
+        except Exception as exc:
+            raise TranscricaoErro(f"Erro durante inferência do Faster-Whisper: {exc}") from exc
+
+        duracao_info = getattr(info, "duration", 0.0) or duracao_segundos or 0.0
+        partes_loc: list[str] = []
+        logprobs_loc: list[float] = []
+        taxas_loc: list[float] = []
+        sem_falas_loc: list[float] = []
+        ultimo_pct_relatado = -1
+
+        for segment in segments:
+            if cancel is not None and cancel.is_set():
+                raise TranscricaoCancelada("Cancelamento solicitado durante a transcrição.")
+
+            texto_seg = (segment.text or "").strip()
+            if texto_seg:
+                partes_loc.append(texto_seg)
+
+            if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
+                logprobs_loc.append(float(segment.avg_logprob))
+            if hasattr(segment, "compression_ratio") and segment.compression_ratio is not None:
+                taxas_loc.append(float(segment.compression_ratio))
+            if hasattr(segment, "no_speech_prob") and segment.no_speech_prob is not None:
+                sem_falas_loc.append(float(segment.no_speech_prob))
+
+            if on_progress and duracao_info > 0:
+                frac = min(segment.end / duracao_info, 0.95)
+                pct = round(frac * 100)
+                if pct != ultimo_pct_relatado:
+                    ultimo_pct_relatado = pct
+                    on_progress(frac, "Transcrevendo áudio via Faster-Whisper local (small)...")
+
+        return duracao_info, partes_loc, logprobs_loc, taxas_loc, sem_falas_loc
+
     try:
-        segments, info = modelo.transcribe(
-            str(caminho_path),
-            language=language,
-            beam_size=beam_size,
-            vad_filter=vad_filter,
-        )
+        duracao_info, partes, logprobs, taxas_compressao, sem_falas = _executar_transcricao_modelo(modelo)
+    except TranscricaoCancelada:
+        raise
     except Exception as exc:
-        raise TranscricaoErro(f"Erro durante inferência do Faster-Whisper: {exc}") from exc
-
-    duracao_info = getattr(info, "duration", 0.0) or duracao_segundos or 0.0
-    partes: list[str] = []
-    logprobs: list[float] = []
-    taxas_compressao: list[float] = []
-    sem_falas: list[float] = []
-    ultimo_pct_relatado = -1
-
-    for segment in segments:
-        if cancel is not None and cancel.is_set():
-            raise TranscricaoCancelada("Cancelamento solicitado durante a transcrição.")
-
-        texto_seg = (segment.text or "").strip()
-        if texto_seg:
-            partes.append(texto_seg)
-
-        if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
-            logprobs.append(float(segment.avg_logprob))
-        if hasattr(segment, "compression_ratio") and segment.compression_ratio is not None:
-            taxas_compressao.append(float(segment.compression_ratio))
-        if hasattr(segment, "no_speech_prob") and segment.no_speech_prob is not None:
-            sem_falas.append(float(segment.no_speech_prob))
-
-        if on_progress and duracao_info > 0:
-            frac = min(segment.end / duracao_info, 0.95)
-            pct = round(frac * 100)
-            if pct != ultimo_pct_relatado:
-                ultimo_pct_relatado = pct
-                on_progress(frac, "Transcrevendo áudio via Faster-Whisper local (small)...")
+        if not modelo_injetado and device_env != "cpu" and _eh_erro_biblioteca_cuda(exc):
+            print(
+                "  [AVISO] Biblioteca CUDA/cuBLAS indisponível na máquina; "
+                "alternando Faster-Whisper para CPU (int8)..."
+            )
+            modelo_cpu = obter_modelo_whisper(
+                nome=nome_modelo,
+                device="cpu",
+                compute_type="int8",
+            )
+            duracao_info, partes, logprobs, taxas_compressao, sem_falas = _executar_transcricao_modelo(modelo_cpu)
+        else:
+            raise
 
     if cancel is not None and cancel.is_set():
         raise TranscricaoCancelada("Cancelamento solicitado após transcrição.")
