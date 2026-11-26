@@ -696,6 +696,22 @@ class TestChamadasDao(unittest.TestCase):
         self.assertEqual(res_vazio, {})
         cur.execute.assert_not_called()
 
+    def test_buscar_logs_com_analise_em_lotes_grandes(self):
+        from app.database.chamadas_dao import buscar_logs_com_analise
+
+        cur = MagicMock()
+        logs = [f"audio_{i:04d}.wav" for i in range(1200)]
+        cur.fetchall.side_effect = [
+            [(logs[0],)],
+            [(logs[500],)],
+            [(logs[1199],)],
+        ]
+
+        res = buscar_logs_com_analise(cur, logs)
+
+        self.assertEqual(cur.execute.call_count, 3)
+        self.assertEqual(res, {logs[0], logs[500], logs[1199]})
+
 
 if __name__ == "__main__":
     unittest.main()

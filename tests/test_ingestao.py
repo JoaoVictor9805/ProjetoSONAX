@@ -473,6 +473,42 @@ class TestChamadaIngestor(unittest.TestCase):
         self.assertEqual(res, {"audio1.wav": {"texto_diarizado": "Texto"}})
         self.assertEqual(self.ingestor.carregar_transcricoes_lote([]), {})
 
+    @patch("app.services.ingestao.time.sleep")
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.buscar_logs_com_analise")
+    def test_verificar_analises_existentes_faz_retentativa_em_erro_transiente(
+        self, mock_buscar, mock_conectar, mock_sleep
+    ):
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = MagicMock()
+        mock_conectar.side_effect = [RuntimeError("timeout temporário"), mock_ctx]
+        mock_buscar.return_value = {"audio1.wav", "audio2.wav"}
+
+        res = self.ingestor.verificar_analises_existentes(["audio1.wav", "audio2.wav"])
+
+        self.assertEqual(res, {"audio1.wav", "audio2.wav"})
+        self.assertEqual(mock_conectar.call_count, 2)
+        mock_sleep.assert_called_once_with(0.5)
+
+    @patch("app.services.ingestao.time.sleep")
+    @patch("app.services.ingestao.buscar_logs_analise_fallback")
+    @patch("app.services.ingestao.conectar")
+    def test_verificar_analises_existentes_avisa_quando_cai_para_fallback(
+        self, mock_conectar, mock_fallback, mock_sleep
+    ):
+        mock_conectar.side_effect = RuntimeError("BD indisponível")
+        mock_fallback.return_value = {"audio_fb.wav"}
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            res = self.ingestor.verificar_analises_existentes(["audio_fb.wav", "audio2.wav"])
+
+        self.assertEqual(res, {"audio_fb.wav"})
+        self.assertEqual(mock_conectar.call_count, 3)
+        self.assertIn("[AVISO] Falha ao consultar análises comerciais existentes em lote no banco", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -589,6 +589,43 @@ class TestRunnerModos(unittest.TestCase):
         msgs_silenciosas = [m for m in msgs_sub if m is None]
         self.assertEqual(len(msgs_silenciosas), 5)
 
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.engine.runner.resolver_destino")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.get_database_url")
+    def test_modo_analise_nao_espera_cooldown_quando_chamada_pulada(
+        self, mock_env, mock_coletar, mock_inspector_cls, mock_copiar, mock_resolver, mock_deletar
+    ):
+        p1 = Path("audio1.wav")
+        p2 = Path("audio2.wav")
+        mock_coletar.return_value = [p1, p2]
+
+        cancel_mock = MagicMock()
+        cancel_mock.is_set.return_value = False
+        cancel_mock.wait.return_value = False
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=cancel_mock,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+            modo_etapa="analise",
+        )
+        runner.ingestor = MagicMock()
+        runner.ingestor.verificar_transcricoes_existentes.return_value = {p1.name, p2.name}
+        runner.ingestor.verificar_revisoes_existentes.return_value = {p1.name, p2.name}
+        runner.ingestor.verificar_analises_existentes.return_value = set()
+        # p1 retorna None (pulado), p2 retorna id_avaliacao (processado)
+        runner.ingestor.analisar_chamada.side_effect = [None, 42]
+
+        runner.run()
+
+        cancel_mock.wait.assert_called_once_with(1.2)
+
 
 if __name__ == "__main__":
     unittest.main()

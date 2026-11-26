@@ -730,7 +730,7 @@ class PipelineRunner:
                             dados_audio["id_empresa"] = res_rev.get("id_empresa")
                             dados_audio["empresa"] = res_rev.get("empresa")
 
-                        if self.cancel_event.wait(1.2):
+                        if res_rev is not None and self.cancel_event.wait(1.2):
                             break
 
                     if self.cancel_event.is_set():
@@ -768,7 +768,11 @@ class PipelineRunner:
                         try:
                             res_ana = self.ingestor.verificar_analises_existentes(nomes_copiados)
                             analises_existentes = set(res_ana) if isinstance(res_ana, (set, list)) else set()
-                        except Exception:
+                        except Exception as exc:
+                            self.on_log(
+                                f"  [AVISO] Falha ao verificar análises existentes em lote: {exc}",
+                                "out", False, None,
+                            )
                             analises_existentes = set()
 
                     pendentes_analise = [c for c in copiados if c.name not in analises_existentes]
@@ -807,13 +811,13 @@ class PipelineRunner:
                             rotulo_audio = self._rotular(idx)
                             self.on_progress(idx - 1, total_copiados, "analyzing", None, caminho.name)
 
-                            self.ingestor.analisar_chamada(
+                            res_ana_item = self.ingestor.analisar_chamada(
                                 caminho.name,
                                 rotulo_audio=rotulo_audio,
                                 cancel=self.cancel_event,
                                 permitir_texto_bruto=True,
                             )
-                            if self.cancel_event.wait(1.2):
+                            if res_ana_item is not None and self.cancel_event.wait(1.2):
                                 break
 
                     if self.cancel_event.is_set():

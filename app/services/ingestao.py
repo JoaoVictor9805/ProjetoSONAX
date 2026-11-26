@@ -421,57 +421,73 @@ class ChamadaIngestor:
             log_dev_exc()
             return bool(buscar_logs_revisao_fallback([log_arquivo], apenas_validas=True))
 
+    def _consultar_lote_com_fallback(
+        self,
+        rotulo_etapa: str,
+        consulta_bd: Callable[[Any], Any],
+        consulta_fallback: Callable[[], Any],
+        tentativas: int = 3,
+    ) -> Any:
+        """Executa consulta em lote no banco com retentativas e aviso explícito ao usar fallback."""
+        if self.modo_offline:
+            return consulta_fallback()
+
+        ultimo_erro: Exception | None = None
+        for tentativa in range(1, tentativas + 1):
+            try:
+                with conectar() as cur:
+                    return consulta_bd(cur)
+            except Exception as exc:
+                ultimo_erro = exc
+                log_dev_exc()
+                if tentativa < tentativas:
+                    time.sleep(0.5 * tentativa)
+
+        print(
+            f"  [AVISO] Falha ao consultar {rotulo_etapa} em lote no banco ({type(ultimo_erro).__name__}: {ultimo_erro}). "
+            "Usando apenas fallback local nesta verificação."
+        )
+        return consulta_fallback()
+
     def verificar_revisoes_existentes(self, logs: list[str], apenas_validas: bool = True) -> set[str]:
         """Retorna o conjunto de logs que já possuem revisão preenchida no banco (ou fallback local)."""
         if not logs:
             return set()
-        if self.modo_offline:
-            return buscar_logs_revisao_fallback(logs, apenas_validas=apenas_validas)
-        try:
-            with conectar() as cur:
-                return buscar_logs_com_revisao(cur, logs, apenas_validas=apenas_validas)
-        except Exception:
-            log_dev_exc()
-            return buscar_logs_revisao_fallback(logs, apenas_validas=apenas_validas)
+        return self._consultar_lote_com_fallback(
+            "revisões existentes",
+            lambda cur: buscar_logs_com_revisao(cur, logs, apenas_validas=apenas_validas),
+            lambda: buscar_logs_revisao_fallback(logs, apenas_validas=apenas_validas),
+        )
 
     def verificar_transcricoes_existentes(self, logs: list[str]) -> set[str]:
         """Retorna o conjunto de logs que já possuem transcrição salva no banco (ou fallback local)."""
         if not logs:
             return set()
-        if self.modo_offline:
-            return buscar_logs_transcricao_fallback(logs)
-        try:
-            with conectar() as cur:
-                return buscar_logs_com_transcricao(cur, logs)
-        except Exception:
-            log_dev_exc()
-            return buscar_logs_transcricao_fallback(logs)
+        return self._consultar_lote_com_fallback(
+            "transcrições existentes",
+            lambda cur: buscar_logs_com_transcricao(cur, logs),
+            lambda: buscar_logs_transcricao_fallback(logs),
+        )
 
     def carregar_transcricoes_lote(self, logs: list[str]) -> dict[str, dict[str, Any]]:
         """Carrega metadados e transcrições de ligações existentes no banco (ou fallback local) em lote."""
         if not logs:
             return {}
-        if self.modo_offline:
-            return carregar_transcricoes_fallback_lote(logs)
-        try:
-            with conectar() as cur:
-                return carregar_dados_transcricoes_existentes(cur, logs)
-        except Exception:
-            log_dev_exc()
-            return carregar_transcricoes_fallback_lote(logs)
+        return self._consultar_lote_com_fallback(
+            "dados de transcrições",
+            lambda cur: carregar_dados_transcricoes_existentes(cur, logs),
+            lambda: carregar_transcricoes_fallback_lote(logs),
+        )
 
     def verificar_analises_existentes(self, logs: list[str]) -> set[str]:
         """Retorna o conjunto de logs que já possuem avaliação comercial no banco (ou fallback local)."""
         if not logs:
             return set()
-        if self.modo_offline:
-            return buscar_logs_analise_fallback(logs)
-        try:
-            with conectar() as cur:
-                return buscar_logs_com_analise(cur, logs)
-        except Exception:
-            log_dev_exc()
-            return buscar_logs_analise_fallback(logs)
+        return self._consultar_lote_com_fallback(
+            "análises comerciais existentes",
+            lambda cur: buscar_logs_com_analise(cur, logs),
+            lambda: buscar_logs_analise_fallback(logs),
+        )
 
     def obter_cache_rpa(self, telefones: list[str], max_dias: int | None = None) -> dict[str, str]:
         """Recupera textos do Google em cache no banco (ou fallback local se offline)."""

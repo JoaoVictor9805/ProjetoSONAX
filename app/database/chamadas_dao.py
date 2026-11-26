@@ -327,6 +327,14 @@ def buscar_transcricao(
     return resultado[0] if resultado else None
 
 
+_TAMANHO_LOTE_SQL = 500
+
+
+def _dividir_em_lotes(itens: list[str], tamanho: int = _TAMANHO_LOTE_SQL) -> list[list[str]]:
+    """Divide uma lista de logs em fatias seguras para consultas `ANY(%s)`."""
+    return [itens[i : i + tamanho] for i in range(0, len(itens), tamanho)]
+
+
 def buscar_logs_com_transcricao(
     cur: psycopg.Cursor,
     logs: list[str],
@@ -334,16 +342,19 @@ def buscar_logs_com_transcricao(
     """Retorna o conjunto de logs que possuem transcrição preenchida no banco."""
     if not logs:
         return set()
-    cur.execute(
-        """
-        SELECT log FROM registro_chamadas 
-        WHERE log = ANY(%s) 
-          AND transcricao IS NOT NULL 
-          AND TRIM(transcricao) != ''
-        """,
-        (logs,),
-    )
-    return {row[0] for row in cur.fetchall()}
+    encontrados: set[str] = set()
+    for lote in _dividir_em_lotes(list(logs)):
+        cur.execute(
+            """
+            SELECT log FROM registro_chamadas 
+            WHERE log = ANY(%s) 
+              AND transcricao IS NOT NULL 
+              AND TRIM(transcricao) != ''
+            """,
+            (lote,),
+        )
+        encontrados.update(row[0] for row in cur.fetchall())
+    return encontrados
 
 
 def carregar_dados_transcricoes_existentes(
@@ -353,33 +364,34 @@ def carregar_dados_transcricoes_existentes(
     """Carrega metadados e transcrições em lote para os logs informados."""
     if not logs:
         return {}
-    cur.execute(
-        """
-        SELECT rc.log, rc.transcricao, c.agente_nome, c.numero, c.estado_ddd, c.identificacao_cliente
-        FROM registro_chamadas rc
-        LEFT JOIN chamadas c ON rc.protocolo = c.protocolo
-        WHERE rc.log = ANY(%s);
-        """,
-        (list(logs),),
-    )
     resultado: dict[str, dict[str, Any]] = {}
-    for row in cur.fetchall():
-        log_nome = row[0]
-        transc = row[1] or ""
-        agente = row[2]
-        num = row[3]
-        ddd = row[4]
-        id_cli = row[5]
-        if not num or not str(num).strip():
-            if id_cli:
-                num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
-        resultado[log_nome] = {
-            "texto_diarizado": transc,
-            "agente_nome": agente,
-            "numero": num,
-            "estado_ddd": ddd,
-            "identificacao_cliente": id_cli,
-        }
+    for lote in _dividir_em_lotes(list(logs)):
+        cur.execute(
+            """
+            SELECT rc.log, rc.transcricao, c.agente_nome, c.numero, c.estado_ddd, c.identificacao_cliente
+            FROM registro_chamadas rc
+            LEFT JOIN chamadas c ON rc.protocolo = c.protocolo
+            WHERE rc.log = ANY(%s);
+            """,
+            (lote,),
+        )
+        for row in cur.fetchall():
+            log_nome = row[0]
+            transc = row[1] or ""
+            agente = row[2]
+            num = row[3]
+            ddd = row[4]
+            id_cli = row[5]
+            if not num or not str(num).strip():
+                if id_cli:
+                    num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
+            resultado[log_nome] = {
+                "texto_diarizado": transc,
+                "agente_nome": agente,
+                "numero": num,
+                "estado_ddd": ddd,
+                "identificacao_cliente": id_cli,
+            }
     return resultado
 
 
@@ -428,23 +440,24 @@ def buscar_logs_com_revisao(
     """
     if not logs:
         return set()
-    cur.execute(
-        """
-        SELECT log, revisao, transcricao FROM registro_chamadas 
-        WHERE log = ANY(%s) AND revisao IS NOT NULL AND TRIM(revisao) != '';
-        """,
-        (list(logs),),
-    )
     logs_com_revisao = set()
-    for row in cur.fetchall():
-        log_nome = row[0]
-        rev = row[1] if len(row) > 1 else None
-        transc = row[2] if len(row) > 2 else None
-        if apenas_validas:
-            if rev is None or not eh_revisao_texto_bruto(rev, transc):
+    for lote in _dividir_em_lotes(list(logs)):
+        cur.execute(
+            """
+            SELECT log, revisao, transcricao FROM registro_chamadas 
+            WHERE log = ANY(%s) AND revisao IS NOT NULL AND TRIM(revisao) != '';
+            """,
+            (lote,),
+        )
+        for row in cur.fetchall():
+            log_nome = row[0]
+            rev = row[1] if len(row) > 1 else None
+            transc = row[2] if len(row) > 2 else None
+            if apenas_validas:
+                if rev is None or not eh_revisao_texto_bruto(rev, transc):
+                    logs_com_revisao.add(log_nome)
+            else:
                 logs_com_revisao.add(log_nome)
-        else:
-            logs_com_revisao.add(log_nome)
     return logs_com_revisao
 
 
@@ -522,14 +535,17 @@ def buscar_logs_com_analise(
     """Retorna o conjunto de logs que já possuem avaliação de IA no banco de dados em lote."""
     if not logs:
         return set()
-    cur.execute(
-        """
-        SELECT log FROM avaliacao_ia
-        WHERE log = ANY(%s);
-        """,
-        (list(logs),),
-    )
-    return {row[0] for row in cur.fetchall()}
+    encontrados: set[str] = set()
+    for lote in _dividir_em_lotes(list(logs)):
+        cur.execute(
+            """
+            SELECT log FROM avaliacao_ia
+            WHERE log = ANY(%s);
+            """,
+            (lote,),
+        )
+        encontrados.update(row[0] for row in cur.fetchall())
+    return encontrados
 
 
 def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:
