@@ -53,11 +53,11 @@ Arquivos WAV / ZIP / RAR
 3. Transcrição ASR (Faster-Whisper local com fallback OpenRouter)
           │ Persistência em `registro_chamadas`
           ▼
-4. Coleta RPA Google (Triangulação de Dados)
+4. Coleta RPA Google (Triangulação de Dados) [opcional nos fluxos sem RPA]
           │ Cache relacional (`cache_rpa_google`) + Pywinauto / Chrome local
           ▼
 5. Revisão & Diarização com IA (DeepSeek 0731 -> V4.1 -> Cascata Gemini)
-          │ Identificação de empresa -> Tabela `empresa`
+          │ Identificação de empresa -> Tabela `empresa` (ignorada pela IA se RPA for pulado)
           │ Gravação de texto revisado -> `registro_chamadas.revisao`
           ▼
 6. Análise de Qualidade Comercial (DeepSeek 0731 -> V4.1 -> Cascata Gemini)

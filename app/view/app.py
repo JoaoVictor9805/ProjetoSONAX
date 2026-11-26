@@ -35,7 +35,9 @@ _COR_NEUTRO = "#bdc3c7"
 
 _MODOS_EXECUCAO: list[tuple[str, str]] = [
     ("Fluxo Completo (Transcrição, Revisão e Análise)", "completo"),
+    ("Fluxo Completo sem RPA (Transcrição, Revisão e Análise)", "completo_sem_rpa"),
     ("A partir da Revisão (Revisão e Análise)", "revisao"),
+    ("A partir da Revisão sem RPA (Revisão e Análise)", "revisao_sem_rpa"),
     ("Apenas Transcrição", "transcricao"),
     ("Apenas Revisão", "apenas_revisao"),
     ("Apenas Análise Comercial (SPIN/BANT/SDR)", "analise"),

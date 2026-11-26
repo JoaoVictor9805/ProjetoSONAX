@@ -145,6 +145,19 @@ def corrigir_mojibake(texto: str) -> str:
         return re.sub(r"[\xc2-\xf4][\x80-\xbf]+", _desfazer, texto)
 
 
+MARCADOR_RPA_IGNORADO = "Não informado (etapa RPA pulada)"
+
+
+def _normalizar_nome_empresa(valor: object) -> str:
+    """Normaliza valores vazios ou nulos do campo Empresa para 'Não encontrado'."""
+    if valor is None:
+        return "Não encontrado"
+    texto = str(valor).strip()
+    if not texto or texto.lower() in ("none", "null", "n/a", "não informado", "nao informado"):
+        return "Não encontrado"
+    return texto
+
+
 def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
     """Faz o parse seguro do JSON retornado pelo modelo de revisão.
 
@@ -174,15 +187,16 @@ def parsear_resposta_revisao(resultado_raw: str) -> tuple[str, str]:
             for item in dados:
                 if isinstance(item, dict):
                     if "Empresa" in item:
-                        empresa = str(item["Empresa"]).strip() or "Não encontrado"
+                        empresa = _normalizar_nome_empresa(item["Empresa"])
                     elif "empresa" in item:
-                        empresa = str(item["empresa"]).strip() or "Não encontrado"
+                        empresa = _normalizar_nome_empresa(item["empresa"])
                     if "Revisao" in item:
-                        revisao = str(item["Revisao"]).strip()
+                        revisao = str(item["Revisao"] or "").strip()
                     elif "revisao" in item:
-                        revisao = str(item["revisao"]).strip()
+                        revisao = str(item["revisao"] or "").strip()
         elif isinstance(dados, dict):
-            empresa = str(dados.get("Empresa") or dados.get("empresa") or "Não encontrado").strip()
+            val_emp = dados.get("Empresa") if "Empresa" in dados else dados.get("empresa")
+            empresa = _normalizar_nome_empresa(val_emp)
             revisao = str(dados.get("Revisao") or dados.get("revisao") or "").strip()
     except Exception:
         # Fallback via regex
@@ -324,6 +338,11 @@ def revisar_texto(
         raise ValueError(
             f"Modelo de IA devolveu revisão vazia (resultado_raw={repr(resultado_raw[:200])})."
         )
+
+    # Garantia determinística: quando a etapa RPA foi pulada, não define empresa
+    if google_str == MARCADOR_RPA_IGNORADO:
+        empresa = "Não encontrado"
+        revisao = re.sub(r"\bCliente\s*\([^)]+\)", "Cliente", revisao, flags=re.IGNORECASE)
 
     # Tenta extrair menção ao nome da empresa rotulada nos turnos do Cliente
     nome_diarizado = None

@@ -473,28 +473,6 @@ class ChamadaIngestor:
             log_dev_exc()
             return buscar_logs_analise_fallback(logs)
 
-    def carregar_transcricoes_lote(self, logs: list[str]) -> dict[str, dict[str, Any]]:
-        """Carrega metadados e transcrições de ligações existentes no banco em lote."""
-        if not logs:
-            return {}
-        try:
-            with conectar() as cur:
-                return carregar_dados_transcricoes_existentes(cur, logs)
-        except Exception:
-            log_dev_exc()
-            return {}
-
-    def verificar_analises_existentes(self, logs: list[str]) -> set[str]:
-        """Retorna o conjunto de logs que já possuem avaliação comercial no banco de dados."""
-        if not logs:
-            return set()
-        try:
-            with conectar() as cur:
-                return buscar_logs_com_analise(cur, logs)
-        except Exception:
-            log_dev_exc()
-            return set()
-
     def obter_cache_rpa(self, telefones: list[str], max_dias: int | None = None) -> dict[str, str]:
         """Recupera textos do Google em cache no banco (ou fallback local se offline)."""
         if not telefones:

@@ -369,7 +369,9 @@ class TestRunnerModos(unittest.TestCase):
 
         ordem_esperada_modos = [
             "completo",
+            "completo_sem_rpa",
             "revisao",
+            "revisao_sem_rpa",
             "transcricao",
             "apenas_revisao",
             "analise",
@@ -378,7 +380,7 @@ class TestRunnerModos(unittest.TestCase):
 
         # Não deve conter 'diarização' no nome da opção de revisão
         for r, m in _MODOS_EXECUCAO:
-            if m == "revisao":
+            if m in ("revisao", "revisao_sem_rpa"):
                 self.assertIn("A partir da Revisão", r)
                 self.assertNotIn("diarização", r.lower())
 
@@ -387,6 +389,127 @@ class TestRunnerModos(unittest.TestCase):
         for r in rotulos:
             for emoji in emojis:
                 self.assertNotIn(emoji, r)
+
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.engine.runner.resolver_destino")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.get_database_url")
+    def test_modo_completo_sem_rpa_pula_rpa_e_executa_pipeline(
+        self, mock_env, mock_coletar, mock_inspector_cls, mock_copiar, mock_resolver, mock_deletar
+    ):
+        from app.services.revisao import MARCADOR_RPA_IGNORADO
+
+        p1 = Path("1001-2026-09-28-10-00-00.wav")
+        mock_coletar.return_value = [p1]
+        mock_copiar.return_value = [p1]
+
+        mock_inspector = MagicMock()
+        mock_inspecao = MagicMock()
+        mock_inspecao.longos = [p1]
+        mock_inspecao.curtos = []
+        mock_inspecao.invalidos = []
+        mock_inspector.classificar_lote.return_value = mock_inspecao
+        mock_inspector.filtrar_qualidade_acustica.return_value = ([p1], [])
+        mock_inspector_cls.return_value = mock_inspector
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+            modo_etapa="completo_sem_rpa",
+        )
+
+        runner.ingestor = MagicMock()
+        mock_item = MagicMock()
+        mock_item.sucesso = True
+        mock_item.ja_existente = False
+        mock_item.texto_transcricao = "transcricao ok"
+        mock_item.agente_nome = "Ana"
+        mock_item.numero = "33101010"
+        mock_item.estado_ddd = "41"
+        mock_item.identificacao_cliente = None
+        runner.ingestor.transcrever_e_inserir.return_value = mock_item
+        runner.ingestor.verificar_transcricoes_existentes.return_value = set()
+        runner.ingestor.verificar_revisoes_existentes.return_value = set()
+        runner.ingestor.verificar_analises_existentes.return_value = set()
+        runner.ingestor.revisar_transcricao.return_value = {"id_empresa": 1, "empresa": "Não encontrado"}
+
+        with patch("app.services.rpa_google.coletar_textos_google_lote") as mock_rpa:
+            runner.run()
+
+        # Transcrição, revisão e análise executam; RPA e cache RPA NÃO são chamados
+        runner.ingestor.transcrever_e_inserir.assert_called_once()
+        mock_rpa.assert_not_called()
+        runner.ingestor.obter_cache_rpa.assert_not_called()
+        runner.ingestor.revisar_transcricao.assert_called_once()
+        _, kwargs_rev = runner.ingestor.revisar_transcricao.call_args
+        self.assertEqual(kwargs_rev.get("texto_google"), MARCADOR_RPA_IGNORADO)
+        self.assertEqual(kwargs_rev.get("telefone"), "33101010")
+        runner.ingestor.analisar_chamada.assert_called_once()
+
+        textos_log = [c[0] for c in self.log_calls]
+        self.assertTrue(any("etapa de coleta RPA no Google pulada" in t for t in textos_log))
+
+    @patch("app.engine.runner.deletar_pasta")
+    @patch("app.engine.runner.resolver_destino")
+    @patch("app.engine.runner.copiar_lote_trabalho")
+    @patch("app.engine.runner.AudioInspector")
+    @patch("app.engine.runner.coletar_wavs")
+    @patch("app.engine.runner.get_database_url")
+    def test_modo_revisao_sem_rpa_pula_transcricao_e_rpa(
+        self, mock_env, mock_coletar, mock_inspector_cls, mock_copiar, mock_resolver, mock_deletar
+    ):
+        from app.services.revisao import MARCADOR_RPA_IGNORADO
+
+        p1 = Path("audio1.wav")
+        mock_coletar.return_value = [p1]
+
+        runner = PipelineRunner(
+            entrada=Path("entrada_fake"),
+            cancel_event=self.cancel_event,
+            dev_mode_event=self.dev_mode_event,
+            on_progress=self.on_progress,
+            on_log=self.on_log,
+            on_finished=self.on_finished,
+            modo_etapa="revisao_sem_rpa",
+        )
+
+        runner.ingestor = MagicMock()
+        runner.ingestor.verificar_transcricoes_existentes.return_value = {p1.name}
+        runner.ingestor.carregar_transcricoes_lote.return_value = {
+            p1.name: {
+                "texto_diarizado": "texto transcrito",
+                "agente_nome": "Agente",
+                "numero": "123",
+                "estado_ddd": "41",
+                "identificacao_cliente": None,
+            }
+        }
+        runner.ingestor.verificar_revisoes_existentes.return_value = set()
+        runner.ingestor.verificar_analises_existentes.return_value = set()
+        runner.ingestor.revisar_transcricao.return_value = {"id_empresa": 1, "empresa": "Não encontrado"}
+
+        with patch("app.services.rpa_google.coletar_textos_google_lote") as mock_rpa:
+            runner.run()
+
+        runner.ingestor.transcrever_e_inserir.assert_not_called()
+        mock_rpa.assert_not_called()
+        runner.ingestor.obter_cache_rpa.assert_not_called()
+        runner.ingestor.revisar_transcricao.assert_called_once()
+        _, kwargs_rev = runner.ingestor.revisar_transcricao.call_args
+        self.assertEqual(kwargs_rev.get("texto_google"), MARCADOR_RPA_IGNORADO)
+        runner.ingestor.analisar_chamada.assert_called_once()
+
+        self.assertEqual(len(self.finished_calls), 1)
+        exit_code, summary, _, was_cancelled = self.finished_calls[0]
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(was_cancelled)
+        self.assertIn("Revisão e análise finalizadas", summary)
 
     @patch("app.engine.runner.deletar_pasta")
     @patch("app.engine.runner.resolver_destino")

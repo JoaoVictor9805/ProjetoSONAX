@@ -120,6 +120,41 @@ Analisei a transcrição e identifiquei Metalúrgica Vale.
         self.assertIn("administração", revisao)
         self.assertIn("Assistência técnica para você.", revisao)
 
+    def test_parsear_resposta_empresa_null_normaliza_para_nao_encontrado(self):
+        resposta_raw = '[{"Empresa": null}, {"Revisao": "Cliente: Alô\\nAgente (Falavinha): Olá"}]'
+        empresa, revisao = parsear_resposta_revisao(resposta_raw)
+        self.assertEqual(empresa, "Não encontrado")
+        self.assertIn("Cliente: Alô", revisao)
+
+    def test_prompt_revisao_instrui_ignorar_etapa_empresa_quando_rpa_pulado(self):
+        from app.config.prompts import prompt_revisao
+        from app.services.revisao import MARCADOR_RPA_IGNORADO
+
+        self.assertIn(MARCADOR_RPA_IGNORADO, prompt_revisao)
+        self.assertIn("IGNORE COMPLETAMENTE a ETAPA 1", prompt_revisao)
+        self.assertIn("NÃO** tente extrair, deduzir ou adivinhar o nome da empresa", prompt_revisao)
+
+    def test_revisar_texto_com_rpa_ignorado_forca_nao_encontrado_e_remove_rotulo_empresa(self):
+        from unittest.mock import MagicMock, patch
+        from app.services.revisao import MARCADOR_RPA_IGNORADO, revisar_texto
+
+        fake_msg = MagicMock()
+        fake_msg.content = '[{"Empresa": "Empresa Alucinada"}, {"Revisao": "Cliente (Empresa Alucinada): Alô\\nAgente (Falavinha): Bom dia"}]'
+
+        mock_client = MagicMock()
+        mock_client.invoke.return_value = fake_msg
+
+        with patch("app.services.gemini_pool.openrouter_em_cooldown", return_value=False):
+            with patch("app.services.revisao.client", mock_client):
+                res = revisar_texto(
+                    "Alô. Bom dia.",
+                    texto_copiado_google=MARCADOR_RPA_IGNORADO,
+                    nome_atendente="Lucas",
+                )
+
+        self.assertEqual(res["empresa"], "Não encontrado")
+        self.assertEqual(res["revisao"], "Cliente: Alô\nAgente (Falavinha): Bom dia")
+
 
 if __name__ == "__main__":
     unittest.main()

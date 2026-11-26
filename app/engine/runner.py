@@ -134,7 +134,9 @@ class PipelineRunner:
             with redirect_engine_stdio(_log_from_stdio):
                 rotulo_modo = {
                     "completo": "Fluxo Completo (Transcrição, Revisão e Análise)",
+                    "completo_sem_rpa": "Fluxo Completo sem RPA (Transcrição, Revisão e Análise)",
                     "revisao": "A partir da Revisão (Revisão e Análise)",
+                    "revisao_sem_rpa": "A partir da Revisão sem RPA (Revisão e Análise)",
                     "transcricao": "Apenas Transcrição",
                     "apenas_revisao": "Apenas Revisão",
                     "analise": "Apenas Análise Comercial (SPIN/BANT/SDR)",
@@ -175,7 +177,7 @@ class PipelineRunner:
                         revisoes_no_banco_brutas = set()
 
                 # Identifica quais áudios necessitam de processamento acústico (Whisper local)
-                if self.modo_etapa in ("analise", "revisao", "apenas_revisao"):
+                if self.modo_etapa in ("analise", "revisao", "revisao_sem_rpa", "apenas_revisao"):
                     # Nestes modos derivados, o Faster-Whisper NUNCA deve ser executado.
                     # Áudios sem registro prévio no banco (ex.: ligações descartadas por <10 palavras) são ignorados.
                     wavs_para_processamento_acustico = []
@@ -189,10 +191,14 @@ class PipelineRunner:
                                 "out", False, None,
                             )
                         copiados = aptos
-                    else:  # "revisao" ou "apenas_revisao"
+                    else:  # "revisao", "revisao_sem_rpa" ou "apenas_revisao"
                         aptos = [w for w in wavs if w.name in transcricoes_no_banco]
                         ignorados = [w for w in wavs if w not in aptos]
-                        nome_modo = "A partir da Revisão" if self.modo_etapa == "revisao" else "Apenas Revisão"
+                        nome_modo = (
+                            "Apenas Revisão" if self.modo_etapa == "apenas_revisao"
+                            else "A partir da Revisão sem RPA" if self.modo_etapa == "revisao_sem_rpa"
+                            else "A partir da Revisão"
+                        )
                         if ignorados:
                             self.on_log(
                                 f"[INFO] Modo {nome_modo}: {len(ignorados)} áudio(s) sem transcrição no banco ignorados (não elegíveis para revisão).",
@@ -200,7 +206,7 @@ class PipelineRunner:
                             )
                         copiados = aptos
                 else:
-                    # Em "completo" ou "transcricao", apenas os que não têm transcrição no banco passam por Whisper
+                    # Em "completo", "completo_sem_rpa" ou "transcricao", apenas os que não têm transcrição no banco passam por Whisper
                     wavs_para_processamento_acustico = [w for w in wavs if w.name not in transcricoes_no_banco]
 
                 if not wavs_para_processamento_acustico:
@@ -209,7 +215,7 @@ class PipelineRunner:
                             f"[INFO] Todas as {len(copiados)} chamadas elegíveis já possuem dados no banco. Inspeção acústica e cópia puladas!",
                             "out", False, None,
                         )
-                    elif self.modo_etapa in ("revisao", "apenas_revisao"):
+                    elif self.modo_etapa in ("revisao", "revisao_sem_rpa", "apenas_revisao"):
                         self.on_log(
                             f"[INFO] Todas as {len(copiados)} chamadas elegíveis já possuem transcrição no banco. Inspeção acústica e cópia puladas!",
                             "out", False, None,
@@ -221,7 +227,7 @@ class PipelineRunner:
                         )
                     self.on_progress(1, 1, "classifying", "[INFO] Inspeção acústica pulada (áudios já no banco).", None)
                     self.on_progress(1, 1, "copying", "[INFO] Cópia de arquivos pulada (processamento direto via banco).", None)
-                    if self.modo_etapa not in ("analise", "revisao", "apenas_revisao"):
+                    if self.modo_etapa not in ("analise", "revisao", "revisao_sem_rpa", "apenas_revisao"):
                         copiados = list(wavs)
                 else:
                     if len(wavs_para_processamento_acustico) < len(wavs):
@@ -234,16 +240,16 @@ class PipelineRunner:
                     self.on_progress(0, 1, "classifying", "[INFO] Classificando arquivos por duração ...", None)
                     inspecao = self.inspector.classificar_lote(wavs_para_processamento_acustico, cancel=self.cancel_event)
                     self.on_log(
-                        f"[INFO] Total faltantes: {len(wavs_para_processamento_acustico)}  •  >1:30:30min: {len(inspecao.longos)}  •  "
-                        f"<=1:30:30min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
+                        f"[INFO] Total faltantes: {len(wavs_para_processamento_acustico)}  •  >1:30 min: {len(inspecao.longos)}  •  "
+                        f"<=1:30 min: {len(inspecao.curtos)}  •  inválidos: {len(inspecao.invalidos)}",
                         "out", False, None,
                     )
-                    self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1:30:30min elegível(is).", None)
+                    self.on_progress(1, 1, "classifying", f"[INFO] Classificação concluída: {len(inspecao.longos)} áudio(s) >1:30 min elegível(is).", None)
 
                     if not inspecao.longos and len(wavs_para_processamento_acustico) == len(wavs):
                         self._limpar_temporarios()
                         self.on_log("[AVISO] Nenhum áudio com mais de 1 minuto e 30 segundos encontrado.", "out", False, None)
-                        self.on_finished(0, "[AVISO] Nenhum áudio >1:30:30min encontrado.", None, False)
+                        self.on_finished(0, "[AVISO] Nenhum áudio >1:30 min encontrado.", None, False)
                         return
 
                     if self.cancel_event.is_set():
@@ -265,10 +271,6 @@ class PipelineRunner:
                             f"[INFO] Filtro de qualidade acústica: {len(aprovados)} aprovado(s) • {len(rejeitados)} reprovado(s) (Péssimo) de {len(inspecao.longos)} inspecionado(s).",
                             "out", False, None,
                         )
-                        self.on_log(
-                            f"[INFO] Filtro de qualidade acústica: {len(aprovados)} aprovado(s) • {len(rejeitados)} reprovado(s) (Péssimo) de {len(inspecao.longos)} inspecionado(s).",
-                            "out", False, None,
-                        )
 
                     # 3) Cópia para a pasta destino (io)
                     if aprovados:
@@ -277,7 +279,6 @@ class PipelineRunner:
                         self.on_progress(0, len(aprovados), "copying", f"[INFO] Copiando {len(aprovados)} arquivo(s) para a pasta de trabalho ...", None)
 
                         def on_copy_progress(idx: int, tot: int, p: Path) -> None:
-                            self.on_progress(idx, tot, "copying", None, p.name)
                             self.on_progress(idx, tot, "copying", None, p.name)
 
                         copiados_novos = copiar_lote_trabalho(
@@ -333,11 +334,15 @@ class PipelineRunner:
                         "[INFO] Modo 'Apenas Análise Comercial': Etapas de transcrição e revisão puladas.",
                         "out", False, None,
                     )
-                elif self.modo_etapa in ("revisao", "apenas_revisao"):
+                elif self.modo_etapa in ("revisao", "revisao_sem_rpa", "apenas_revisao"):
                     # Nos modos a partir da revisão, nenhuma transcrição é executada: apenas revisa o que já está transcrito
                     arquivos_para_transcrever = []
                     qtd_carregadas = len(mapa_diarizacao) if mapa_diarizacao else len(nomes_existentes)
-                    nome_modo = "Apenas Revisão" if self.modo_etapa == "apenas_revisao" else "A partir da Revisão"
+                    nome_modo = (
+                        "Apenas Revisão" if self.modo_etapa == "apenas_revisao"
+                        else "A partir da Revisão sem RPA" if self.modo_etapa == "revisao_sem_rpa"
+                        else "A partir da Revisão"
+                    )
                     self.on_log(
                         f"[INFO] Modo '{nome_modo}': Etapa de transcrição pulada ({qtd_carregadas} de {total} chamada(s) já transcritas carregadas em lote).",
                         "out", False, None,
@@ -502,6 +507,7 @@ class PipelineRunner:
                     return
 
                 # 4.25) Coleta RPA Google (Triangulação de Dados)
+                from app.services.revisao import MARCADOR_RPA_IGNORADO
                 from app.services.rpa_google import (
                     coletar_textos_google_lote,
                     formatar_telefone_busca,
@@ -526,8 +532,16 @@ class PipelineRunner:
 
                 textos_google: dict[str, str] = {}
                 telefones_para_busca: dict[str, str | None] = {}
+                pular_rpa = self.modo_etapa in ("completo_sem_rpa", "revisao_sem_rpa")
 
-                if not arquivos_pendentes and (mapa_diarizacao or self.modo_etapa == "analise"):
+                if pular_rpa:
+                    self.on_progress(1, 1, "searching", None, None)
+                    self.on_log(
+                        "[INFO] Modo sem RPA: etapa de coleta RPA no Google pulada.",
+                        "out", False, None,
+                    )
+                    textos_google = {c.name: MARCADOR_RPA_IGNORADO for c in copiados}
+                elif not arquivos_pendentes and (mapa_diarizacao or self.modo_etapa == "analise"):
                     msg_pulo = (
                         "[INFO] Revisão da ligação já está no banco de dados. Etapa de coleta RPA no Google pulada."
                         if total == 1
@@ -699,7 +713,7 @@ class PipelineRunner:
                         tel_para_empresa = (
                             str(int(id_cliente)).strip() if isinstance(id_cliente, (int, float))
                             else str(id_cliente).strip() if id_cliente is not None
-                            else telefones_para_busca.get(caminho.name)
+                            else telefones_para_busca.get(caminho.name) or dados_audio.get("numero")
                         )
                         res_rev = self.ingestor.revisar_transcricao(
                             caminho.name,
@@ -837,7 +851,7 @@ class PipelineRunner:
                     resumo_final = f"[INFO] Análise comercial finalizada para {total_copiados} chamada(s)."
                 elif self.modo_etapa == "apenas_revisao":
                     resumo_final = f"[INFO] Revisão finalizada para {total_copiados} chamada(s)."
-                elif self.modo_etapa == "revisao":
+                elif self.modo_etapa in ("revisao", "revisao_sem_rpa"):
                     resumo_final = f"[INFO] Revisão e análise finalizadas para {total_copiados} chamada(s)."
                 elif modo_offline_ativo or salvos_fallback > 0:
                     resumo_final = (
