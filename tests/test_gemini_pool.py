@@ -23,6 +23,7 @@ from app.services.gemini_pool import (
     obter_chaves_gemini_disponiveis,
     obter_modelo_gemini_ativo,
     openrouter_em_cooldown,
+    resetar_cooldown_chaves,
 )
 
 
@@ -457,6 +458,30 @@ class TestGeminiPool(unittest.TestCase):
         reset = calcular_proximo_reset_gemini(agora)
         self.assertGreater(reset, agora)
         self.assertLessEqual((reset - agora).total_seconds(), 25 * 3600)
+
+    @patch("app.services.gemini_pool._salvar_status_disco")
+    @patch("app.services.gemini_pool._carregar_status_disco")
+    def test_resetar_cooldown_chaves(self, mock_carregar, mock_salvar):
+        status_simulado = {
+            "key1": {"var_name": "GEMINI_API_KEY"},
+            "key2": {"var_name": "GEMINI_API_KEY_FALLBACK"},
+            OPENROUTER_STATUS_KEY: {"provedor": "OpenRouter"},
+        }
+        mock_carregar.side_effect = lambda: status_simulado.copy()
+
+        def salvar_impl(d):
+            status_simulado.clear()
+            status_simulado.update(d)
+        mock_salvar.side_effect = salvar_impl
+
+        resetar_cooldown_chaves(resetar_gemini=True, resetar_openrouter=False)
+        self.assertNotIn("key1", status_simulado)
+        self.assertNotIn("key2", status_simulado)
+        self.assertIn(OPENROUTER_STATUS_KEY, status_simulado)
+
+        status_simulado["key1"] = {"var_name": "GEMINI_API_KEY"}
+        resetar_cooldown_chaves(resetar_gemini=True, resetar_openrouter=True)
+        self.assertEqual(status_simulado, {})
 
 
 if __name__ == "__main__":

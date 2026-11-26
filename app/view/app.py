@@ -299,17 +299,16 @@ class App(ctk.CTk):
         self._entry_path.configure(state="readonly")
 
     def _habilitar_enviar_se_ok(self) -> None:
-        """Confere o .env e habilita o botão Enviar, ou mostra erro."""
+        """Confere o .env e habilita o botão Enviar (permite modo offline se banco não configurado)."""
+        self._btn_enviar.configure(state="normal")
         try:
             get_database_url()
         except KeyError as e:
-            self._btn_enviar.configure(state="disabled")
             self._set_status(
-                f"Configure o .env antes de processar (faltando: {e}).",
-                cor=_COR_ERRO,
+                f"Pronto (modo offline — .env sem {e}; dados serão salvos em fallback local).",
+                cor=_COR_NEUTRO,
             )
             return
-        self._btn_enviar.configure(state="normal")
         self._set_status("Pronto para enviar.", cor=_COR_NEUTRO)
 
     def _on_enviar(self) -> None:
@@ -458,11 +457,7 @@ class App(ctk.CTk):
             self._option_etapa.configure(state="normal")
 
         if self._entrada is not None:
-            try:
-                get_database_url()
-                self._btn_enviar.configure(state="normal")
-            except KeyError:
-                self._btn_enviar.configure(state="disabled")
+            self._btn_enviar.configure(state="normal")
 
     # ----------------------------------------------------------------
     # Utilitários de Interface

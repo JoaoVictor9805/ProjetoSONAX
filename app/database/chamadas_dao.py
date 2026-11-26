@@ -346,6 +346,43 @@ def buscar_logs_com_transcricao(
     return {row[0] for row in cur.fetchall()}
 
 
+def carregar_dados_transcricoes_existentes(
+    cur: psycopg.Cursor,
+    logs: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Carrega metadados e transcrições em lote para os logs informados."""
+    if not logs:
+        return {}
+    cur.execute(
+        """
+        SELECT rc.log, rc.transcricao, c.agente_nome, c.numero, c.estado_ddd, c.identificacao_cliente
+        FROM registro_chamadas rc
+        LEFT JOIN chamadas c ON rc.protocolo = c.protocolo
+        WHERE rc.log = ANY(%s);
+        """,
+        (list(logs),),
+    )
+    resultado: dict[str, dict[str, Any]] = {}
+    for row in cur.fetchall():
+        log_nome = row[0]
+        transc = row[1] or ""
+        agente = row[2]
+        num = row[3]
+        ddd = row[4]
+        id_cli = row[5]
+        if not num or not str(num).strip():
+            if id_cli:
+                num = str(int(id_cli) if isinstance(id_cli, (int, float)) else id_cli).strip()
+        resultado[log_nome] = {
+            "texto_diarizado": transc,
+            "agente_nome": agente,
+            "numero": num,
+            "estado_ddd": ddd,
+            "identificacao_cliente": id_cli,
+        }
+    return resultado
+
+
 def verificar_coluna_revisao(
     cur: psycopg.Cursor,
     log: str,
@@ -476,6 +513,23 @@ def verificar_tabela_analise(
     )
     resultado = cur.fetchone()
     return resultado is not None
+
+
+def buscar_logs_com_analise(
+    cur: psycopg.Cursor,
+    logs: list[str],
+) -> set[str]:
+    """Retorna o conjunto de logs que já possuem avaliação de IA no banco de dados em lote."""
+    if not logs:
+        return set()
+    cur.execute(
+        """
+        SELECT log FROM avaliacao_ia
+        WHERE log = ANY(%s);
+        """,
+        (list(logs),),
+    )
+    return {row[0] for row in cur.fetchall()}
 
 
 def garantir_schema_avaliacao(cur: psycopg.Cursor | None = None) -> None:

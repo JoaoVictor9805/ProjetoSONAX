@@ -70,7 +70,7 @@ class TestAudioInspector(unittest.TestCase):
 
     def test_classificar_lote(self):
         meta_longo = AudioMetadata(path=Path("longo.wav"), duracao=90.0)
-        meta_curto = AudioMetadata(path=Path("curto.wav"), duracao=30.0)
+        meta_curto = AudioMetadata(path=Path("curto.wav"), duracao=75.0)
 
         with patch.object(self.inspector, "inspecionar") as mock_insp:
             mock_insp.side_effect = lambda p: meta_longo if p.name == "longo.wav" else (meta_curto if p.name == "curto.wav" else None)
@@ -96,12 +96,15 @@ class TestAudioInspector(unittest.TestCase):
             AudioMetadata(path=Path("audio2.wav"), duracao=150.0),
         ]
 
-        aprovados, rejeitados = self.inspector.filtrar_qualidade_acustica(audios)
+        stdout_buf = io.StringIO()
+        with patch("sys.stdout", stdout_buf):
+            aprovados, rejeitados = self.inspector.filtrar_qualidade_acustica(audios)
 
         self.assertEqual(len(aprovados), 1)
         self.assertEqual(aprovados[0].path.name, "audio1.wav")
         self.assertEqual(len(rejeitados), 1)
         self.assertEqual(rejeitados[0].name, "audio2.wav")
+        self.assertEqual(stdout_buf.getvalue(), "")
 
 
 if __name__ == "__main__":

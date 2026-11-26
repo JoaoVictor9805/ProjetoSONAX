@@ -437,6 +437,24 @@ class TestChamadaIngestor(unittest.TestCase):
         self.assertEqual(kwargs["etapa_falha"], "analise")
         self.assertIsInstance(kwargs["analise_json"], dict)
 
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.buscar_logs_com_analise")
+    def test_verificar_analises_existentes(self, mock_buscar, mock_conectar):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_buscar.return_value = {"audio1.wav"}
+        res = self.ingestor.verificar_analises_existentes(["audio1.wav", "audio2.wav"])
+        self.assertEqual(res, {"audio1.wav"})
+        self.assertEqual(self.ingestor.verificar_analises_existentes([]), set())
+
+    @patch("app.services.ingestao.conectar")
+    @patch("app.services.ingestao.carregar_dados_transcricoes_existentes")
+    def test_carregar_transcricoes_lote(self, mock_carregar, mock_conectar):
+        mock_conectar.return_value.__enter__.return_value = MagicMock()
+        mock_carregar.return_value = {"audio1.wav": {"texto_diarizado": "Texto"}}
+        res = self.ingestor.carregar_transcricoes_lote(["audio1.wav"])
+        self.assertEqual(res, {"audio1.wav": {"texto_diarizado": "Texto"}})
+        self.assertEqual(self.ingestor.carregar_transcricoes_lote([]), {})
+
 
 if __name__ == "__main__":
     unittest.main()
