@@ -31,3 +31,7 @@ dist/
 *.zip
 
 .agents/
+
+Dicionario_de_Dados_SONAX.docx
+log_transcricoes_selecionadas.txt
+transcricoes_modo_teste.xlsx
