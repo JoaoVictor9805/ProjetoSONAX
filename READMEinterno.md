@@ -32,3 +32,11 @@ git reset --hard origin/main
 
 python -m app.services.analise_final_AI
 python -m app.services.revisao
+
+# executar importação do fallback para o banco (teste e final)
+python importar_fallback_bd.py --dry-run
+python importar_fallback_bd.py
+
+  
+
+  
